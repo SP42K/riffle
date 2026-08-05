@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { HAND_SIZE, RANK_LABEL, makeCard, sortCards, type Card, type Rank, type Suit } from 'shared';
+import {
+  HAND_SIZE,
+  RANK_LABEL,
+  cardValue,
+  makeCard,
+  sortCards,
+  type Card,
+  type Rank,
+  type Suit,
+} from 'shared';
 import {
   activeSeats,
   autoAct,
@@ -49,17 +58,17 @@ function setup(specs: Record<string, string>): { seats: Seats; state: GameState 
 const turn = (seats: Seats, state: GameState) => seats[state.turnSeat];
 
 describe('發牌', () => {
-  it('四人局每人 13 張，持 ♦3 者先手', () => {
+  it('四人局每人 13 張，持 ♣3 者先手', () => {
     const seats: Seats = ['a', 'b', 'c', 'd'];
     const state = dealGame(seats);
 
     for (const id of seats) {
       expect(state.hands.get(id!)).toHaveLength(HAND_SIZE);
     }
-    expect(state.openingCardId).toBe('D3');
+    expect(state.openingCardId).toBe('C3');
 
     const leader = seats[state.turnSeat]!;
-    expect(state.hands.get(leader)!.some((c) => c.id === 'D3')).toBe(true);
+    expect(state.hands.get(leader)!.some((c) => c.id === 'C3')).toBe(true);
   });
 
   it('每個人拿到的牌不重複', () => {
@@ -68,7 +77,7 @@ describe('發牌', () => {
     expect(new Set(all).size).toBe(52);
   });
 
-  it('人數不足時整副牌發不完，改用發出去的最小牌開局', () => {
+  it('人數不足時整副牌發不完，開局牌從 ♣3 依序往上找', () => {
     const seats: Seats = ['a', 'b'];
     const state = dealGame(seats);
 
@@ -78,10 +87,34 @@ describe('發牌', () => {
     const dealt = [...state.hands.values()].flat();
     expect(dealt).toHaveLength(26);
 
-    // 開局牌一定在先手玩家手上，而且是全場最小的一張
+    // 以 ♣3 為起點繞一圈，比它小的 ♦3 排到最後
+    const clubThree = cardValue(makeCard('C', 3));
+    const order = (card: Card) => (cardValue(card) >= clubThree ? cardValue(card) : cardValue(card) + 64);
+    const expected = dealt.reduce((best, card) => (order(card) < order(best) ? card : best));
+
+    expect(state.openingCardId).toBe(expected.id);
+    // 開局牌一定在先手玩家手上
     const leader = seats[state.turnSeat]!;
-    const leaderSmallest = state.hands.get(leader)![0]!;
-    expect(state.openingCardId).toBe(leaderSmallest.id);
+    expect(state.hands.get(leader)!.some((c) => c.id === expected.id)).toBe(true);
+  });
+
+  it('♣3 只要有發出去就一定是開局牌', () => {
+    const clubThree = cardValue(makeCard('C', 3));
+
+    for (let i = 0; i < 200; i++) {
+      const state = dealGame(['a', 'b']);
+      const dealt = [...state.hands.values()].flat();
+
+      if (dealt.some((c) => c.id === 'C3')) {
+        expect(state.openingCardId).toBe('C3');
+      } else {
+        // 沒有 ♣3 就往上找；連 ♦3 也只有在往上都找不到時才輪得到
+        const above = dealt.filter((c) => cardValue(c) > clubThree);
+        expect(state.openingCardId).toBe(
+          above.length > 0 ? sortCards(above)[0]!.id : 'D3',
+        );
+      }
+    }
   });
 });
 
@@ -165,18 +198,18 @@ describe('回合與領牌權', () => {
     expect(state.lastPlay).toBeNull();
   });
 
-  it('出牌者打完出局時，領牌權交給最後沒 PASS 的人', () => {
+  it('出牌者打完出局時，下一家直接取得領牌權', () => {
     const { seats, state } = setup({ a: 'S2', b: 'C5 C6', c: 'H7 H8', d: 'S9 S10' });
     // a 用最後一張牌出局
     const res = playCards(seats, state, 'a', ['S2']);
     expect(res.ok && res.result.rank).toBe(1);
     expect(activeSeats(seats, state)).toEqual([1, 2, 3]);
 
-    passTurn(seats, state, 'b');
-    passTurn(seats, state, 'c');
-    // d 是唯一沒 PASS 的活人，輪到他時取得領牌權
-    expect(turn(seats, state)).toBe('d');
+    // 領牌權不會再繞回出局的 a，所以 b 可以自由出牌，也不能 PASS
+    expect(turn(seats, state)).toBe('b');
     expect(state.lastPlay).toBeNull();
+    expect(passTurn(seats, state, 'b')).toEqual({ ok: false, error: 'CANNOT_PASS_ON_LEAD' });
+    expect(playCards(seats, state, 'b', ['C5']).ok).toBe(true);
   });
 
   it('出完牌的人不再進入輪轉', () => {
@@ -184,11 +217,11 @@ describe('回合與領牌權', () => {
     playCards(seats, state, 'a', ['S2']); // a 出局
     expect(turn(seats, state)).toBe('b');
 
-    passTurn(seats, state, 'b');
-    // a 已出局、b 已 PASS，c 是唯一還可能壓過的人 → 直接取得領牌權，不會再繞回 a
-    expect(turn(seats, state)).toBe('c');
+    playCards(seats, state, 'b', ['C5']);
+    passTurn(seats, state, 'c');
+    // a 已出局，c PASS 後直接繞回 b，不會停在 a
+    expect(turn(seats, state)).toBe('b');
     expect(state.lastPlay).toBeNull();
-    expect(passTurn(seats, state, 'c')).toEqual({ ok: false, error: 'CANNOT_PASS_ON_LEAD' });
   });
 });
 

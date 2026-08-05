@@ -94,9 +94,9 @@ export function pickCards(hand: readonly Card[], ids: readonly string[]): Card[]
   return picked;
 }
 
-/** 全場最小的牌：方塊 3，持有者先手。 */
-export const DIAMOND_THREE_ID = 'D3';
+/** 開局牌：梅花 3，持有者先手。 */
+export const CLUB_THREE_ID = 'C3';
 
-export function hasDiamondThree(cards: readonly Card[]): boolean {
-  return cards.some((c) => c.id === DIAMOND_THREE_ID);
+export function hasClubThree(cards: readonly Card[]): boolean {
+  return cards.some((c) => c.id === CLUB_THREE_ID);
 }

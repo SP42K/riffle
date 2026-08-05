@@ -5,6 +5,7 @@ import {
   cardValue,
   createDeck,
   identifyCombo,
+  makeCard,
   pickCards,
   shuffle,
   smallestLegalPlay,
@@ -27,7 +28,7 @@ export interface GameState {
   finished: PlayerId[];
   /**
    * 開局牌的 id。持有者先手，且第一手必須包含它。
-   * 4 人局固定是 ♦3；人數較少時整副牌發不完，改用「發出去的牌裡最小的那張」。
+   * 4 人局固定是 ♣3；人數較少時整副牌發不完，就從 ♣3 依序往上找第一張有人拿到的牌。
    */
   openingCardId: string | null;
   turnDeadline: number;
@@ -57,6 +58,19 @@ export const PLAY_ERROR_MESSAGE: Record<PlayError, string> = {
 // 開局
 // ---------------------------------------------------------------------------
 
+/** cardValue 的上限是 15 * 4 + 3 = 63，加這個數就能把牌排到「繞完一圈」之後。 */
+const CARD_VALUE_RANGE = 64;
+const CLUB_THREE_VALUE = cardValue(makeCard('C', 3));
+
+/**
+ * 以 ♣3 為起點的環狀排序權重，數字越小越優先當開局牌。
+ * 比 ♣3 小的（只有 ♦3）排到最後 —— 人數不足、♣3 沒發出去時才輪得到它。
+ */
+function openingOrder(card: Card): number {
+  const value = cardValue(card);
+  return value >= CLUB_THREE_VALUE ? value : value + CARD_VALUE_RANGE;
+}
+
 export function dealGame(seats: Seats, rng: () => number = Math.random): GameState {
   const playerIds = seats.filter((id): id is PlayerId => id !== null);
   const deck = shuffle(createDeck(), rng);
@@ -66,15 +80,16 @@ export function dealGame(seats: Seats, rng: () => number = Math.random): GameSta
     hands.set(playerId, sortCards(deck.slice(index * HAND_SIZE, (index + 1) * HAND_SIZE)));
   });
 
-  // 找出發到玩家手上最小的那張牌，持有者先手
+  // 開局牌是 ♣3；沒發出去就依序往上找，持有者先手
   let openingCard: Card | null = null;
   let openingSeat = 0;
   for (const [seat, playerId] of seats.entries()) {
     if (!playerId) continue;
-    const smallest = hands.get(playerId)![0]!; // 手牌已排序
-    if (!openingCard || cardValue(smallest) < cardValue(openingCard)) {
-      openingCard = smallest;
-      openingSeat = seat;
+    for (const card of hands.get(playerId)!) {
+      if (!openingCard || openingOrder(card) < openingOrder(openingCard)) {
+        openingCard = card;
+        openingSeat = seat;
+      }
     }
   }
 
@@ -116,8 +131,8 @@ function nextActiveSeat(seats: Seats, state: GameState, from: number): number {
 
 /**
  * 換到下一位，並判斷他是不是拿到領牌權。
- * 只要「其他還在打的人都已經 PASS」，下一位就能自由出牌 ——
- * 這個條件同時涵蓋了「出牌者剛好打完出局」的情況。
+ * 只要「其他還在打的人都已經 PASS」，下一位就能自由出牌。
+ *（出牌者剛好打完出局的情況由 commitPlay 直接清掉 lastPlay 處理。）
  */
 function advanceTurn(seats: Seats, state: GameState): void {
   const active = activeSeats(seats, state);
@@ -227,6 +242,8 @@ function commitPlay(seats: Seats, state: GameState, playerId: PlayerId, combo: C
   if (state.hands.get(playerId)!.length === 0) {
     state.finished.push(playerId);
     rank = state.finished.length;
+    // 出完牌的人已經離場，領牌權不會再繞回他身上 —— 直接讓下一家自由出牌
+    state.lastPlay = null;
   }
 
   advanceTurn(seats, state);
