@@ -1,5 +1,12 @@
 import { useState, type FormEvent } from 'react';
-import { MAX_PLAYERS, MIN_PLAYERS, type JoinMode, type RoomStatus } from 'shared';
+import {
+  GAME_TYPES,
+  GAME_TYPE_LABEL,
+  SEAT_LIMITS,
+  type GameType,
+  type JoinMode,
+  type RoomStatus,
+} from 'shared';
 import { ChatPanel } from '../components/ChatPanel';
 import { emitWithAck, getPlayerId, socket } from '../net/socket';
 import { useGame } from '../state/GameProvider';
@@ -13,13 +20,23 @@ const STATUS_LABEL: Record<RoomStatus, string> = {
 export function Lobby() {
   const { rooms, lobbyMessages, nickname, saveNickname, run, connected } = useGame();
   const [roomName, setRoomName] = useState('');
-  const [maxPlayers, setMaxPlayers] = useState(MAX_PLAYERS);
+  const [gameType, setGameType] = useState<GameType>('bigTwo');
+  const [maxPlayers, setMaxPlayers] = useState(SEAT_LIMITS.bigTwo.max);
   const [joinCode, setJoinCode] = useState('');
   const [nicknameDraft, setNicknameDraft] = useState(nickname);
 
+  const limits = SEAT_LIMITS[gameType];
+  const seatOptions = Array.from({ length: limits.max - limits.min + 1 }, (_, i) => limits.min + i);
+
+  // 換玩法時人數上限跟著換，免得送出超出範圍的值
+  const changeGameType = (next: GameType) => {
+    setGameType(next);
+    setMaxPlayers(SEAT_LIMITS[next].max);
+  };
+
   const createRoom = (event: FormEvent) => {
     event.preventDefault();
-    run(() => emitWithAck('room:create', { name: roomName.trim(), maxPlayers }));
+    run(() => emitWithAck('room:create', { name: roomName.trim(), maxPlayers, gameType }));
     setRoomName('');
   };
 
@@ -38,7 +55,7 @@ export function Lobby() {
     <div className="lobby">
       <header className="lobby__header">
         <h1>
-          大老二 <span className="lobby__header-en">Online</span>
+          線上牌桌 <span className="lobby__header-en">Online</span>
         </h1>
         <form
           className="lobby__nickname"
@@ -73,17 +90,26 @@ export function Lobby() {
                 maxLength={20}
               />
               <select
+                value={gameType}
+                onChange={(event) => changeGameType(event.target.value as GameType)}
+                aria-label="玩法"
+              >
+                {GAME_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {GAME_TYPE_LABEL[type]}
+                  </option>
+                ))}
+              </select>
+              <select
                 value={maxPlayers}
                 onChange={(event) => setMaxPlayers(Number(event.target.value))}
                 aria-label="人數上限"
               >
-                {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i).map(
-                  (n) => (
-                    <option key={n} value={n}>
-                      {n} 人
-                    </option>
-                  ),
-                )}
+                {seatOptions.map((n) => (
+                  <option key={n} value={n}>
+                    {n} 人
+                  </option>
+                ))}
               </select>
               <button type="submit" className="btn btn--primary">
                 開房
@@ -118,6 +144,7 @@ export function Lobby() {
                     <div className="room-row__main">
                       <span className="room-row__name">{room.name}</span>
                       <span className="room-row__code">#{room.id}</span>
+                      <span className="tag tag--game">{GAME_TYPE_LABEL[room.gameType]}</span>
                       <span className={`badge badge--${room.status}`}>{STATUS_LABEL[room.status]}</span>
                     </div>
                     <div className="room-row__meta">

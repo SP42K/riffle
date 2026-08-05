@@ -119,8 +119,8 @@ export function canBeat(candidate: Combo, last: Combo | null): boolean {
   return compareCombo(candidate, last) > 0;
 }
 
-/** 產生 size 張的所有組合。 */
-function* combinations(cards: readonly Card[], size: number): Generator<Card[]> {
+/** 產生 size 張的所有組合。純組合列舉，德州撲克的 7 選 5 也用這支。 */
+export function* combinations(cards: readonly Card[], size: number): Generator<Card[]> {
   const idx: number[] = [];
   const n = cards.length;
   if (size > n) return;

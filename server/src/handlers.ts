@@ -1,10 +1,16 @@
 import type { Server, Socket } from 'socket.io';
 import {
   DISCONNECT_GRACE_MS,
+  HOLDEM_SHOWDOWN_MS,
+  HOLDEM_START_CHIPS,
+  HOLDEM_STREET_LABEL,
+  SEAT_LIMITS,
   TURN_MS,
   cardsLabel,
   describeCombo,
+  describeHoldemHand,
   type Ack,
+  type BetAction,
   type ChatMessage,
   type ClientToServerEvents,
   type JoinMode,
@@ -20,12 +26,22 @@ import {
   removePlayerFromGame,
 } from './gameEngine.js';
 import {
+  BET_ERROR_MESSAGE,
+  applyBet,
+  autoActHoldem,
+  nextButtonSeat,
+  removePlayerFromHoldem,
+  startHand,
+  type HoldemState,
+} from './holdemEngine.js';
+import {
   addSpectator,
   buildRoomView,
   buildSummary,
   canStart,
   clampMaxPlayers,
   createRoom,
+  fundedCount,
   generateRoomId,
   isEmpty,
   makeChatMessage,
@@ -33,8 +49,10 @@ import {
   memberOf,
   modeOf,
   nicknameOf,
+  normalizeGameType,
   pushChat,
   pushLog,
+  refillChips,
   removeMember,
   seatPlayer,
   seatedPlayers,
@@ -51,6 +69,8 @@ const roomChannel = (roomId: string) => `room:${roomId}`;
 
 /** 斷線的人輪到時不用等滿 45 秒，短暫等一下就代打。 */
 const DISCONNECTED_TURN_MS = 3_000;
+
+const BET_ACTIONS: readonly BetAction[] = ['fold', 'check', 'call', 'raise', 'allin'];
 
 interface Session {
   playerId: PlayerId;
@@ -74,6 +94,8 @@ export class GameServer {
   private readonly sessions = new Map<string, Session>();
   /** playerId → 目前所在房間，斷線寬限期內也保留著，才能無縫接回。 */
   private readonly playerRoom = new Map<PlayerId, string>();
+  /** 德州撲克：已經寫過戰報的手數，避免同一手被重複結算播報。 */
+  private readonly loggedHand = new Map<string, number>();
 
   constructor(private readonly io: GameIo) {
     io.on('connection', (socket) => this.register(socket));
@@ -94,6 +116,7 @@ export class GameServer {
     socket.on('game:start', (_payload, ack) => this.onStartGame(socket, ack));
     socket.on('game:play', (payload, ack) => this.onPlay(socket, payload, ack));
     socket.on('game:pass', (_payload, ack) => this.onPass(socket, ack));
+    socket.on('game:action', (payload, ack) => this.onAction(socket, payload, ack));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -161,10 +184,10 @@ export class GameServer {
     socket.leave(LOBBY);
     socket.join(roomChannel(room.id));
 
-    // 斷線時把回合縮短成 3 秒，回來了要把整個回合還給他，否則一重整就被自動 PASS
+    // 斷線時把回合縮短成 3 秒，回來了要把整個回合還給他，否則一重整就被自動代打
     const game = room.game;
-    if (game && !game.over && room.seats[game.turnSeat] === playerId) {
-      game.turnDeadline = Date.now() + TURN_MS;
+    if (game && !game.state.over && room.seats[game.state.turnSeat] === playerId) {
+      game.state.turnDeadline = Date.now() + TURN_MS;
     }
 
     socket.emit('room:chat', { messages: room.chat });
@@ -257,7 +280,7 @@ export class GameServer {
 
   private onCreateRoom(
     socket: GameSocket,
-    payload: { name?: unknown; maxPlayers?: unknown },
+    payload: { name?: unknown; maxPlayers?: unknown; gameType?: unknown },
     ack: unknown,
   ): void {
     const session = this.sessions.get(socket.id);
@@ -267,12 +290,13 @@ export class GameServer {
     }
 
     const name = cleanText(payload?.name, 20) || `${session.nickname} 的房間`;
-    const maxPlayers = clampMaxPlayers(payload?.maxPlayers);
+    const gameType = normalizeGameType(payload?.gameType);
+    const maxPlayers = clampMaxPlayers(payload?.maxPlayers, gameType);
     const id = generateRoomId((candidate) => this.rooms.has(candidate));
 
     const host = this.memberFromSession(session);
     host.socketId = socket.id;
-    const room = createRoom(id, name, maxPlayers, host);
+    const room = createRoom(id, name, gameType, maxPlayers, host);
     this.rooms.set(id, room);
 
     session.roomId = id;
@@ -327,7 +351,7 @@ export class GameServer {
       seatPlayer(room, member);
     } else {
       // 遊戲中改當觀眾等同棄牌
-      if (room.game && !room.game.over) removePlayerFromGame(room.seats, room.game, session.playerId);
+      this.removeFromGame(room, session.playerId);
       addSpectator(room, member);
     }
 
@@ -365,24 +389,29 @@ export class GameServer {
     if (!modeOf(room, playerId)) return;
     const nickname = nicknameOf(room, playerId);
 
-    if (room.game && !room.game.over && room.players.has(playerId)) {
-      removePlayerFromGame(room.seats, room.game, playerId);
-    }
+    if (room.players.has(playerId)) this.removeFromGame(room, playerId);
     removeMember(room, playerId);
     this.playerRoom.delete(playerId);
 
     if (isEmpty(room)) {
       if (room.turnTimer) clearTimeout(room.turnTimer);
+      if (room.handTimer) clearTimeout(room.handTimer);
       this.rooms.delete(room.id);
+      this.loggedHand.delete(room.id);
       this.broadcastLobby();
       return;
     }
 
     this.systemNotice(room, `${nickname} ${reason}`);
-    this.checkGameOver(room);
-    this.broadcastRoom(room);
-    this.broadcastLobby();
-    this.scheduleTurn(room);
+    this.afterGameAction(room);
+  }
+
+  /** 讓玩家從進行中的牌局退出：大老二是抽掉手牌，德州撲克是視同蓋牌。 */
+  private removeFromGame(room: Room, playerId: PlayerId): void {
+    const game = room.game;
+    if (!game || game.state.over) return;
+    if (game.type === 'bigTwo') removePlayerFromGame(room.seats, game.state, playerId);
+    else removePlayerFromHoldem(room.seats, game.state, playerId);
   }
 
   private onRoomChat(socket: GameSocket, payload: { text?: unknown }): void {
@@ -425,36 +454,67 @@ export class GameServer {
       return reply(ack, { ok: false, error: { code: 'IN_PROGRESS', message: '這局還在進行中' } });
     }
     if (!canStart(room)) {
+      const min = SEAT_LIMITS[room.gameType].min;
       return reply(ack, {
         ok: false,
-        error: { code: 'NOT_READY', message: '需要至少 2 位玩家，且所有人都按下準備' },
+        error: { code: 'NOT_READY', message: `需要至少 ${min} 位玩家，且所有人都按下準備` },
       });
     }
 
-    room.game = dealGame(room.seats);
     room.log = [];
     for (const player of room.players.values()) player.ready = false;
 
-    const leader = room.seats[room.game.turnSeat];
-    pushLog(room, `新的一局開始，共 ${seatedPlayers(room).length} 人`);
-    if (leader) pushLog(room, `${nicknameOf(room, leader)} 持有最小的牌，先手`);
+    if (room.gameType === 'bigTwo') {
+      const state = dealGame(room.seats);
+      room.game = { type: 'bigTwo', state };
+      pushLog(room, `新的一局開始，共 ${seatedPlayers(room).length} 人`);
+      const leader = room.seats[state.turnSeat];
+      if (leader) pushLog(room, `${nicknameOf(room, leader)} 持有最小的牌，先手`);
+    } else {
+      this.startHoldemHand(room);
+    }
 
-    this.broadcastRoom(room);
-    this.broadcastLobby();
-    this.scheduleTurn(room);
+    this.afterGameAction(room);
     reply(ack, { ok: true, data: null });
+  }
+
+  /** 發德州撲克的下一手：補碼、轉莊、發牌、貼盲注。 */
+  private startHoldemHand(room: Room): void {
+    if (room.handTimer) {
+      clearTimeout(room.handTimer);
+      room.handTimer = null;
+    }
+
+    for (const playerId of refillChips(room)) {
+      pushLog(room, `${nicknameOf(room, playerId)} 補碼 ${HOLDEM_START_CHIPS}`);
+    }
+    if (fundedCount(room) < SEAT_LIMITS.holdem.min) return;
+
+    const previous = room.game?.type === 'holdem' ? room.game.state : null;
+    room.buttonSeat = nextButtonSeat(room.seats, room.chips, room.buttonSeat);
+    const state = startHand(room.seats, room.chips, room.buttonSeat, {
+      handNo: (previous?.handNo ?? 0) + 1,
+    });
+    room.game = { type: 'holdem', state };
+
+    const button = room.seats[state.buttonSeat];
+    pushLog(room, `第 ${state.handNo} 手開始，小盲 ${state.smallBlind} / 大盲 ${state.bigBlind}`);
+    if (button) pushLog(room, `${nicknameOf(room, button)} 坐莊`);
   }
 
   private onPlay(socket: GameSocket, payload: { cardIds?: unknown }, ack: unknown): void {
     const context = this.gameContext(socket, ack);
     if (!context) return;
     const { room, game, playerId } = context;
+    if (game.type !== 'bigTwo') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間玩的是德州撲克' } });
+    }
 
     const cardIds = Array.isArray(payload?.cardIds)
       ? payload.cardIds.filter((id): id is string => typeof id === 'string')
       : [];
 
-    const result = playCards(room.seats, game, playerId, cardIds);
+    const result = playCards(room.seats, game.state, playerId, cardIds);
     if (!result.ok) {
       return reply(ack, {
         ok: false,
@@ -475,8 +535,11 @@ export class GameServer {
     const context = this.gameContext(socket, ack);
     if (!context) return;
     const { room, game, playerId } = context;
+    if (game.type !== 'bigTwo') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間玩的是德州撲克' } });
+    }
 
-    const result = passTurn(room.seats, game, playerId);
+    const result = passTurn(room.seats, game.state, playerId);
     if (!result.ok) {
       return reply(ack, {
         ok: false,
@@ -489,6 +552,41 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
+  private onAction(
+    socket: GameSocket,
+    payload: { action?: unknown; amount?: unknown },
+    ack: unknown,
+  ): void {
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { room, game, playerId } = context;
+    if (game.type !== 'holdem') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間玩的是大老二' } });
+    }
+
+    const action = payload?.action as BetAction;
+    if (!BET_ACTIONS.includes(action)) {
+      return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的動作' } });
+    }
+    const amount = typeof payload?.amount === 'number' ? Math.floor(payload.amount) : undefined;
+
+    const result = applyBet(room.seats, game.state, playerId, action, amount);
+    if (!result.ok) {
+      return reply(ack, {
+        ok: false,
+        error: { code: result.error, message: BET_ERROR_MESSAGE[result.error] },
+      });
+    }
+
+    pushLog(room, `${nicknameOf(room, playerId)} ${result.result.label}`);
+    if (result.result.streetAdvanced && !result.result.handOver) {
+      pushLog(room, `${HOLDEM_STREET_LABEL[game.state.street]}　${cardsLabel(game.state.board)}`);
+    }
+
+    this.afterGameAction(room);
+    reply(ack, { ok: true, data: null });
+  }
+
   private gameContext(socket: GameSocket, ack: unknown) {
     const session = this.sessions.get(socket.id);
     if (!session?.roomId) {
@@ -496,7 +594,7 @@ export class GameServer {
       return null;
     }
     const room = this.rooms.get(session.roomId);
-    if (!room?.game || room.game.over) {
+    if (!room?.game || room.game.state.over) {
       reply(ack, { ok: false, error: { code: 'GAME_NOT_RUNNING', message: '遊戲尚未開始' } });
       return null;
     }
@@ -512,17 +610,26 @@ export class GameServer {
     this.broadcastRoom(room);
     this.broadcastLobby();
     this.scheduleTurn(room);
+    this.scheduleNextHand(room);
   }
 
+  /** 大老二整局結束時公布名次。德州撲克是連續的現金局，不走這條路。 */
   private checkGameOver(room: Room): void {
     const game = room.game;
-    if (!game?.over) return;
+    if (!game) return;
+
+    if (game.type === 'holdem') {
+      this.logShowdown(room, game.state);
+      return;
+    }
+    if (!game.state.over) return;
+
     if (room.turnTimer) {
       clearTimeout(room.turnTimer);
       room.turnTimer = null;
     }
 
-    const ranking = game.finished.map((playerId) => ({
+    const ranking = game.state.finished.map((playerId) => ({
       playerId,
       nickname: nicknameOf(room, playerId),
     }));
@@ -530,6 +637,29 @@ export class GameServer {
     if (podium) pushLog(room, `本局結束：${podium}`);
 
     this.io.to(roomChannel(room.id)).emit('game:over', { ranking });
+  }
+
+  /** 一手結束時寫戰報。同一手只會寫一次。 */
+  private logShowdown(room: Room, state: HoldemState): void {
+    if (!state.over || !state.showdown) return;
+    if (this.loggedHand.get(room.id) === state.handNo) return;
+    this.loggedHand.set(room.id, state.handNo);
+
+    if (room.turnTimer) {
+      clearTimeout(room.turnTimer);
+      room.turnTimer = null;
+    }
+
+    if (state.board.length > 0) pushLog(room, `公共牌　${cardsLabel(state.board)}`);
+    for (const entry of state.showdown) {
+      const nickname = nicknameOf(room, entry.playerId);
+      if (entry.hand) {
+        const suffix = entry.won > 0 ? `，贏得 ${entry.won}` : '';
+        pushLog(room, `${nickname}：${describeHoldemHand(entry.hand)}${suffix}`);
+      } else if (entry.won > 0) {
+        pushLog(room, `${nickname} 贏得 ${entry.won}（其他人都蓋牌了）`);
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -543,19 +673,19 @@ export class GameServer {
     }
 
     const game = room.game;
-    if (!game || game.over) return;
+    if (!game || game.state.over) return;
 
-    const playerId = room.seats[game.turnSeat];
+    const playerId = room.seats[game.state.turnSeat];
     const player = playerId ? room.players.get(playerId) : undefined;
 
     // 斷線的人不讓全桌乾等
     if (player && !player.connected) {
-      game.turnDeadline = Math.min(game.turnDeadline, Date.now() + DISCONNECTED_TURN_MS);
-    } else if (game.turnDeadline < Date.now()) {
-      game.turnDeadline = Date.now() + TURN_MS;
+      game.state.turnDeadline = Math.min(game.state.turnDeadline, Date.now() + DISCONNECTED_TURN_MS);
+    } else if (game.state.turnDeadline < Date.now()) {
+      game.state.turnDeadline = Date.now() + TURN_MS;
     }
 
-    const delay = Math.max(0, game.turnDeadline - Date.now());
+    const delay = Math.max(0, game.state.turnDeadline - Date.now());
     room.turnTimer = setTimeout(() => {
       room.turnTimer = null;
       this.runAutoAct(room);
@@ -564,23 +694,49 @@ export class GameServer {
 
   private runAutoAct(room: Room): void {
     const game = room.game;
-    if (!game || game.over) return;
+    if (!game || game.state.over) return;
 
-    const playerId = room.seats[game.turnSeat];
+    const playerId = room.seats[game.state.turnSeat];
     const nickname = playerId ? nicknameOf(room, playerId) : '';
-    const acted = autoAct(room.seats, game);
-    if (!acted) return;
 
-    if (acted.action === 'pass') {
-      pushLog(room, `${nickname} 逾時，自動 PASS`);
-    } else {
-      pushLog(room, `${nickname} 逾時，自動出 ${describeCombo(acted.result.combo)}`);
-      if (acted.result.rank !== null) {
-        pushLog(room, `${nickname} 出完了，第 ${acted.result.rank} 名`);
+    if (game.type === 'bigTwo') {
+      const acted = autoAct(room.seats, game.state);
+      if (!acted) return;
+
+      if (acted.action === 'pass') {
+        pushLog(room, `${nickname} 逾時，自動 PASS`);
+      } else {
+        pushLog(room, `${nickname} 逾時，自動出 ${describeCombo(acted.result.combo)}`);
+        if (acted.result.rank !== null) {
+          pushLog(room, `${nickname} 出完了，第 ${acted.result.rank} 名`);
+        }
       }
+    } else {
+      const acted = autoActHoldem(room.seats, game.state);
+      if (!acted) return;
+      pushLog(room, `${nickname} 逾時，自動${acted.action === 'check' ? '過牌' : '蓋牌'}`);
     }
 
     this.afterGameAction(room);
+  }
+
+  /** 德州撲克：攤牌停留一下，再自動發下一手。 */
+  private scheduleNextHand(room: Room): void {
+    if (room.handTimer) {
+      clearTimeout(room.handTimer);
+      room.handTimer = null;
+    }
+
+    const game = room.game;
+    if (game?.type !== 'holdem' || !game.state.over) return;
+    if (seatedPlayers(room).length < SEAT_LIMITS.holdem.min) return;
+
+    room.handTimer = setTimeout(() => {
+      room.handTimer = null;
+      if (this.rooms.get(room.id) !== room) return; // 房間已經被砍掉了
+      this.startHoldemHand(room);
+      this.afterGameAction(room);
+    }, HOLDEM_SHOWDOWN_MS);
   }
 }
 

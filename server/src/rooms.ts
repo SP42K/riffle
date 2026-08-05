@@ -1,11 +1,16 @@
 import {
   CHAT_HISTORY,
+  HOLDEM_START_CHIPS,
   LOG_HISTORY,
-  MAX_PLAYERS,
-  MIN_PLAYERS,
+  SEAT_LIMITS,
+  type BigTwoGameView,
+  type BigTwoSeatInfo,
   type ChatMessage,
   type Card,
+  type GameType,
   type GameView,
+  type HoldemGameView,
+  type HoldemSeatInfo,
   type JoinMode,
   type PlayerId,
   type RoomStatus,
@@ -14,6 +19,8 @@ import {
   type SeatView,
 } from 'shared';
 import { seatOfPlayer, type GameState, type Seats } from './gameEngine.js';
+import { actionsFor, type HoldemState } from './holdemEngine.js';
+import type { TurnBased } from './turnBased.js';
 
 export interface Member {
   playerId: PlayerId;
@@ -28,9 +35,15 @@ export interface PlayerMember extends Member {
   ready: boolean;
 }
 
+/** 依玩法分派的牌局。兩種 state 都滿足 TurnBased，計時與狀態判斷不必分支。 */
+export type RoomGame =
+  | { type: 'bigTwo'; state: GameState }
+  | { type: 'holdem'; state: HoldemState };
+
 export interface Room {
   id: string;
   name: string;
+  gameType: GameType;
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -38,8 +51,22 @@ export interface Room {
   spectators: Map<PlayerId, Member>;
   chat: ChatMessage[];
   log: string[];
-  game: GameState | null;
+  game: RoomGame | null;
+  /**
+   * 德州撲克的房內籌碼表。房間活著就一直累積，離開再回來也保留，
+   * 所以不會有「輸光就退出重進洗籌碼」這種事。
+   */
+  chips: Map<PlayerId, number>;
+  /** 德州撲克的莊家鈕位置。 */
+  buttonSeat: number;
   turnTimer: NodeJS.Timeout | null;
+  /** 德州撲克：攤牌後自動發下一手的計時器，跟 turnTimer 分開才不會被清掉。 */
+  handTimer: NodeJS.Timeout | null;
+}
+
+/** 取出玩法無關的回合資訊。 */
+export function turnStateOf(room: Room): TurnBased | null {
+  return room.game?.state ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,16 +86,28 @@ export function generateRoomId(taken: (id: string) => boolean): string {
   return `R${Date.now().toString(36).toUpperCase()}`;
 }
 
-export function clampMaxPlayers(value: unknown): number {
-  const n = Math.floor(Number(value));
-  if (!Number.isFinite(n)) return MAX_PLAYERS;
-  return Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, n));
+export function normalizeGameType(value: unknown): GameType {
+  return value === 'holdem' ? 'holdem' : 'bigTwo';
 }
 
-export function createRoom(id: string, name: string, maxPlayers: number, host: Member): Room {
+export function clampMaxPlayers(value: unknown, gameType: GameType): number {
+  const limits = SEAT_LIMITS[gameType];
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n)) return limits.max;
+  return Math.min(limits.max, Math.max(limits.min, n));
+}
+
+export function createRoom(
+  id: string,
+  name: string,
+  gameType: GameType,
+  maxPlayers: number,
+  host: Member,
+): Room {
   const room: Room = {
     id,
     name,
+    gameType,
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -77,7 +116,10 @@ export function createRoom(id: string, name: string, maxPlayers: number, host: M
     chat: [],
     log: [],
     game: null,
+    chips: new Map(),
+    buttonSeat: -1, // 還沒發過牌；第一手會往後推一位，也就是從座位 0 開始坐莊
     turnTimer: null,
+    handTimer: null,
   };
   seatPlayer(room, host);
   return room;
@@ -89,6 +131,10 @@ export function seatPlayer(room: Room, member: Member): number | null {
   if (seat === -1) return null;
   room.seats[seat] = member.playerId;
   room.players.set(member.playerId, { ...member, ready: false });
+  // 第一次入座才發籌碼；回鍋的人接回原本的堆疊
+  if (room.gameType === 'holdem' && !room.chips.has(member.playerId)) {
+    room.chips.set(member.playerId, HOLDEM_START_CHIPS);
+  }
   return seat;
 }
 
@@ -99,6 +145,7 @@ export function addSpectator(room: Room, member: Member): void {
 /**
  * 把成員從房間移除。
  * 遊戲進行中的玩家會空出座位，但手牌留著 —— 引擎會把空位當成不存在的座位跳過。
+ * 籌碼刻意不刪，這樣改觀戰或重新入座都接得回來。
  */
 export function removeMember(room: Room, playerId: PlayerId): void {
   const seat = room.seats.indexOf(playerId);
@@ -136,8 +183,25 @@ export function seatedPlayers(room: Room): PlayerMember[] {
 /** 開得了新局的條件：人數夠、而且除了房主以外都按了準備。 */
 export function canStart(room: Room): boolean {
   const players = seatedPlayers(room);
-  if (players.length < MIN_PLAYERS) return false;
+  if (players.length < SEAT_LIMITS[room.gameType].min) return false;
   return players.every((p) => p.ready || p.playerId === room.hostId);
+}
+
+/** 德州撲克：把籌碼歸零的人補回起始籌碼，回傳補了哪些人。 */
+export function refillChips(room: Room): PlayerId[] {
+  const refilled: PlayerId[] = [];
+  for (const playerId of room.seats) {
+    if (!playerId) continue;
+    if ((room.chips.get(playerId) ?? 0) > 0) continue;
+    room.chips.set(playerId, HOLDEM_START_CHIPS);
+    refilled.push(playerId);
+  }
+  return refilled;
+}
+
+/** 德州撲克：還有籌碼、開得了下一手的玩家數。 */
+export function fundedCount(room: Room): number {
+  return room.seats.filter((id) => id !== null && (room.chips.get(id) ?? 0) > 0).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,13 +242,14 @@ export function nicknameOf(room: Room, playerId: PlayerId): string {
 
 export function statusOf(room: Room): RoomStatus {
   if (!room.game) return 'waiting';
-  return room.game.over ? 'finished' : 'playing';
+  return room.game.state.over ? 'finished' : 'playing';
 }
 
 export function buildSummary(room: Room): RoomSummary {
   return {
     id: room.id,
     name: room.name,
+    gameType: room.gameType,
     hostNickname: nicknameOf(room, room.hostId),
     playerCount: room.players.size,
     maxPlayers: room.maxPlayers,
@@ -194,12 +259,10 @@ export function buildSummary(room: Room): RoomSummary {
 }
 
 function buildSeats(room: Room): SeatView[] {
-  const game = room.game;
   return room.seats.flatMap((playerId, seat) => {
     if (!playerId) return [];
     const player = room.players.get(playerId);
     if (!player) return [];
-    const rankIndex = game ? game.finished.indexOf(playerId) : -1;
     return [
       {
         seat,
@@ -208,19 +271,28 @@ function buildSeats(room: Room): SeatView[] {
         isHost: playerId === room.hostId,
         ready: player.ready,
         connected: player.connected,
-        handCount: game?.hands.get(playerId)?.length ?? 0,
-        passed: game ? game.passedSeats.has(seat) : false,
-        rank: rankIndex === -1 ? null : rankIndex + 1,
       } satisfies SeatView,
     ];
   });
 }
 
-function buildGameView(room: Room, game: GameState): GameView {
-  const turnPlayerId = game.over ? null : (room.seats[game.turnSeat] ?? null);
+function buildBigTwoGameView(room: Room, game: GameState): BigTwoGameView {
+  const seats: Record<number, BigTwoSeatInfo> = {};
+  for (const [seat, playerId] of room.seats.entries()) {
+    if (!playerId || !room.players.has(playerId)) continue;
+    const rankIndex = game.finished.indexOf(playerId);
+    seats[seat] = {
+      handCount: game.hands.get(playerId)?.length ?? 0,
+      passed: game.passedSeats.has(seat),
+      rank: rankIndex === -1 ? null : rankIndex + 1,
+    };
+  }
+
   return {
-    turnPlayerId,
+    type: 'bigTwo',
+    turnPlayerId: game.over ? null : (room.seats[game.turnSeat] ?? null),
     turnDeadline: game.turnDeadline,
+    over: game.over,
     lastPlay: game.lastPlay
       ? {
           playerId: game.lastPlay.playerId,
@@ -231,13 +303,71 @@ function buildGameView(room: Room, game: GameState): GameView {
     freeLead: game.lastPlay === null,
     openingCardId: game.openingCardId,
     ranking: game.finished.slice(),
-    over: game.over,
+    seats,
   };
+}
+
+function buildHoldemGameView(room: Room, game: HoldemState, viewerId: PlayerId): HoldemGameView {
+  const seats: Record<number, HoldemSeatInfo> = {};
+  for (const [seat, playerId] of room.seats.entries()) {
+    if (!playerId || !room.players.has(playerId)) continue;
+    seats[seat] = {
+      committed: game.committed.get(playerId) ?? 0,
+      totalCommitted: game.totalCommitted.get(playerId) ?? 0,
+      folded: game.folded.has(playerId),
+      allIn: game.allIn.has(playerId),
+      // 0 表示這一手沒發到牌（籌碼歸零或中途入座），前端據此顯示「坐出」
+      holeCount: game.hole.get(playerId)?.length ?? 0,
+      isButton: seat === game.buttonSeat,
+      blind: seat === game.smallBlindSeat ? 'sb' : seat === game.bigBlindSeat ? 'bb' : null,
+      lastAction: game.lastAction.get(playerId) ?? null,
+    };
+  }
+
+  return {
+    type: 'holdem',
+    turnPlayerId: game.over ? null : (room.seats[game.turnSeat] ?? null),
+    turnDeadline: game.turnDeadline,
+    over: game.over,
+    handNo: game.handNo,
+    street: game.street,
+    board: game.board.slice(),
+    pots: game.pots.map((pot) => ({ amount: pot.amount, eligible: pot.eligible.slice() })),
+    totalPot: game.pots.reduce((sum, pot) => sum + pot.amount, 0),
+    currentBet: game.currentBet,
+    minRaise: game.minRaise,
+    smallBlind: game.smallBlind,
+    bigBlind: game.bigBlind,
+    seats,
+    showdown:
+      game.showdown?.map((entry) => ({
+        playerId: entry.playerId,
+        nickname: nicknameOf(room, entry.playerId),
+        hole: entry.hole?.slice() ?? null,
+        hand: entry.hand,
+        won: entry.won,
+      })) ?? null,
+    myActions: room.players.has(viewerId) ? actionsFor(room.seats, game, viewerId) : null,
+  };
+}
+
+function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
+  if (!room.game) return null;
+  return room.game.type === 'bigTwo'
+    ? buildBigTwoGameView(room, room.game.state)
+    : buildHoldemGameView(room, room.game.state, viewerId);
+}
+
+/** 這位玩家自己看得到的牌：大老二是手牌，德州撲克是底牌。 */
+function handOf(game: RoomGame, playerId: PlayerId): Card[] {
+  const cards =
+    game.type === 'bigTwo' ? game.state.hands.get(playerId) : game.state.hole.get(playerId);
+  return cards?.slice() ?? [];
 }
 
 /**
  * 為單一觀看者產生房間快照。
- * 玩家只拿得到自己的手牌；觀戰者是上帝視角，拿得到所有人的手牌。
+ * 玩家只拿得到自己的牌；觀戰者是上帝視角，拿得到所有人的牌。
  */
 export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
   const mode = modeOf(room, viewerId);
@@ -247,14 +377,23 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
   let allHands: Record<PlayerId, Card[]> | null = null;
   if (mode === 'spectate' && game) {
     allHands = {};
-    for (const [playerId, cards] of game.hands) {
-      if (room.players.has(playerId)) allHands[playerId] = cards;
+    for (const playerId of room.seats) {
+      if (playerId && room.players.has(playerId)) allHands[playerId] = handOf(game, playerId);
+    }
+  }
+
+  let chips: Record<PlayerId, number> | null = null;
+  if (room.gameType === 'holdem') {
+    chips = {};
+    for (const playerId of room.seats) {
+      if (playerId && room.players.has(playerId)) chips[playerId] = room.chips.get(playerId) ?? 0;
     }
   }
 
   return {
     id: room.id,
     name: room.name,
+    gameType: room.gameType,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),
@@ -264,9 +403,10 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
       nickname: s.nickname,
     })),
     me: { playerId: viewerId, mode },
-    hand: mode === 'play' ? (game?.hands.get(viewerId)?.slice() ?? []) : null,
+    hand: mode === 'play' ? (game ? handOf(game, viewerId) : []) : null,
     allHands,
-    game: game ? buildGameView(room, game) : null,
+    chips,
+    game: buildGameView(room, viewerId),
     log: room.log.slice(),
   };
 }

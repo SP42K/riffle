@@ -670,12 +670,168 @@ select:focus {
   z-index: 50;
 }
 
+/* --- 德州撲克 */
+.tag--game {
+  background: rgba(227, 179, 65, 0.18);
+  color: var(--gold);
+}
+.tag--button {
+  background: var(--gold);
+  color: #1a1a1a;
+  font-weight: 700;
+}
+.tag--blind {
+  background: rgba(255, 255, 255, 0.2);
+}
+.tag--allin {
+  background: rgba(217, 79, 79, 0.25);
+  color: #ffb4b4;
+  font-weight: 700;
+}
+.seat--folded {
+  opacity: 0.45;
+}
+.seat__status {
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.seat__chips {
+  color: var(--gold);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.seat__bet {
+  font-size: 0.75rem;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+}
+.seat__action {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.6rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  max-width: 60%;
+  text-align: right;
+}
+
+.holdem__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.holdem__street {
+  color: var(--gold);
+  font-weight: 700;
+}
+.holdem__board {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: center;
+  padding: 0.9rem 0;
+}
+.holdem__slot {
+  --card-w: 54px;
+  width: var(--card-w);
+  height: calc(var(--card-w) * 1.42);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.holdem__pots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+.holdem__pot {
+  background: rgba(227, 179, 65, 0.15);
+  color: var(--gold);
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.2rem 0.75rem;
+}
+.holdem__pot--side {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.holdem__showdown ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+  padding: 0;
+}
+.holdem__showdown li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+.holdem__showdown-name {
+  font-weight: 700;
+  min-width: 5em;
+}
+.holdem__showdown-cards {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+.holdem__winner .holdem__showdown-name {
+  color: var(--gold);
+}
+.holdem__won {
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.holdem__raise {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.holdem__raise input[type='range'] {
+  width: 120px;
+  accent-color: var(--gold);
+}
+.holdem__raise-input {
+  width: 5.5rem;
+}
+.holdem__mine {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+.holdem__me-info {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.9rem;
+}
+.holdem__strength {
+  color: var(--gold);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 860px) {
   .lobby__body,
   .room__body {
     grid-template-columns: minmax(0, 1fr);
   }
-  .card {
+  .card,
+  .holdem__slot {
     --card-w: 44px;
   }
   .room-row {

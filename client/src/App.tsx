@@ -17,9 +17,9 @@ function NicknameGate() {
     <div className="gate">
       <form className="gate__card" onSubmit={submit}>
         <h1>
-          大老二 <span className="lobby__header-en">Online</span>
+          線上牌桌 <span className="lobby__header-en">Online</span>
         </h1>
-        <p className="muted">2~4 人線上對戰，可開房、加入、觀戰</p>
+        <p className="muted">大老二 2~4 人、德州撲克 2~9 人，可開房、加入、觀戰</p>
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}

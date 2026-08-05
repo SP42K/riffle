@@ -1,3 +1,5 @@
+import type { HoldemGameView } from './holdem.js';
+
 // ---------------------------------------------------------------------------
 // 牌
 // ---------------------------------------------------------------------------
@@ -104,6 +106,22 @@ export interface Combo {
 
 export type PlayerId = string;
 
+/** 一個房間只玩一種玩法，建房時決定。 */
+export type GameType = 'bigTwo' | 'holdem';
+
+export const GAME_TYPES: readonly GameType[] = ['bigTwo', 'holdem'];
+
+export const GAME_TYPE_LABEL: Record<GameType, string> = {
+  bigTwo: '大老二',
+  holdem: '德州撲克',
+};
+
+/** 各玩法的人數上下限。 */
+export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
+  bigTwo: { min: 2, max: 4 },
+  holdem: { min: 2, max: 9 },
+};
+
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
 
 export type JoinMode = 'play' | 'spectate';
@@ -122,6 +140,7 @@ export interface ChatMessage {
 export interface RoomSummary {
   id: string;
   name: string;
+  gameType: GameType;
   hostNickname: string;
   playerCount: number;
   maxPlayers: number;
@@ -129,7 +148,10 @@ export interface RoomSummary {
   status: RoomStatus;
 }
 
-/** 牌桌上一位玩家的公開資訊。 */
+/**
+ * 牌桌上一位玩家的公開資訊。
+ * 只放跟玩法無關的成員資訊；玩法專屬的數字（手牌張數、籌碼…）在各自的 GameView 裡。
+ */
 export interface SeatView {
   seat: number;
   playerId: PlayerId;
@@ -137,11 +159,6 @@ export interface SeatView {
   isHost: boolean;
   ready: boolean;
   connected: boolean;
-  handCount: number;
-  /** 本輪是否已經 PASS。 */
-  passed: boolean;
-  /** 已經出完牌的名次（1 起算），還在打的人為 null。 */
-  rank: number | null;
 }
 
 export interface SpectatorView {
@@ -155,11 +172,21 @@ export interface LastPlay {
   combo: Combo;
 }
 
-export interface GameView {
+export interface BigTwoSeatInfo {
+  handCount: number;
+  /** 本輪是否已經 PASS。 */
+  passed: boolean;
+  /** 已經出完牌的名次（1 起算），還在打的人為 null。 */
+  rank: number | null;
+}
+
+export interface BigTwoGameView {
+  type: 'bigTwo';
   /** 輪到誰（playerId）。遊戲結束時為 null。 */
   turnPlayerId: PlayerId | null;
   /** 目前回合結束的時間戳（ms）。 */
   turnDeadline: number;
+  over: boolean;
   lastPlay: LastPlay | null;
   /** true 表示現在是自由出牌（可出任意合法牌型）。 */
   freeLead: boolean;
@@ -167,13 +194,18 @@ export interface GameView {
   openingCardId: string | null;
   /** 出完牌的順序，index 0 為第一名。 */
   ranking: PlayerId[];
-  over: boolean;
+  /** seat → 該座位的公開資訊。 */
+  seats: Record<number, BigTwoSeatInfo>;
 }
+
+/** 依 type 分派的玩法快照。前端用 game.type 收窄。 */
+export type GameView = BigTwoGameView | HoldemGameView;
 
 /** 伺服器推給單一 socket 的房間快照。每個人收到的內容不同。 */
 export interface RoomView {
   id: string;
   name: string;
+  gameType: GameType;
   hostId: PlayerId;
   maxPlayers: number;
   status: RoomStatus;
@@ -181,10 +213,15 @@ export interface RoomView {
   spectators: SpectatorView[];
   /** 收訊者自己的身分。 */
   me: { playerId: PlayerId; mode: JoinMode };
-  /** 只有玩家會拿到，且只有自己的手牌。 */
+  /** 只有玩家會拿到：大老二是手牌，德州撲克是自己的底牌。 */
   hand: Card[] | null;
   /** 只有觀戰者會拿到（上帝視角）。 */
   allHands: Record<PlayerId, Card[]> | null;
+  /**
+   * 德州撲克的房內籌碼，其他玩法為 null。
+   * 這是房間層的狀態（跨手累積），所以不放在單手的 GameView 裡。
+   */
+  chips: Record<PlayerId, number> | null;
   game: GameView | null;
   log: string[];
 }
@@ -204,15 +241,24 @@ export type Ack<T> = (res: { ok: true; data: T } | { ok: false; error: ErrorPayl
 export interface ClientToServerEvents {
   'session:hello': (p: { playerId: PlayerId; nickname: string }, ack: Ack<{ roomId: string | null }>) => void;
   'lobby:chat': (p: { text: string }) => void;
-  'room:create': (p: { name: string; maxPlayers: number }, ack: Ack<{ roomId: string }>) => void;
+  'room:create': (
+    p: { name: string; maxPlayers: number; gameType: GameType },
+    ack: Ack<{ roomId: string }>,
+  ) => void;
   'room:join': (p: { roomId: string; mode: JoinMode }, ack: Ack<{ roomId: string }>) => void;
   'room:leave': (p: Record<string, never>, ack: Ack<null>) => void;
   'room:chat': (p: { text: string }) => void;
   'room:ready': (p: { ready: boolean }) => void;
   'game:start': (p: Record<string, never>, ack: Ack<null>) => void;
+  /** 大老二專用。 */
   'game:play': (p: { cardIds: string[] }, ack: Ack<null>) => void;
+  /** 大老二專用。 */
   'game:pass': (p: Record<string, never>, ack: Ack<null>) => void;
+  /** 德州撲克專用。amount 是「這一街總共加到多少」，不是增量。 */
+  'game:action': (p: { action: BetAction; amount?: number }, ack: Ack<null>) => void;
 }
+
+export type BetAction = 'fold' | 'check' | 'call' | 'raise' | 'allin';
 
 /** Server → Client */
 export interface ServerToClientEvents {
@@ -228,9 +274,8 @@ export interface ServerToClientEvents {
 // 規則常數
 // ---------------------------------------------------------------------------
 
+/** 大老二每人的手牌張數。人數上限請看 SEAT_LIMITS。 */
 export const HAND_SIZE = 13;
-export const MIN_PLAYERS = 2;
-export const MAX_PLAYERS = 4;
 export const TURN_MS = 45_000;
 export const DISCONNECT_GRACE_MS = 30_000;
 export const CHAT_HISTORY = 100;
