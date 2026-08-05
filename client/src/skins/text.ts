@@ -102,6 +102,7 @@ export const CASINO_TEXT = {
   'bigTwo.cannotPass': '你有領牌權，不能 PASS',
   'bigTwo.sortRank': '排序：按大小',
   'bigTwo.sortSuit': '排序：按花色',
+  'bigTwo.suitOrder': '花色大小',
   'bigTwo.handEmpty': '手牌已出完',
   'bigTwo.waitingDeal': '等待發牌',
   'hint.notPlaying': '按下準備，等房主開局',

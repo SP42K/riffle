@@ -575,6 +575,16 @@
 [data-skin='vscode'] .holdem__board {
   gap: 0.25rem;
 }
+/* 花色對照表跟著牌面走：深色底、等寬字 */
+[data-skin='vscode'] .suit-order {
+  font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
+}
+[data-skin='vscode'] .suit-order__item {
+  background: #2d2d2d;
+  border: 1px solid #3c3c3c;
+  border-radius: 2px;
+  font-weight: 400;
+}
 
 /* --------------------------------------------------------- 終端機外觀 */
 
@@ -794,4 +804,11 @@
 [data-skin='terminal'] .table__last-cards,
 [data-skin='terminal'] .holdem__board {
   gap: 0.25rem;
+}
+/* 花色對照表跟著牌面走：透明底、只留框線 */
+[data-skin='terminal'] .suit-order__item {
+  background: transparent;
+  border: 1px solid #232a31;
+  border-radius: 2px;
+  font-weight: 400;
 }

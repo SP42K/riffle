@@ -710,6 +710,35 @@ select:focus {
   color: var(--gold);
   font-weight: 700;
 }
+/* 花色由小到大的對照表，貼在手牌上方 */
+.suit-order {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.suit-order__label {
+  color: var(--muted);
+}
+.suit-order__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.suit-order__lt {
+  color: var(--muted);
+  opacity: 0.6;
+}
+.suit-order__item {
+  min-width: 1.4em;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+  text-align: center;
+}
 .hand {
   display: flex;
   flex-wrap: wrap;

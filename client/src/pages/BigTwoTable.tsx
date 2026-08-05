@@ -12,6 +12,7 @@ import {
 import { Hand, type SortMode } from '../components/Hand';
 import { PlayingCard } from '../components/PlayingCard';
 import { StartControls } from '../components/StartControls';
+import { SuitOrder } from '../components/SuitOrder';
 import { TurnBanner } from '../components/TurnBanner';
 import { useCountdown } from '../hooks/useCountdown';
 import { emitWithAck } from '../net/socket';
@@ -198,6 +199,8 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
         </button>
         <span className={`room__hint${canPlay ? ' room__hint--ok' : ''}`}>{hint}</span>
       </div>
+
+      <SuitOrder />
 
       <Hand
         cards={hand}

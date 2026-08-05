@@ -236,6 +236,7 @@ const TEXT: TextTable = {
   'bigTwo.cannotPass': 'you hold the lead — cannot skip',
   'bigTwo.sortRank': 'sort: name',
   'bigTwo.sortSuit': 'sort: type',
+  'bigTwo.suitOrder': 'tag order',
   'bigTwo.handEmpty': 'queue empty',
   'bigTwo.waitingDeal': 'waiting for input',
   'hint.notPlaying': 'press ready, owner starts',
