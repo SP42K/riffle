@@ -191,7 +191,7 @@ const TEXT: TextTable = {
   'room.spectators': 'tailing ({n})',
   'room.chatTitle': 'notes',
   'room.turnPrefix': 'waiting on',
-  'room.you': 'you',
+  'room.turnMine': 'waiting on you',
 
   'chat.lobbyTitle': 'notes',
   'chat.empty': 'no output.',

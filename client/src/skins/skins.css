@@ -453,6 +453,34 @@
 [data-skin='vscode'] .timer__bar {
   background: #4fa6e8;
 }
+/* 輪到自己 → 借「聚焦的編輯器群組 + 未存檔圓點」的語彙，編輯器不會呼吸也不會發光 */
+[data-skin='vscode'] .room[data-myturn='true'] .table {
+  border-color: #4fa6e8;
+  box-shadow: inset 3px 0 0 #4fa6e8;
+  animation: none;
+}
+[data-skin='vscode'] .room[data-myturn='true'] .room__footer {
+  border-top-color: #4fa6e8;
+}
+[data-skin='vscode'] .table__turn[data-mine='true'] {
+  color: #4fa6e8;
+  background: rgba(79, 166, 232, 0.16);
+  border-color: #4fa6e8;
+  border-radius: 2px;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
+}
+[data-skin='vscode'] .table__turn[data-mine='true']::before {
+  content: '●';
+  font-size: 1em;
+}
+[data-skin='vscode'] .timer[data-urgency='warn'] .timer__bar {
+  background: #cca700;
+}
+[data-skin='vscode'] .timer[data-urgency='critical'] .timer__bar {
+  background: #f14c4c;
+}
 [data-skin='vscode'] .toast {
   background: #252526;
   border: 1px solid #4fa6e8;
@@ -651,6 +679,40 @@
 }
 [data-skin='terminal'] .timer__bar {
   background: #4ee08a;
+}
+/* 輪到自己 → 借「閃爍方塊游標」的語彙，終端機不發光也不畫圓角 */
+[data-skin='terminal'] .room[data-myturn='true'] .table {
+  border-color: #4ee08a;
+  border-left-width: 2px;
+  box-shadow: none;
+  animation: none;
+}
+[data-skin='terminal'] .room[data-myturn='true'] .room__footer {
+  border-top-color: #4ee08a;
+}
+[data-skin='terminal'] .table__turn[data-mine='true'] {
+  color: #4ee08a;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 400;
+}
+[data-skin='terminal'] .table__turn[data-mine='true']::before {
+  content: '█';
+  animation: boss-blink 1s step-end infinite;
+}
+[data-skin='terminal'] .timer[data-urgency='warn'] .timer__bar {
+  background: #d0a215;
+}
+[data-skin='terminal'] .timer[data-urgency='critical'] .timer__bar {
+  background: #ff7b72;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-skin='terminal'] .table__turn[data-mine='true']::before {
+    animation: none;
+  }
 }
 [data-skin='terminal'] .toast {
   background: #0d0f12;

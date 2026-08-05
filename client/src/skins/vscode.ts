@@ -196,7 +196,7 @@ const TEXT: TextTable = {
   'room.spectators': 'Watching ({n})',
   'room.chatTitle': 'Comments',
   'room.turnPrefix': 'Assigned to',
-  'room.you': 'you',
+  'room.turnMine': 'Assigned to you',
 
   'chat.lobbyTitle': 'Discussion',
   'chat.empty': 'No comments yet.',

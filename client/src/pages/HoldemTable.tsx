@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   SEAT_LIMITS,
-  TURN_MS,
   bestHand,
   type HoldemGameView,
   type LegalActions,
@@ -9,6 +8,7 @@ import {
 } from 'shared';
 import { PlayingCard } from '../components/PlayingCard';
 import { StartControls } from '../components/StartControls';
+import { TurnBanner } from '../components/TurnBanner';
 import { useCountdown } from '../hooks/useCountdown';
 import { emitWithAck } from '../net/socket';
 import { useGame } from '../state/GameProvider';
@@ -102,23 +102,13 @@ export function HoldemRoom({ room }: { room: RoomView }) {
           </div>
 
           {!game.over && (
-            <div className="table__turn">
-              <span>
-                {t('room.turnPrefix')}{' '}
-                <strong>
-                  {isMyTurn
-                    ? t('room.you')
-                    : (room.seats.find((s) => s.playerId === game.turnPlayerId)?.nickname ?? '—')}
-                </strong>
-              </span>
-              <div className="timer">
-                <div
-                  className="timer__bar"
-                  style={{ width: `${Math.min(100, (remainingMs / TURN_MS) * 100)}%` }}
-                />
-              </div>
-              <span className="timer__value">{Math.ceil(remainingMs / 1000)}s</span>
-            </div>
+            <TurnBanner
+              isMyTurn={Boolean(isMyTurn)}
+              nickname={
+                room.seats.find((s) => s.playerId === game.turnPlayerId)?.nickname ?? '—'
+              }
+              remainingMs={remainingMs}
+            />
           )}
 
           {game.over && game.showdown && <Showdown game={game} />}
@@ -170,7 +160,14 @@ export function HoldemRoom({ room }: { room: RoomView }) {
     </>
   );
 
-  return <RoomShell room={room} center={center} footer={isSpectator ? null : footer} />;
+  return (
+    <RoomShell
+      room={room}
+      center={center}
+      footer={isSpectator ? null : footer}
+      isMyTurn={Boolean(isMyTurn)}
+    />
+  );
 }
 
 function Showdown({ game }: { game: HoldemGameView }) {

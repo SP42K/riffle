@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   SEAT_LIMITS,
-  TURN_MS,
   canBeat,
   identifyCombo,
   smallestLegalPlay,
@@ -13,6 +12,7 @@ import {
 import { Hand, type SortMode } from '../components/Hand';
 import { PlayingCard } from '../components/PlayingCard';
 import { StartControls } from '../components/StartControls';
+import { TurnBanner } from '../components/TurnBanner';
 import { useCountdown } from '../hooks/useCountdown';
 import { emitWithAck } from '../net/socket';
 import { useGame } from '../state/GameProvider';
@@ -129,23 +129,13 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
             )}
           </div>
 
-          <div className="table__turn">
-            <span>
-              {t('room.turnPrefix')}{' '}
-              <strong>
-                {isMyTurn
-                  ? t('room.you')
-                  : (room.seats.find((s) => s.playerId === game?.turnPlayerId)?.nickname ?? '—')}
-              </strong>
-            </span>
-            <div className="timer">
-              <div
-                className="timer__bar"
-                style={{ width: `${Math.min(100, (remainingMs / TURN_MS) * 100)}%` }}
-              />
-            </div>
-            <span className="timer__value">{Math.ceil(remainingMs / 1000)}s</span>
-          </div>
+          <TurnBanner
+            isMyTurn={Boolean(isMyTurn)}
+            nickname={
+              room.seats.find((s) => s.playerId === game?.turnPlayerId)?.nickname ?? '—'
+            }
+            remainingMs={remainingMs}
+          />
         </>
       )}
 
@@ -220,7 +210,14 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
     </>
   );
 
-  return <RoomShell room={room} center={center} footer={isSpectator ? null : footer} />;
+  return (
+    <RoomShell
+      room={room}
+      center={center}
+      footer={isSpectator ? null : footer}
+      isMyTurn={Boolean(isMyTurn)}
+    />
+  );
 }
 
 function buildHint(input: {

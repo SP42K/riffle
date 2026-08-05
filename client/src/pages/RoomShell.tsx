@@ -13,13 +13,15 @@ interface Props {
   center: ReactNode;
   /** 底部控制列，觀戰者不會看到。 */
   footer: ReactNode;
+  /** 輪到自己時整個房間會高亮，各玩法算好了傳進來。 */
+  isMyTurn?: boolean;
 }
 
 /**
  * 房間的外殼：標題列、座位、戰報、側欄聊天。
  * 這些跟玩法無關，大老二與德州撲克共用。
  */
-export function RoomShell({ room, center, footer }: Props) {
+export function RoomShell({ room, center, footer, isMyTurn }: Props) {
   const { roomMessages, run } = useGame();
   const { skin, t } = useSkin();
   const game = room.game;
@@ -31,7 +33,7 @@ export function RoomShell({ room, center, footer }: Props) {
   const others = room.seats.filter((seat) => seat.playerId !== me.playerId);
 
   return (
-    <div className="room">
+    <div className="room" data-myturn={isMyTurn ? 'true' : undefined}>
       <header className="room__header">
         <div>
           <h1>{room.name}</h1>

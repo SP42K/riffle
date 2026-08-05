@@ -52,7 +52,7 @@ export const CASINO_TEXT = {
   'room.spectators': '觀戰者（{n}）',
   'room.chatTitle': '房間聊天',
   'room.turnPrefix': '輪到',
-  'room.you': '你',
+  'room.turnMine': '輪到你了',
 
   // 聊天
   'chat.lobbyTitle': '大廳聊天',
