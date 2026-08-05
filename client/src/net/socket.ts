@@ -3,8 +3,21 @@ import type { Ack, ClientToServerEvents, ServerToClientEvents } from 'shared';
 
 export type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
-const PLAYER_ID_KEY = 'bigtwo:playerId';
-const NICKNAME_KEY = 'bigtwo:nickname';
+/**
+ * 儲存鍵刻意取得中性 —— 舊的 'bigtwo:' 前綴在 devtools 裡一看就穿幫。
+ * 讀不到新 key 時會把舊 key 搬過來再刪掉，升級的人不會被登出。
+ */
+const PLAYER_ID_KEY = 'ws.sid';
+const NICKNAME_KEY = 'ws.user';
+const LEGACY_PLAYER_ID_KEY = 'bigtwo:playerId';
+const LEGACY_NICKNAME_KEY = 'bigtwo:nickname';
+
+function migrate(store: Storage, from: string, to: string): string | null {
+  const value = store.getItem(to) ?? store.getItem(from);
+  if (value !== null) store.setItem(to, value);
+  store.removeItem(from);
+  return value;
+}
 
 /**
  * 產生一組 UUID v4。
@@ -33,7 +46,7 @@ function randomId(): string {
  * 但每個分頁各自獨立，同一台電腦開多個分頁就是多個玩家（測試跟雙開都方便）。
  */
 export function getPlayerId(): string {
-  let id = sessionStorage.getItem(PLAYER_ID_KEY);
+  let id = migrate(sessionStorage, LEGACY_PLAYER_ID_KEY, PLAYER_ID_KEY);
   if (!id) {
     id = randomId();
     sessionStorage.setItem(PLAYER_ID_KEY, id);
@@ -42,7 +55,7 @@ export function getPlayerId(): string {
 }
 
 export function getStoredNickname(): string {
-  return localStorage.getItem(NICKNAME_KEY) ?? '';
+  return migrate(localStorage, LEGACY_NICKNAME_KEY, NICKNAME_KEY) ?? '';
 }
 
 export function storeNickname(nickname: string): void {
@@ -51,7 +64,18 @@ export function storeNickname(nickname: string): void {
 
 export const socket: GameSocket = io({ autoConnect: false });
 
-/** 把 socket.io 的 ack 包成 Promise，失敗時 reject 一個帶訊息的 Error。 */
+/** 伺服器回錯時丟出來的錯誤。帶 code 是為了讓前端能依外觀換掉文案。 */
+export class AckError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AckError';
+  }
+}
+
+/** 把 socket.io 的 ack 包成 Promise，失敗時 reject 一個 AckError。 */
 export function emitWithAck<E extends keyof ClientToServerEvents, T>(
   event: E,
   payload: Parameters<ClientToServerEvents[E]>[0],
@@ -59,7 +83,7 @@ export function emitWithAck<E extends keyof ClientToServerEvents, T>(
   return new Promise((resolve, reject) => {
     const ack: Ack<T> = (res) => {
       if (res.ok) resolve(res.data);
-      else reject(new Error(res.error.message));
+      else reject(new AckError(res.error.code, res.error.message));
     };
     // socket.io 的型別推不出這種泛型轉發，這裡直接放行
     (socket.emit as (event: E, payload: unknown, ack: unknown) => void)(event, payload, ack);

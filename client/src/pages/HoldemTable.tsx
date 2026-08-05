@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  HOLDEM_STREET_LABEL,
   SEAT_LIMITS,
   TURN_MS,
   bestHand,
-  describeHoldemHand,
   type HoldemGameView,
   type LegalActions,
   type RoomView,
@@ -14,12 +12,14 @@ import { StartControls } from '../components/StartControls';
 import { useCountdown } from '../hooks/useCountdown';
 import { emitWithAck } from '../net/socket';
 import { useGame } from '../state/GameProvider';
+import { useSkin, type SkinContextValue } from '../state/skinContext';
 import { RoomShell } from './RoomShell';
 
 const BOARD_SLOTS = 5;
 
 export function HoldemRoom({ room }: { room: RoomView }) {
   const { run } = useGame();
+  const { skin, t } = useSkin();
   const game = room.game?.type === 'holdem' ? room.game : null;
   const me = room.me;
   const isSpectator = me.mode === 'spectate';
@@ -54,9 +54,13 @@ export function HoldemRoom({ room }: { room: RoomView }) {
     <>
       {!game && (
         <div className="table__idle">
-          <p>等待房主開始牌局</p>
+          <p>{t('holdem.idleTitle')}</p>
           <p className="muted">
-            目前 {room.seats.length}/{room.maxPlayers} 人，至少 {SEAT_LIMITS.holdem.min} 人可開始
+            {t('holdem.idleHint', {
+              n: room.seats.length,
+              max: room.maxPlayers,
+              min: SEAT_LIMITS.holdem.min,
+            })}
           </p>
         </div>
       )}
@@ -64,10 +68,10 @@ export function HoldemRoom({ room }: { room: RoomView }) {
       {game && (
         <>
           <div className="holdem__meta">
-            <span>第 {game.handNo} 手</span>
-            <span className="holdem__street">{HOLDEM_STREET_LABEL[game.street]}</span>
+            <span>{t('holdem.handNo', { n: game.handNo })}</span>
+            <span className="holdem__street">{skin.street[game.street]}</span>
             <span className="muted">
-              盲注 {game.smallBlind}/{game.bigBlind}
+              {t('holdem.blinds', { sb: game.smallBlind, bb: game.bigBlind })}
             </span>
           </div>
 
@@ -83,23 +87,27 @@ export function HoldemRoom({ room }: { room: RoomView }) {
           </div>
 
           <div className="holdem__pots">
-            <span className="holdem__pot">底池 {game.totalPot}</span>
+            <span className="holdem__pot">{t('holdem.pot', { n: game.totalPot })}</span>
             {contestedPots.length > 1 &&
               contestedPots.map((pot, index) => (
                 <span key={index} className="holdem__pot holdem__pot--side">
-                  {index === 0 ? '主池' : `邊池 ${index}`} {pot.amount}
+                  {index === 0
+                    ? t('holdem.mainPot', { n: pot.amount })
+                    : t('holdem.sidePot', { i: index, n: pot.amount })}
                 </span>
               ))}
-            {game.currentBet > 0 && <span className="muted">目前注額 {game.currentBet}</span>}
+            {game.currentBet > 0 && (
+              <span className="muted">{t('holdem.currentBet', { n: game.currentBet })}</span>
+            )}
           </div>
 
           {!game.over && (
             <div className="table__turn">
               <span>
-                輪到{' '}
+                {t('room.turnPrefix')}{' '}
                 <strong>
                   {isMyTurn
-                    ? '你'
+                    ? t('room.you')
                     : (room.seats.find((s) => s.playerId === game.turnPlayerId)?.nickname ?? '—')}
                 </strong>
               </span>
@@ -134,7 +142,7 @@ export function HoldemRoom({ room }: { room: RoomView }) {
           />
         )}
         <span className={`room__hint${isMyTurn ? ' room__hint--ok' : ''}`}>
-          {buildHint({ game, playing, isMyTurn: Boolean(isMyTurn), actions })}
+          {buildHint({ game, playing, isMyTurn: Boolean(isMyTurn), actions, t })}
         </span>
       </div>
 
@@ -143,14 +151,20 @@ export function HoldemRoom({ room }: { room: RoomView }) {
           {hole.map((card) => (
             <PlayingCard key={card.id} card={card} />
           ))}
-          {hole.length === 0 && <p className="muted">{game ? '這一手沒有你的牌' : '等待發牌'}</p>}
+          {hole.length === 0 && (
+            <p className="muted">{game ? t('holdem.noCards') : t('bigTwo.waitingDeal')}</p>
+          )}
         </div>
         <div className="holdem__me-info">
-          <span className="seat__chips">🪙 {myChips}</span>
+          <span className="seat__chips">{t('seat.chips', { n: myChips })}</span>
           {myInfo && myInfo.committed > 0 && (
-            <span className="seat__bet">本街已下注 {myInfo.committed}</span>
+            <span className="seat__bet">{t('holdem.myCommitted', { n: myInfo.committed })}</span>
           )}
-          {myHand && <span className="holdem__strength">目前：{describeHoldemHand(myHand)}</span>}
+          {myHand && (
+            <span className="holdem__strength">
+              {t('holdem.strength', { hand: skin.describeHand(myHand) })}
+            </span>
+          )}
         </div>
       </div>
     </>
@@ -160,9 +174,10 @@ export function HoldemRoom({ room }: { room: RoomView }) {
 }
 
 function Showdown({ game }: { game: HoldemGameView }) {
+  const { skin, t } = useSkin();
   return (
     <div className="table__result holdem__showdown">
-      <h2>第 {game.handNo} 手結束</h2>
+      <h2>{t('holdem.showdownTitle', { n: game.handNo })}</h2>
       <ul>
         {game.showdown?.map((entry) => (
           <li key={entry.playerId} className={entry.won > 0 ? 'holdem__winner' : undefined}>
@@ -174,12 +189,12 @@ function Showdown({ game }: { game: HoldemGameView }) {
                 ))}
               </span>
             )}
-            {entry.hand && <span className="muted">{describeHoldemHand(entry.hand)}</span>}
+            {entry.hand && <span className="muted">{skin.describeHand(entry.hand)}</span>}
             {entry.won > 0 && <span className="holdem__won">+{entry.won}</span>}
           </li>
         ))}
       </ul>
-      <p className="muted">稍後自動發下一手</p>
+      <p className="muted">{t('holdem.nextHandSoon')}</p>
     </div>
   );
 }
@@ -193,6 +208,7 @@ interface BetControlsProps {
 }
 
 function BetControls({ actions, raiseTo, onRaiseTo, onAct, disabled }: BetControlsProps) {
+  const { t } = useSkin();
   const canRaise = Boolean(actions?.canRaise) && !disabled;
   const min = actions?.minRaiseTo ?? 0;
   const max = actions?.maxRaiseTo ?? 0;
@@ -205,7 +221,7 @@ function BetControls({ actions, raiseTo, onRaiseTo, onAct, disabled }: BetContro
         disabled={disabled || !actions?.canFold}
         onClick={() => onAct('fold')}
       >
-        蓋牌
+        {t('holdem.fold')}
       </button>
       <button
         type="button"
@@ -213,7 +229,7 @@ function BetControls({ actions, raiseTo, onRaiseTo, onAct, disabled }: BetContro
         disabled={disabled || !actions?.canCheck}
         onClick={() => onAct('check')}
       >
-        過牌
+        {t('holdem.check')}
       </button>
       <button
         type="button"
@@ -221,7 +237,7 @@ function BetControls({ actions, raiseTo, onRaiseTo, onAct, disabled }: BetContro
         disabled={disabled || !actions?.canCall}
         onClick={() => onAct('call')}
       >
-        跟注 {actions?.callAmount ?? 0}
+        {t('holdem.call', { n: actions?.callAmount ?? 0 })}
       </button>
 
       <span className="holdem__raise">
@@ -232,7 +248,7 @@ function BetControls({ actions, raiseTo, onRaiseTo, onAct, disabled }: BetContro
           step={1}
           value={Math.min(Math.max(raiseTo, min), max)}
           disabled={!canRaise}
-          aria-label="加注金額"
+          aria-label={t('holdem.raiseAmountLabel')}
           onChange={(event) => onRaiseTo(Number(event.target.value))}
         />
         <input
@@ -242,7 +258,7 @@ function BetControls({ actions, raiseTo, onRaiseTo, onAct, disabled }: BetContro
           max={max}
           value={raiseTo}
           disabled={!canRaise}
-          aria-label="加注到"
+          aria-label={t('holdem.raiseToLabel')}
           onChange={(event) => onRaiseTo(Number(event.target.value))}
         />
         <button
@@ -251,7 +267,7 @@ function BetControls({ actions, raiseTo, onRaiseTo, onAct, disabled }: BetContro
           disabled={!canRaise || raiseTo < min || raiseTo > max}
           onClick={() => onAct('raise', raiseTo)}
         >
-          加注到 {raiseTo}
+          {t('holdem.raiseTo', { n: raiseTo })}
         </button>
       </span>
 
@@ -261,7 +277,7 @@ function BetControls({ actions, raiseTo, onRaiseTo, onAct, disabled }: BetContro
         disabled={disabled || (!actions?.canRaise && !actions?.canCall)}
         onClick={() => onAct('allin')}
       >
-        All-in
+        {t('holdem.allIn')}
       </button>
     </>
   );
@@ -272,14 +288,15 @@ function buildHint(input: {
   playing: boolean;
   isMyTurn: boolean;
   actions: LegalActions | null;
+  t: SkinContextValue['t'];
 }): string {
-  const { game, playing, isMyTurn, actions } = input;
-  if (!game) return '按下準備，等房主開局';
-  if (game.over) return '這一手結束了，稍後自動發下一手';
-  if (!playing) return '等待開局';
-  if (!isMyTurn) return '等待其他玩家下注';
-  if (!actions) return '你這一手沒有參與';
-  if (actions.canCheck) return `可以過牌，或加注到 ${actions.minRaiseTo} 以上`;
-  if (actions.canCall) return `要跟 ${actions.callAmount} 才能繼續`;
-  return '輪到你了';
+  const { game, playing, isMyTurn, actions, t } = input;
+  if (!game) return t('holdemHint.notStarted');
+  if (game.over) return t('holdemHint.handOver');
+  if (!playing) return t('holdemHint.waitStart');
+  if (!isMyTurn) return t('holdemHint.waitOthers');
+  if (!actions) return t('holdemHint.notInHand');
+  if (actions.canCheck) return t('holdemHint.canCheck', { n: actions.minRaiseTo });
+  if (actions.canCall) return t('holdemHint.mustCall', { n: actions.callAmount });
+  return t('holdemHint.yourTurn');
 }

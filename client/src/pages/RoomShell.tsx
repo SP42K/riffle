@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
-import { GAME_TYPE_LABEL, sortCards, type RoomView } from 'shared';
+import { sortCards, type RoomView } from 'shared';
 import { ChatPanel } from '../components/ChatPanel';
 import { PlayingCard } from '../components/PlayingCard';
 import { Seat } from '../components/Seat';
 import { emitWithAck, socket } from '../net/socket';
 import { useGame } from '../state/GameProvider';
+import { useSkin } from '../state/skinContext';
 
 interface Props {
   room: RoomView;
@@ -20,6 +21,7 @@ interface Props {
  */
 export function RoomShell({ room, center, footer }: Props) {
   const { roomMessages, run } = useGame();
+  const { skin, t } = useSkin();
   const game = room.game;
   const me = room.me;
   const isSpectator = me.mode === 'spectate';
@@ -33,9 +35,9 @@ export function RoomShell({ room, center, footer }: Props) {
       <header className="room__header">
         <div>
           <h1>{room.name}</h1>
-          <span className="room__code">房號 #{room.id}</span>
-          <span className="tag tag--game">{GAME_TYPE_LABEL[room.gameType]}</span>
-          {isSpectator && <span className="tag tag--spectator">觀戰中</span>}
+          <span className="room__code">{t('room.code', { id: room.id })}</span>
+          <span className="tag tag--game">{skin.gameType[room.gameType]}</span>
+          {isSpectator && <span className="tag tag--spectator">{t('room.spectating')}</span>}
         </div>
         <div className="room__header-actions">
           {isSpectator && room.seats.length < room.maxPlayers && !playing && (
@@ -44,7 +46,7 @@ export function RoomShell({ room, center, footer }: Props) {
               className="btn"
               onClick={() => run(() => emitWithAck('room:join', { roomId: room.id, mode: 'play' }))}
             >
-              坐下來玩
+              {t('room.sitDown')}
             </button>
           )}
           {!isSpectator && !playing && (
@@ -53,7 +55,7 @@ export function RoomShell({ room, center, footer }: Props) {
               className="btn"
               onClick={() => run(() => emitWithAck('room:join', { roomId: room.id, mode: 'spectate' }))}
             >
-              改為觀戰
+              {t('room.toSpectator')}
             </button>
           )}
           <button
@@ -61,7 +63,7 @@ export function RoomShell({ room, center, footer }: Props) {
             className="btn btn--danger"
             onClick={() => run(() => emitWithAck('room:leave', {}))}
           >
-            離開房間
+            {t('room.leave')}
           </button>
         </div>
       </header>
@@ -82,7 +84,7 @@ export function RoomShell({ room, center, footer }: Props) {
             ))}
             {Array.from({ length: room.maxPlayers - room.seats.length }, (_, i) => (
               <div key={`empty-${i}`} className="seat seat--empty">
-                空位
+                {t('room.emptySeat')}
               </div>
             ))}
           </div>
@@ -90,21 +92,24 @@ export function RoomShell({ room, center, footer }: Props) {
           <div className="table__center">{center}</div>
 
           <div className="table__log">
-            {room.log.slice(-6).map((line, index) => (
-              <p key={`${index}-${line}`}>{line}</p>
-            ))}
+            {room.log.slice(-6).map((event, index) => {
+              const line = skin.formatLog(event);
+              return <p key={`${index}-${line}`}>{line}</p>;
+            })}
           </div>
         </div>
 
         <aside className="room__side">
           {isSpectator && allHands && (
             <section className="panel spectator">
-              <h2>上帝視角</h2>
+              <h2>{t('room.godView')}</h2>
               {room.seats.map((seat) => (
                 <div key={seat.playerId} className="spectator__row">
                   <span className="spectator__name">
                     {seat.nickname}
-                    {game?.turnPlayerId === seat.playerId && <span className="tag tag--turn">輪到</span>}
+                    {game?.turnPlayerId === seat.playerId && (
+                      <span className="tag tag--turn">{t('room.turnTag')}</span>
+                    )}
                   </span>
                   <div className="spectator__cards">
                     {sortCards(allHands[seat.playerId] ?? []).map((card) => (
@@ -118,13 +123,13 @@ export function RoomShell({ room, center, footer }: Props) {
 
           {room.spectators.length > 0 && (
             <section className="panel">
-              <h2>觀戰者（{room.spectators.length}）</h2>
-              <p className="muted">{room.spectators.map((s) => s.nickname).join('、')}</p>
+              <h2>{t('room.spectators', { n: room.spectators.length })}</h2>
+              <p className="muted">{room.spectators.map((s) => s.nickname).join(', ')}</p>
             </section>
           )}
 
           <ChatPanel
-            title="房間聊天"
+            title={t('room.chatTitle')}
             messages={roomMessages}
             myPlayerId={me.playerId}
             onSend={(text) => socket.emit('room:chat', { text })}

@@ -1,24 +1,20 @@
 import { useState, type FormEvent } from 'react';
-import {
-  GAME_TYPES,
-  GAME_TYPE_LABEL,
-  SEAT_LIMITS,
-  type GameType,
-  type JoinMode,
-  type RoomStatus,
-} from 'shared';
+import { GAME_TYPES, SEAT_LIMITS, type GameType, type JoinMode, type RoomStatus } from 'shared';
 import { ChatPanel } from '../components/ChatPanel';
 import { emitWithAck, getPlayerId, socket } from '../net/socket';
 import { useGame } from '../state/GameProvider';
+import { useSkin } from '../state/skinContext';
+import type { TextKey } from '../skins/text';
 
-const STATUS_LABEL: Record<RoomStatus, string> = {
-  waiting: '等待中',
-  playing: '遊戲中',
-  finished: '已結束',
+const STATUS_KEY: Record<RoomStatus, TextKey> = {
+  waiting: 'lobby.status.waiting',
+  playing: 'lobby.status.playing',
+  finished: 'lobby.status.finished',
 };
 
 export function Lobby() {
   const { rooms, lobbyMessages, nickname, saveNickname, run, connected } = useGame();
+  const { skin, t } = useSkin();
   const [roomName, setRoomName] = useState('');
   const [gameType, setGameType] = useState<GameType>('bigTwo');
   const [maxPlayers, setMaxPlayers] = useState(SEAT_LIMITS.bigTwo.max);
@@ -55,7 +51,7 @@ export function Lobby() {
     <div className="lobby">
       <header className="lobby__header">
         <h1>
-          線上牌桌 <span className="lobby__header-en">Online</span>
+          {t('gate.title')} <span className="lobby__header-en">{t('gate.titleAccent')}</span>
         </h1>
         <form
           className="lobby__nickname"
@@ -64,7 +60,7 @@ export function Lobby() {
             saveNickname(nicknameDraft);
           }}
         >
-          <label htmlFor="nickname">暱稱</label>
+          <label htmlFor="nickname">{t('lobby.nicknameLabel')}</label>
           <input
             id="nickname"
             value={nicknameDraft}
@@ -72,69 +68,72 @@ export function Lobby() {
             maxLength={12}
           />
           <button type="submit" disabled={!nicknameDraft.trim() || nicknameDraft.trim() === nickname}>
-            更名
+            {t('lobby.rename')}
           </button>
-          <span className={connected ? 'dot dot--on' : 'dot dot--off'} title={connected ? '已連線' : '連線中…'} />
+          <span
+            className={connected ? 'dot dot--on' : 'dot dot--off'}
+            title={connected ? t('lobby.connected') : t('lobby.connecting')}
+          />
         </form>
       </header>
 
       <div className="lobby__body">
         <main className="lobby__rooms">
           <form className="panel lobby__create" onSubmit={createRoom}>
-            <h2>建立房間</h2>
+            <h2>{t('lobby.createTitle')}</h2>
             <div className="lobby__create-row">
               <input
                 value={roomName}
                 onChange={(event) => setRoomName(event.target.value)}
-                placeholder={`${nickname} 的房間`}
+                placeholder={t('lobby.roomNamePlaceholder', { name: nickname })}
                 maxLength={20}
               />
               <select
                 value={gameType}
                 onChange={(event) => changeGameType(event.target.value as GameType)}
-                aria-label="玩法"
+                aria-label={t('lobby.gameTypeLabel')}
               >
                 {GAME_TYPES.map((type) => (
                   <option key={type} value={type}>
-                    {GAME_TYPE_LABEL[type]}
+                    {skin.gameType[type]}
                   </option>
                 ))}
               </select>
               <select
                 value={maxPlayers}
                 onChange={(event) => setMaxPlayers(Number(event.target.value))}
-                aria-label="人數上限"
+                aria-label={t('lobby.maxPlayersLabel')}
               >
                 {seatOptions.map((n) => (
                   <option key={n} value={n}>
-                    {n} 人
+                    {t('lobby.seatOption', { n })}
                   </option>
                 ))}
               </select>
               <button type="submit" className="btn btn--primary">
-                開房
+                {t('lobby.create')}
               </button>
             </div>
           </form>
 
           <form className="panel lobby__code" onSubmit={joinByCode}>
-            <h2>用房號加入</h2>
+            <h2>{t('lobby.codeTitle')}</h2>
             <div className="lobby__create-row">
               <input
                 value={joinCode}
                 onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
-                placeholder="例如 K7QM"
+                placeholder={t('lobby.codePlaceholder')}
                 maxLength={8}
               />
               <button type="submit" className="btn">
-                加入
+                {t('lobby.join')}
               </button>
             </div>
           </form>
 
           <section className="panel lobby__list">
-            <h2>房間列表（{rooms.length}）</h2>
-            {rooms.length === 0 && <p className="muted">目前沒有房間，開一間吧。</p>}
+            <h2>{t('lobby.listTitle', { n: rooms.length })}</h2>
+            {rooms.length === 0 && <p className="muted">{t('lobby.empty')}</p>}
             <ul>
               {rooms.map((room) => {
                 const full = room.playerCount >= room.maxPlayers;
@@ -144,28 +143,30 @@ export function Lobby() {
                     <div className="room-row__main">
                       <span className="room-row__name">{room.name}</span>
                       <span className="room-row__code">#{room.id}</span>
-                      <span className="tag tag--game">{GAME_TYPE_LABEL[room.gameType]}</span>
-                      <span className={`badge badge--${room.status}`}>{STATUS_LABEL[room.status]}</span>
+                      <span className="tag tag--game">{skin.gameType[room.gameType]}</span>
+                      <span className={`badge badge--${room.status}`}>
+                        {t(STATUS_KEY[room.status])}
+                      </span>
                     </div>
                     <div className="room-row__meta">
-                      <span>房主 {room.hostNickname}</span>
-                      <span>
-                        {room.playerCount}/{room.maxPlayers} 人
-                      </span>
-                      {room.spectatorCount > 0 && <span>觀戰 {room.spectatorCount}</span>}
+                      <span>{t('lobby.host', { name: room.hostNickname })}</span>
+                      <span>{t('lobby.playerCount', { n: room.playerCount, max: room.maxPlayers })}</span>
+                      {room.spectatorCount > 0 && (
+                        <span>{t('lobby.spectatorCount', { n: room.spectatorCount })}</span>
+                      )}
                     </div>
                     <div className="room-row__actions">
                       <button
                         type="button"
                         className="btn btn--primary"
                         disabled={full || started}
-                        title={started ? '這局已開打' : full ? '房間已滿' : undefined}
+                        title={started ? t('lobby.started') : full ? t('lobby.full') : undefined}
                         onClick={() => join(room.id, 'play')}
                       >
-                        加入
+                        {t('lobby.join')}
                       </button>
                       <button type="button" className="btn" onClick={() => join(room.id, 'spectate')}>
-                        觀戰
+                        {t('lobby.spectate')}
                       </button>
                     </div>
                   </li>
@@ -177,7 +178,7 @@ export function Lobby() {
 
         <aside className="lobby__chat">
           <ChatPanel
-            title="大廳聊天"
+            title={t('chat.lobbyTitle')}
             messages={lobbyMessages}
             myPlayerId={getPlayerId()}
             onSend={(text) => socket.emit('lobby:chat', { text })}

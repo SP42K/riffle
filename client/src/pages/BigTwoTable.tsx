@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  COMBO_LABEL,
+  SEAT_LIMITS,
   TURN_MS,
   canBeat,
   identifyCombo,
@@ -16,10 +16,12 @@ import { StartControls } from '../components/StartControls';
 import { useCountdown } from '../hooks/useCountdown';
 import { emitWithAck } from '../net/socket';
 import { useGame } from '../state/GameProvider';
+import { useSkin, type SkinContextValue } from '../state/skinContext';
 import { RoomShell } from './RoomShell';
 
 export function BigTwoRoom({ room }: { room: RoomView }) {
   const { run } = useGame();
+  const { skin, t } = useSkin();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sortMode, setSortMode] = useState<SortMode>('rank');
 
@@ -66,6 +68,8 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
     combo,
     lastCombo,
     includesOpening,
+    skin,
+    t,
   });
 
   const play = () => {
@@ -89,9 +93,13 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
     <>
       {!playing && room.status !== 'finished' && (
         <div className="table__idle">
-          <p>等待房主開始遊戲</p>
+          <p>{t('bigTwo.idleTitle')}</p>
           <p className="muted">
-            目前 {room.seats.length}/{room.maxPlayers} 人，至少 2 人可開始
+            {t('bigTwo.idleHint', {
+              n: room.seats.length,
+              max: room.maxPlayers,
+              min: SEAT_LIMITS.bigTwo.min,
+            })}
           </p>
         </div>
       )}
@@ -102,7 +110,10 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
             {game?.lastPlay ? (
               <>
                 <p className="table__last-label">
-                  {game.lastPlay.nickname} 的 {COMBO_LABEL[game.lastPlay.combo.type]}
+                  {t('bigTwo.lastPlay', {
+                    name: game.lastPlay.nickname,
+                    combo: skin.combo[game.lastPlay.combo.type],
+                  })}
                 </p>
                 <div className="table__last-cards">
                   {sortCards(game.lastPlay.combo.cards).map((card) => (
@@ -112,18 +123,18 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
               </>
             ) : (
               <p className="table__last-label">
-                自由出牌
-                {openingCardId && <> · 這一手必須包含開局牌</>}
+                {t('bigTwo.freeLead')}
+                {openingCardId && <>{t('bigTwo.mustIncludeOpening')}</>}
               </p>
             )}
           </div>
 
           <div className="table__turn">
             <span>
-              輪到{' '}
+              {t('room.turnPrefix')}{' '}
               <strong>
                 {isMyTurn
-                  ? '你'
+                  ? t('room.you')
                   : (room.seats.find((s) => s.playerId === game?.turnPlayerId)?.nickname ?? '—')}
               </strong>
             </span>
@@ -140,11 +151,11 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
 
       {room.status === 'finished' && game && (
         <div className="table__result">
-          <h2>本局結束</h2>
+          <h2>{t('bigTwo.resultTitle')}</h2>
           <ol>
             {game.ranking.map((playerId) => (
               <li key={playerId}>
-                {room.seats.find((s) => s.playerId === playerId)?.nickname ?? '(已離開)'}
+                {room.seats.find((s) => s.playerId === playerId)?.nickname ?? t('seat.left')}
               </li>
             ))}
           </ol>
@@ -154,10 +165,10 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
               className="btn btn--primary"
               onClick={() => run(() => emitWithAck('game:start', {}))}
             >
-              再來一局
+              {t('bigTwo.playAgain')}
             </button>
           ) : (
-            <p className="muted">等房主開下一局</p>
+            <p className="muted">{t('bigTwo.waitHost')}</p>
           )}
         </div>
       )}
@@ -172,19 +183,19 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
         ) : (
           <>
             <button type="button" className="btn btn--primary" disabled={!canPlay} onClick={play}>
-              出牌
+              {t('bigTwo.play')}
             </button>
             <button
               type="button"
               className="btn"
               disabled={!isMyTurn || !lastCombo}
-              title={!lastCombo ? '你有領牌權，不能 PASS' : undefined}
+              title={!lastCombo ? t('bigTwo.cannotPass') : undefined}
               onClick={pass}
             >
-              PASS
+              {t('bigTwo.pass')}
             </button>
             <button type="button" className="btn" disabled={!isMyTurn} onClick={suggest}>
-              提示
+              {t('bigTwo.suggest')}
             </button>
           </>
         )}
@@ -193,7 +204,7 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
           className="btn"
           onClick={() => setSortMode((mode) => (mode === 'rank' ? 'suit' : 'rank'))}
         >
-          排序：{sortMode === 'rank' ? '按大小' : '按花色'}
+          {sortMode === 'rank' ? t('bigTwo.sortRank') : t('bigTwo.sortSuit')}
         </button>
         <span className={`room__hint${canPlay ? ' room__hint--ok' : ''}`}>{hint}</span>
       </div>
@@ -203,7 +214,7 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
         selected={selectedIds}
         sortMode={sortMode}
         disabled={!playing}
-        emptyLabel={playing ? '手牌已出完' : '等待發牌'}
+        emptyLabel={playing ? t('bigTwo.handEmpty') : t('bigTwo.waitingDeal')}
         onToggle={toggleCard}
       />
     </>
@@ -219,14 +230,20 @@ function buildHint(input: {
   combo: Combo | null;
   lastCombo: Combo | null;
   includesOpening: boolean;
+  skin: SkinContextValue['skin'];
+  t: SkinContextValue['t'];
 }): string {
-  const { playing, isMyTurn, selectedCount, combo, lastCombo, includesOpening } = input;
-  if (!playing) return '按下準備，等房主開局';
-  if (!isMyTurn) return '等待其他玩家出牌';
-  if (selectedCount === 0) return lastCombo ? `請選 ${lastCombo.size} 張牌跟牌` : '請選擇要出的牌';
-  if (!combo) return '這不是合法的牌型';
-  if (!includesOpening) return '第一手必須包含開局牌';
-  if (lastCombo && combo.size !== lastCombo.size) return `必須出 ${lastCombo.size} 張`;
-  if (lastCombo && !canBeat(combo, lastCombo)) return `${COMBO_LABEL[combo.type]} 壓不過上一手`;
-  return `可出：${COMBO_LABEL[combo.type]}`;
+  const { playing, isMyTurn, selectedCount, combo, lastCombo, includesOpening, skin, t } = input;
+  if (!playing) return t('hint.notPlaying');
+  if (!isMyTurn) return t('hint.waitOthers');
+  if (selectedCount === 0) {
+    return lastCombo ? t('hint.selectToFollow', { n: lastCombo.size }) : t('hint.selectCards');
+  }
+  if (!combo) return t('hint.invalidCombo');
+  if (!includesOpening) return t('hint.mustIncludeOpening');
+  if (lastCombo && combo.size !== lastCombo.size) return t('hint.mustPlayN', { n: lastCombo.size });
+  if (lastCombo && !canBeat(combo, lastCombo)) {
+    return t('hint.cannotBeat', { combo: skin.combo[combo.type] });
+  }
+  return t('hint.canPlay', { combo: skin.combo[combo.type] });
 }

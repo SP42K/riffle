@@ -9,7 +9,15 @@ import {
   type ReactNode,
 } from 'react';
 import type { ChatMessage, RoomSummary, RoomView } from 'shared';
-import { emitWithAck, getPlayerId, getStoredNickname, socket, storeNickname } from '../net/socket';
+import {
+  AckError,
+  emitWithAck,
+  getPlayerId,
+  getStoredNickname,
+  socket,
+  storeNickname,
+} from '../net/socket';
+import { useSkin } from './skinContext';
 
 interface GameContextValue {
   connected: boolean;
@@ -34,6 +42,7 @@ export function useGame(): GameContextValue {
 }
 
 export function GameProvider({ children }: { children: ReactNode }) {
+  const { skin, t } = useSkin();
   const [connected, setConnected] = useState(false);
   const [nickname, setNickname] = useState(getStoredNickname);
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
@@ -49,13 +58,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
 
+  /** 伺服器的訊息是中文的牌類用語，隱匿模式下要換成外觀自己的說法。 */
+  const localizeError = useCallback(
+    (code: string, message: string) => skin.errors[code] ?? message,
+    [skin],
+  );
+
   const run = useCallback(
     (action: () => Promise<unknown>) => {
       action().catch((error: unknown) => {
-        showToast(error instanceof Error ? error.message : '操作失敗');
+        if (error instanceof AckError) showToast(localizeError(error.code, error.message));
+        else showToast(error instanceof Error ? error.message : t('toast.failed'));
       });
     },
-    [showToast],
+    [showToast, localizeError, t],
   );
 
   const saveNickname = useCallback((next: string) => {
@@ -87,7 +103,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setRoom(payload);
       if (!payload) setRoomMessages([]);
     });
-    socket.on('error', (payload) => showToast(payload.message));
+    socket.on('error', (payload) => showToast(localizeError(payload.code, payload.message)));
 
     if (socket.connected) hello();
     else socket.connect();
@@ -101,7 +117,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       socket.off('room:state');
       socket.off('error');
     };
-  }, [nickname, showToast]);
+  }, [nickname, showToast, localizeError]);
 
   const value = useMemo<GameContextValue>(
     () => ({

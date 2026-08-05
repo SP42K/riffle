@@ -13,6 +13,7 @@ import {
   type HoldemStreet,
   type LegalActions,
   type PlayerId,
+  type SeatAction,
 } from 'shared';
 import type { Seats } from './gameEngine.js';
 import type { TurnBased } from './turnBased.js';
@@ -60,8 +61,8 @@ export interface HoldemState extends TurnBased {
   pots: Pot[];
   showdown: ShowdownEntry[] | null;
   handNo: number;
-  /** 顯示用的最近動作。 */
-  lastAction: Map<PlayerId, string>;
+  /** 最近一次動作，結構化的，讓前端自己組句子。 */
+  lastAction: Map<PlayerId, SeatAction>;
 }
 
 export type BetError =
@@ -211,8 +212,8 @@ export function startHand(
   state.smallBlindSeat = smallBlindSeat;
   state.bigBlindSeat = bigBlindSeat;
 
-  postBlind(state, seats[smallBlindSeat]!, smallBlind, '小盲');
-  postBlind(state, seats[bigBlindSeat]!, bigBlind, '大盲');
+  postBlind(state, seats[smallBlindSeat]!, smallBlind, 'sb');
+  postBlind(state, seats[bigBlindSeat]!, bigBlind, 'bb');
   state.currentBet = bigBlind;
 
   // 從大盲的下一位開始找第一個行動者；兩人局時那正好會繞回莊家
@@ -221,9 +222,9 @@ export function startHand(
   return state;
 }
 
-function postBlind(state: HoldemState, playerId: PlayerId, amount: number, label: string): void {
+function postBlind(state: HoldemState, playerId: PlayerId, amount: number, kind: 'sb' | 'bb'): void {
   const put = putIn(state, playerId, amount);
-  state.lastAction.set(playerId, `${label} ${put}`);
+  state.lastAction.set(playerId, { kind, amount: put, allIn: state.allIn.has(playerId) });
 }
 
 /** 把籌碼放進池，回傳實際放進去的量（籌碼不夠就是全下）。 */
@@ -245,8 +246,8 @@ export interface BetResult {
   action: BetAction;
   /** 這次實際放進池的籌碼。 */
   amount: number;
-  /** 寫戰報用的中文描述。 */
-  label: string;
+  /** 寫戰報用的結構化描述。 */
+  seatAction: SeatAction;
   streetAdvanced: boolean;
   handOver: boolean;
 }
@@ -284,25 +285,25 @@ export function applyBet(
   const committed = state.committed.get(playerId) ?? 0;
   const streetBefore = state.street;
   let put = 0;
-  let label: string;
+  let seatAction: SeatAction;
 
   switch (action) {
     case 'fold': {
       state.folded.add(playerId);
-      label = '蓋牌';
+      seatAction = { kind: 'fold', amount: 0, allIn: false };
       break;
     }
 
     case 'check': {
       if (!actions.canCheck) return { ok: false, error: 'CANNOT_CHECK' };
-      label = '過牌';
+      seatAction = { kind: 'check', amount: 0, allIn: false };
       break;
     }
 
     case 'call': {
       if (!actions.canCall) return { ok: false, error: 'CANNOT_CALL' };
       put = putIn(state, playerId, actions.callAmount);
-      label = state.allIn.has(playerId) ? `跟注 ${put}（all-in）` : `跟注 ${put}`;
+      seatAction = { kind: 'call', amount: put, allIn: state.allIn.has(playerId) };
       break;
     }
 
@@ -314,7 +315,7 @@ export function applyBet(
         if (!actions.canRaise) {
           if (!actions.canCall) return { ok: false, error: 'CANNOT_CALL' };
           put = putIn(state, playerId, actions.callAmount);
-          label = `跟注 ${put}（all-in）`;
+          seatAction = { kind: 'call', amount: put, allIn: state.allIn.has(playerId) };
           break;
         }
         raiseTo = actions.maxRaiseTo;
@@ -342,8 +343,12 @@ export function applyBet(
       }
 
       // 本街原本沒人下注就叫「下注」，否則是「加注到」
-      label = increment === total ? `下注 ${total}` : `加注到 ${total}`;
-      if (state.allIn.has(playerId)) label += '（all-in）';
+      seatAction = {
+        kind: increment === total ? 'bet' : 'raise',
+        amount: put,
+        to: total,
+        allIn: state.allIn.has(playerId),
+      };
       break;
     }
 
@@ -352,7 +357,7 @@ export function applyBet(
   }
 
   state.actedSeats.add(state.turnSeat);
-  state.lastAction.set(playerId, label);
+  state.lastAction.set(playerId, seatAction);
   progress(seats, state);
 
   return {
@@ -360,7 +365,7 @@ export function applyBet(
     result: {
       action,
       amount: put,
-      label,
+      seatAction,
       streetAdvanced: state.street !== streetBefore,
       handOver: state.over,
     },
@@ -393,7 +398,7 @@ export function removePlayerFromHoldem(
 ): void {
   if (!state.hole.has(playerId)) return;
   state.folded.add(playerId);
-  state.lastAction.set(playerId, '離開');
+  state.lastAction.set(playerId, { kind: 'leave', amount: 0, allIn: false });
   if (state.over) return;
 
   // 只有在「該行動的人不能再行動了」或「場上只剩一人」時才推進，

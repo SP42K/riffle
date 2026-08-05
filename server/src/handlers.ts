@@ -3,19 +3,17 @@ import {
   DISCONNECT_GRACE_MS,
   HOLDEM_SHOWDOWN_MS,
   HOLDEM_START_CHIPS,
-  HOLDEM_STREET_LABEL,
   SEAT_LIMITS,
   TURN_MS,
-  cardsLabel,
-  describeCombo,
-  describeHoldemHand,
   type Ack,
   type BetAction,
+  type Card,
   type ChatMessage,
   type ClientToServerEvents,
   type JoinMode,
   type PlayerId,
   type ServerToClientEvents,
+  type SystemNotice,
 } from 'shared';
 import {
   PLAY_ERROR_MESSAGE,
@@ -76,6 +74,11 @@ interface Session {
   playerId: PlayerId;
   nickname: string;
   roomId: string | null;
+}
+
+/** 戰報只送牌的 id，文字寫法交給前端的外觀決定。 */
+function cardIdsOf(cards: readonly Card[]): string[] {
+  return cards.map((card) => card.id);
 }
 
 function cleanText(input: unknown, max: number): string {
@@ -218,7 +221,7 @@ export class GameServer {
     member.socketId = null;
     member.graceTimer = setTimeout(() => {
       member.graceTimer = null;
-      this.dropFromRoom(room, session.playerId, '斷線離開');
+      this.dropFromRoom(room, session.playerId, 'disconnected');
     }, DISCONNECT_GRACE_MS);
 
     this.broadcastRoom(room);
@@ -263,8 +266,8 @@ export class GameServer {
     this.io.to(roomChannel(room.id)).emit('room:chat', { messages: room.chat });
   }
 
-  private systemNotice(room: Room, text: string): void {
-    pushChat(room.chat, makeSystemMessage(text));
+  private systemNotice(room: Room, notice: SystemNotice): void {
+    pushChat(room.chat, makeSystemMessage(notice));
     this.broadcastRoomChat(room);
   }
 
@@ -304,7 +307,7 @@ export class GameServer {
     socket.leave(LOBBY);
     socket.join(roomChannel(id));
 
-    this.systemNotice(room, `${session.nickname} 建立了房間`);
+    this.systemNotice(room, { t: 'created', player: session.nickname });
     this.broadcastRoom(room);
     this.broadcastLobby();
     reply(ack, { ok: true, data: { roomId: id } });
@@ -361,7 +364,10 @@ export class GameServer {
     socket.join(roomChannel(roomId));
 
     socket.emit('room:chat', { messages: room.chat });
-    this.systemNotice(room, `${session.nickname} ${mode === 'play' ? '加入了房間' : '進來觀戰'}`);
+    this.systemNotice(room, {
+      t: mode === 'play' ? 'joined' : 'spectating',
+      player: session.nickname,
+    });
     this.broadcastRoom(room);
     this.broadcastLobby();
     this.scheduleTurn(room);
@@ -381,11 +387,11 @@ export class GameServer {
     const room = this.rooms.get(session.roomId);
     session.roomId = null;
     socket.leave(room ? roomChannel(room.id) : roomChannel(''));
-    if (room) this.dropFromRoom(room, session.playerId, '離開了房間');
+    if (room) this.dropFromRoom(room, session.playerId, 'left');
   }
 
   /** 把玩家徹底移出房間（主動離開或斷線寬限到期）。 */
-  private dropFromRoom(room: Room, playerId: PlayerId, reason: string): void {
+  private dropFromRoom(room: Room, playerId: PlayerId, reason: 'left' | 'disconnected'): void {
     if (!modeOf(room, playerId)) return;
     const nickname = nicknameOf(room, playerId);
 
@@ -402,7 +408,7 @@ export class GameServer {
       return;
     }
 
-    this.systemNotice(room, `${nickname} ${reason}`);
+    this.systemNotice(room, { t: reason, player: nickname });
     this.afterGameAction(room);
   }
 
@@ -467,9 +473,9 @@ export class GameServer {
     if (room.gameType === 'bigTwo') {
       const state = dealGame(room.seats);
       room.game = { type: 'bigTwo', state };
-      pushLog(room, `新的一局開始，共 ${seatedPlayers(room).length} 人`);
+      pushLog(room, { t: 'bigTwoStart', players: seatedPlayers(room).length });
       const leader = room.seats[state.turnSeat];
-      if (leader) pushLog(room, `${nicknameOf(room, leader)} 持有最小的牌，先手`);
+      if (leader) pushLog(room, { t: 'lead', player: nicknameOf(room, leader) });
     } else {
       this.startHoldemHand(room);
     }
@@ -486,7 +492,11 @@ export class GameServer {
     }
 
     for (const playerId of refillChips(room)) {
-      pushLog(room, `${nicknameOf(room, playerId)} 補碼 ${HOLDEM_START_CHIPS}`);
+      pushLog(room, {
+        t: 'rebuy',
+        player: nicknameOf(room, playerId),
+        amount: HOLDEM_START_CHIPS,
+      });
     }
     if (fundedCount(room) < SEAT_LIMITS.holdem.min) return;
 
@@ -498,8 +508,13 @@ export class GameServer {
     room.game = { type: 'holdem', state };
 
     const button = room.seats[state.buttonSeat];
-    pushLog(room, `第 ${state.handNo} 手開始，小盲 ${state.smallBlind} / 大盲 ${state.bigBlind}`);
-    if (button) pushLog(room, `${nicknameOf(room, button)} 坐莊`);
+    pushLog(room, {
+      t: 'holdemStart',
+      handNo: state.handNo,
+      smallBlind: state.smallBlind,
+      bigBlind: state.bigBlind,
+    });
+    if (button) pushLog(room, { t: 'button', player: nicknameOf(room, button) });
   }
 
   private onPlay(socket: GameSocket, payload: { cardIds?: unknown }, ack: unknown): void {
@@ -522,9 +537,18 @@ export class GameServer {
       });
     }
 
-    pushLog(room, `${nicknameOf(room, playerId)} 出 ${describeCombo(result.result.combo)}`);
+    pushLog(room, {
+      t: 'play',
+      player: nicknameOf(room, playerId),
+      combo: result.result.combo.type,
+      cards: cardIdsOf(result.result.combo.cards),
+    });
     if (result.result.rank !== null) {
-      pushLog(room, `${nicknameOf(room, playerId)} 出完了，第 ${result.result.rank} 名`);
+      pushLog(room, {
+        t: 'finished',
+        player: nicknameOf(room, playerId),
+        rank: result.result.rank,
+      });
     }
 
     this.afterGameAction(room);
@@ -547,7 +571,7 @@ export class GameServer {
       });
     }
 
-    pushLog(room, `${nicknameOf(room, playerId)} PASS`);
+    pushLog(room, { t: 'pass', player: nicknameOf(room, playerId) });
     this.afterGameAction(room);
     reply(ack, { ok: true, data: null });
   }
@@ -578,9 +602,17 @@ export class GameServer {
       });
     }
 
-    pushLog(room, `${nicknameOf(room, playerId)} ${result.result.label}`);
+    pushLog(room, {
+      t: 'bet',
+      player: nicknameOf(room, playerId),
+      action: result.result.seatAction,
+    });
     if (result.result.streetAdvanced && !result.result.handOver) {
-      pushLog(room, `${HOLDEM_STREET_LABEL[game.state.street]}　${cardsLabel(game.state.board)}`);
+      pushLog(room, {
+        t: 'street',
+        street: game.state.street,
+        board: cardIdsOf(game.state.board),
+      });
     }
 
     this.afterGameAction(room);
@@ -633,8 +665,9 @@ export class GameServer {
       playerId,
       nickname: nicknameOf(room, playerId),
     }));
-    const podium = ranking.map((entry, index) => `第 ${index + 1} 名 ${entry.nickname}`).join('、');
-    if (podium) pushLog(room, `本局結束：${podium}`);
+    if (ranking.length > 0) {
+      pushLog(room, { t: 'bigTwoOver', ranking: ranking.map((entry) => entry.nickname) });
+    }
 
     this.io.to(roomChannel(room.id)).emit('game:over', { ranking });
   }
@@ -650,14 +683,19 @@ export class GameServer {
       room.turnTimer = null;
     }
 
-    if (state.board.length > 0) pushLog(room, `公共牌　${cardsLabel(state.board)}`);
+    if (state.board.length > 0) pushLog(room, { t: 'board', board: cardIdsOf(state.board) });
     for (const entry of state.showdown) {
       const nickname = nicknameOf(room, entry.playerId);
       if (entry.hand) {
-        const suffix = entry.won > 0 ? `，贏得 ${entry.won}` : '';
-        pushLog(room, `${nickname}：${describeHoldemHand(entry.hand)}${suffix}`);
+        pushLog(room, {
+          t: 'showdown',
+          player: nickname,
+          category: entry.hand.category,
+          tiebreak: entry.hand.tiebreak.slice(),
+          won: entry.won,
+        });
       } else if (entry.won > 0) {
-        pushLog(room, `${nickname} 贏得 ${entry.won}（其他人都蓋牌了）`);
+        pushLog(room, { t: 'uncontested', player: nickname, won: entry.won });
       }
     }
   }
@@ -704,17 +742,22 @@ export class GameServer {
       if (!acted) return;
 
       if (acted.action === 'pass') {
-        pushLog(room, `${nickname} 逾時，自動 PASS`);
+        pushLog(room, { t: 'timeout', player: nickname, auto: 'pass' });
       } else {
-        pushLog(room, `${nickname} 逾時，自動出 ${describeCombo(acted.result.combo)}`);
+        pushLog(room, {
+          t: 'timeoutPlay',
+          player: nickname,
+          combo: acted.result.combo.type,
+          cards: cardIdsOf(acted.result.combo.cards),
+        });
         if (acted.result.rank !== null) {
-          pushLog(room, `${nickname} 出完了，第 ${acted.result.rank} 名`);
+          pushLog(room, { t: 'finished', player: nickname, rank: acted.result.rank });
         }
       }
     } else {
       const acted = autoActHoldem(room.seats, game.state);
       if (!acted) return;
-      pushLog(room, `${nickname} 逾時，自動${acted.action === 'check' ? '過牌' : '蓋牌'}`);
+      pushLog(room, { t: 'timeout', player: nickname, auto: acted.action });
     }
 
     this.afterGameAction(room);
@@ -739,5 +782,3 @@ export class GameServer {
     }, HOLDEM_SHOWDOWN_MS);
   }
 }
-
-export { cardsLabel };

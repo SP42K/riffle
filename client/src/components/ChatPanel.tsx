@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ChatMessage } from 'shared';
+import { useSkin } from '../state/skinContext';
 
 interface Props {
   title: string;
@@ -10,6 +11,7 @@ interface Props {
 
 /** 大廳與房間共用同一個面板，差別只在傳進來的訊息與送出函式。 */
 export function ChatPanel({ title, messages, myPlayerId, onSend }: Props) {
+  const { skin, t } = useSkin();
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -30,7 +32,7 @@ export function ChatPanel({ title, messages, myPlayerId, onSend }: Props) {
     <section className="chat">
       <h2 className="chat__title">{title}</h2>
       <div className="chat__list" ref={listRef}>
-        {messages.length === 0 && <p className="chat__empty">還沒有人說話</p>}
+        {messages.length === 0 && <p className="chat__empty">{t('chat.empty')}</p>}
         {messages.map((message) => (
           <p
             key={message.id}
@@ -43,7 +45,9 @@ export function ChatPanel({ title, messages, myPlayerId, onSend }: Props) {
               .join(' ')}
           >
             {!message.system && <span className="chat__author">{message.nickname}</span>}
-            <span className="chat__text">{message.text}</span>
+            <span className="chat__text">
+              {message.notice ? skin.notice(message.notice) : message.text}
+            </span>
           </p>
         ))}
       </div>
@@ -51,11 +55,11 @@ export function ChatPanel({ title, messages, myPlayerId, onSend }: Props) {
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="說點什麼…"
+          placeholder={t('chat.placeholder')}
           maxLength={200}
         />
         <button type="submit" disabled={!draft.trim()}>
-          送出
+          {t('chat.send')}
         </button>
       </form>
     </section>

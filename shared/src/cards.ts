@@ -22,6 +22,19 @@ export function makeCard(suit: Suit, rank: Rank): Card {
   return { id: `${suit}${RANK_LABEL[rank]}`, suit, rank };
 }
 
+const RANK_BY_LABEL = new Map<string, Rank>(RANKS.map((rank) => [RANK_LABEL[rank], rank]));
+
+/**
+ * makeCard 的反向操作：'SA' → { id: 'SA', suit: 'S', rank: 14 }。
+ * 戰報事件只帶 id，前端要把它還原成牌才能照自己的外觀渲染。認不得就回 null。
+ */
+export function parseCardId(id: string): Card | null {
+  const suit = id.slice(0, 1);
+  const rank = RANK_BY_LABEL.get(id.slice(1));
+  if (!(suit in SUIT_ORDER) || rank === undefined) return null;
+  return { id, suit: suit as Suit, rank };
+}
+
 /** 建立一副 52 張的牌。 */
 export function createDeck(): Card[] {
   const deck: Card[] = [];

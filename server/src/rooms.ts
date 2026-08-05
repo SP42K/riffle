@@ -12,11 +12,13 @@ import {
   type HoldemGameView,
   type HoldemSeatInfo,
   type JoinMode,
+  type LogEvent,
   type PlayerId,
   type RoomStatus,
   type RoomSummary,
   type RoomView,
   type SeatView,
+  type SystemNotice,
 } from 'shared';
 import { seatOfPlayer, type GameState, type Seats } from './gameEngine.js';
 import { actionsFor, type HoldemState } from './holdemEngine.js';
@@ -50,7 +52,7 @@ export interface Room {
   players: Map<PlayerId, PlayerMember>;
   spectators: Map<PlayerId, Member>;
   chat: ChatMessage[];
-  log: string[];
+  log: LogEvent[];
   game: RoomGame | null;
   /**
    * 德州撲克的房內籌碼表。房間活著就一直累積，離開再回來也保留，
@@ -218,8 +220,17 @@ export function makeChatMessage(
   return { id: `m${++messageSeq}`, playerId, nickname, text, at: Date.now() };
 }
 
-export function makeSystemMessage(text: string): ChatMessage {
-  return { id: `m${++messageSeq}`, playerId: null, nickname: '系統', text, at: Date.now(), system: true };
+export function makeSystemMessage(notice: SystemNotice): ChatMessage {
+  return {
+    id: `m${++messageSeq}`,
+    playerId: null,
+    nickname: 'system',
+    // text 只是給沒認得這個事件的前端當後備，正常情況下前端會照外觀自己組句子
+    text: notice.player,
+    at: Date.now(),
+    system: true,
+    notice,
+  };
 }
 
 export function pushChat(history: ChatMessage[], message: ChatMessage): void {
@@ -227,8 +238,8 @@ export function pushChat(history: ChatMessage[], message: ChatMessage): void {
   if (history.length > CHAT_HISTORY) history.splice(0, history.length - CHAT_HISTORY);
 }
 
-export function pushLog(room: Room, text: string): void {
-  room.log.push(text);
+export function pushLog(room: Room, event: LogEvent): void {
+  room.log.push(event);
   if (room.log.length > LOG_HISTORY) room.log.splice(0, room.log.length - LOG_HISTORY);
 }
 

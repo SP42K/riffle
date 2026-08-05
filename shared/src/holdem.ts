@@ -1,5 +1,5 @@
 import { combinations } from './combos.js';
-import { SUIT_ORDER, type Card, type PlayerId } from './types.js';
+import { SUIT_ORDER, type Card, type PlayerId, type SeatAction } from './types.js';
 
 // ---------------------------------------------------------------------------
 // 點數
@@ -205,8 +205,16 @@ export function compareHoldemHands(a: HoldemHand, b: HoldemHand): number {
 const label = (value: number | undefined): string => HOLDEM_RANK_LABEL[value ?? 0] ?? '?';
 
 export function describeHoldemHand(hand: HoldemHand): string {
-  const [first, second] = hand.tiebreak;
-  switch (hand.category) {
+  return describeHoldemCategory(hand.category, hand.tiebreak);
+}
+
+/** 只用牌型與比大小向量描述牌力。戰報事件不帶那五張牌，所以走這一條。 */
+export function describeHoldemCategory(
+  category: HoldemCategory,
+  tiebreak: readonly number[],
+): string {
+  const [first, second] = tiebreak;
+  switch (category) {
     case 'straightFlush':
       return first === 14 ? '皇家同花順' : `同花順 ${label(first)} 高`;
     case 'fourOfAKind':
@@ -324,8 +332,8 @@ export interface HoldemSeatInfo {
   holeCount: number;
   isButton: boolean;
   blind: 'sb' | 'bb' | null;
-  /** 顯示用的最近動作，例如 '跟注 20'。 */
-  lastAction: string | null;
+  /** 最近一次動作。給的是結構，句子由前端依外觀自己組。 */
+  lastAction: SeatAction | null;
 }
 
 export interface HoldemPotView {

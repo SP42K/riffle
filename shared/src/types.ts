@@ -1,4 +1,4 @@
-import type { HoldemGameView } from './holdem.js';
+import type { HoldemCategory, HoldemGameView, HoldemStreet } from './holdem.js';
 
 // ---------------------------------------------------------------------------
 // 牌
@@ -134,7 +134,17 @@ export interface ChatMessage {
   text: string;
   at: number;
   system?: boolean;
+  /** 系統訊息才有：結構化的事件，句子由前端依外觀組，text 只是後備。 */
+  notice?: SystemNotice;
 }
+
+/** 房間內的系統通知。跟 LogEvent 一樣只給結構，不給句子。 */
+export type SystemNotice =
+  | { t: 'created'; player: string }
+  | { t: 'joined'; player: string }
+  | { t: 'spectating'; player: string }
+  | { t: 'left'; player: string }
+  | { t: 'disconnected'; player: string };
 
 /** 大廳房間列表的一列。 */
 export interface RoomSummary {
@@ -201,6 +211,47 @@ export interface BigTwoGameView {
 /** 依 type 分派的玩法快照。前端用 game.type 收窄。 */
 export type GameView = BigTwoGameView | HoldemGameView;
 
+// ---------------------------------------------------------------------------
+// 戰報
+// ---------------------------------------------------------------------------
+
+/**
+ * 戰報事件。伺服器只送結構，句子由前端依外觀（skin）自己組。
+ * 這樣隱匿模式才有辦法把「小明 出 對子 ♠A ♥A」講成工作用語。
+ * cards / board 一律放 card id（'SA'、'D3'），讓前端用自己的卡面寫法渲染。
+ */
+export type LogEvent =
+  // 大老二
+  | { t: 'bigTwoStart'; players: number }
+  | { t: 'lead'; player: string }
+  | { t: 'play'; player: string; combo: ComboType; cards: string[] }
+  | { t: 'pass'; player: string }
+  | { t: 'finished'; player: string; rank: number }
+  | { t: 'bigTwoOver'; ranking: string[] }
+  // 德州撲克
+  | { t: 'rebuy'; player: string; amount: number }
+  | { t: 'holdemStart'; handNo: number; smallBlind: number; bigBlind: number }
+  | { t: 'button'; player: string }
+  | { t: 'bet'; player: string; action: SeatAction }
+  | { t: 'street'; street: HoldemStreet; board: string[] }
+  | { t: 'board'; board: string[] }
+  | { t: 'showdown'; player: string; category: HoldemCategory; tiebreak: number[]; won: number }
+  | { t: 'uncontested'; player: string; won: number }
+  // 逾時代打
+  | { t: 'timeout'; player: string; auto: 'pass' | 'check' | 'fold' }
+  | { t: 'timeoutPlay'; player: string; combo: ComboType; cards: string[] };
+
+/**
+ * 一次下注動作的結構化描述。座位上的「最近動作」與戰報共用。
+ * bet/raise 的 amount 是這次放進池的量，to 是這一街總共加到多少。
+ */
+export interface SeatAction {
+  kind: 'sb' | 'bb' | 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'leave';
+  amount: number;
+  to?: number;
+  allIn: boolean;
+}
+
 /** 伺服器推給單一 socket 的房間快照。每個人收到的內容不同。 */
 export interface RoomView {
   id: string;
@@ -223,7 +274,7 @@ export interface RoomView {
    */
   chips: Record<PlayerId, number> | null;
   game: GameView | null;
-  log: string[];
+  log: LogEvent[];
 }
 
 // ---------------------------------------------------------------------------

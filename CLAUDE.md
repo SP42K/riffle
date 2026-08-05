@@ -125,8 +125,10 @@ an empty room is deleted.
 
 `client/src/state/GameProvider.tsx` owns the socket and every piece of server state; pages read it
 through `useGame()`. `run(action)` is the standard wrapper for ack-based emits — it surfaces the
-server's error message as a toast, so handlers should not write their own try/catch. `emitWithAck`
-in `net/socket.ts` promisifies socket.io acks, rejecting with `error.message`.
+error as a toast, so handlers should not write their own try/catch. `emitWithAck` in
+`net/socket.ts` promisifies socket.io acks, rejecting with an `AckError` that carries the server's
+`code`; `run` looks that code up in the active skin's table and only falls back to the server's
+Chinese message when the skin has no entry.
 
 `App.tsx` routes on state, not URLs: no nickname → gate, `room !== null` → `Room`, else `Lobby`.
 `pages/Room.tsx` is a two-line dispatcher on `room.gameType`. `pages/RoomShell.tsx` owns everything
@@ -134,14 +136,45 @@ game-agnostic (header, seat row, log, spectator/chat aside, footer slot); `BigTw
 `HoldemTable.tsx` supply the table centre and the controls. Put shared chrome in `RoomShell`, not in
 either table. The dev server proxies `/socket.io` (including ws) to `:3001`.
 
+### 隱匿模式（skins）
+
+The product is played at work, so **no user-facing string is hard-coded in a component**. Every
+label, card face, log line and error goes through the active skin (`client/src/skins/`):
+
+- `text.ts` holds `CASINO_TEXT` and derives `TextKey` from it — every other skin's `text` must
+  cover the same keys, so a missing translation is a compile error. `t('key', { n })` fills
+  `{name}` templates.
+- `casino.ts` (the original 牌桌 look), `vscode.ts` and `terminal.ts` each implement `Skin`
+  (`skins/types.ts`): text table, `combo`/`gameType`/`street`/`holdemCategory` label maps that
+  shadow the `shared` ones, `card()` → `CardFace`, `action()`, `describeHand()`, `formatLog()`,
+  `notice()`, plus a `Chrome` wrapper and a `Boss` full-screen cover.
+- `skins.css` restyles by `[data-skin='…']` only; `styles.css` stays the casino baseline. Card
+  colour comes from `CardFace.tone` (`a`/`b`/`c`/`d` = ♠/♥/♦/♣ — deliberately neutral class names).
+  Anything Chinese living in CSS (e.g. `.table__result li::before`) needs an override there too.
+- `state/SkinProvider.tsx` owns prefs (`localStorage` `ws.prefs`), the skin-cycle hotkey, the
+  boss key and blur/mouse-leave auto-hide, and swaps `document.title` + favicon. Hiding sets
+  `visibility:hidden` on `.app-root` — it never unmounts, so the socket and game state stay live.
+  `state/skinContext.ts` holds the context/hook so `SkinProvider` and `pages/SkinSettings.tsx`
+  don't import each other.
+
+Because of this, **the server never sends prose**. `RoomView.log` is `LogEvent[]`, system chat
+messages carry a structured `notice`, and `HoldemSeatInfo.lastAction` is a `SeatAction` — all
+three are unions in `shared/src/types.ts` and the sentence is built client-side by the skin. Adding
+a `pushLog` call means adding a `LogEvent` variant and a case in all three `formatLog`s.
+Storage keys are neutral on purpose (`ws.sid` / `ws.user` / `ws.prefs`, migrated from the old
+`bigtwo:` ones) — nicknames, room names and chat text are the only things the disguise can't cover.
+
 ## Adding a rule or event
 
 - New Big Two combo type → `ComboType` + `COMBO_LABEL` + `FIVE_CARD_ORDER` in `types.ts`, detection
-  in `identifyCombo`, ordering in `compareCombo`, then tests in `shared/src/combos.test.ts`.
-  Both the server validator and the client button pick it up for free.
+  in `identifyCombo`, ordering in `compareCombo`, then tests in `shared/src/combos.test.ts`, and a
+  label in each skin's `combo` map. Both the server validator and the client button pick it up for
+  free.
+- New user-facing string → add the key to `CASINO_TEXT` first; the compiler then demands it from
+  `vscode.ts` and `terminal.ts`. Never put the literal in the component.
 - New socket event → add to `ClientToServerEvents` / `ServerToClientEvents` in `types.ts` first;
   both ends are typed off those interfaces, so the compiler will point at every site to update.
 - New game mode → add to `GameType` / `GAME_TYPE_LABEL` / `SEAT_LIMITS`, add a `GameView` union
   member, a pure engine satisfying `TurnBased`, a branch in `buildRoomView` and in the four
   dispatch points in `handlers.ts` (create / start / action / autoAct), and a client table
-  component under `RoomShell`.
+  component under `RoomShell` — plus its `LogEvent` variants and skin vocabulary.

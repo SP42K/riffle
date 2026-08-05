@@ -181,11 +181,14 @@ select:focus {
   border-radius: 4px;
   padding: 2px;
 }
-.card--red {
-  color: #c62828;
-}
-.card--black {
+/* 色調 a/b/c/d 依序是 黑桃/紅心/方塊/梅花；牌桌外觀就是傳統的紅黑兩色 */
+.card--ta,
+.card--td {
   color: #17201c;
+}
+.card--tb,
+.card--tc {
+  color: #c62828;
 }
 .card--clickable {
   cursor: pointer;
