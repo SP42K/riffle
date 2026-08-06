@@ -1,5 +1,13 @@
 import type { ReactNode } from 'react';
-import { BIG_TWO_RULE_KEYS, bigTwoPresetOf, sortCards, type RoomView } from 'shared';
+import {
+  BIG_TWO_RULE_KEYS,
+  MONOPOLY_OPTION_KEYS,
+  MONOPOLY_OPTION_SPEC,
+  bigTwoPresetOf,
+  sortCards,
+  type MonopolyOptionKey,
+  type RoomView,
+} from 'shared';
 import { ChatPanel } from '../components/ChatPanel';
 import { PlayingCard } from '../components/PlayingCard';
 import { Seat } from '../components/Seat';
@@ -37,6 +45,21 @@ export function RoomShell({ room, center, footer, isMyTurn }: Props) {
   const ruleDetails =
     rules && rulePreset === 'custom' ? BIG_TWO_RULE_KEYS.filter((key) => rules[key]) : [];
 
+  // 大富翁沒有套組，只列跟預設不一樣的選項 —— 全開全關都掛上去的話標題列會爆掉
+  const options = room.monopolyOptions;
+  const optionTags: { key: MonopolyOptionKey; text: string }[] = options
+    ? MONOPOLY_OPTION_KEYS.flatMap((key) => {
+        const spec = MONOPOLY_OPTION_SPEC[key];
+        const value = options[key];
+        if (value === spec.default) return [];
+        const text =
+          spec.kind === 'flag'
+            ? skin.monopolyOption[key]
+            : `${skin.monopolyOption[key]} ${value}`;
+        return [{ key, text }];
+      })
+    : [];
+
   return (
     <div className="room" data-myturn={isMyTurn ? 'true' : undefined}>
       <header className="room__header">
@@ -48,6 +71,11 @@ export function RoomShell({ room, center, footer, isMyTurn }: Props) {
           {ruleDetails.map((key) => (
             <span key={key} className="tag tag--rules">
               {skin.bigTwoRule[key]}
+            </span>
+          ))}
+          {optionTags.map((tag) => (
+            <span key={tag.key} className="tag tag--rules">
+              {tag.text}
             </span>
           ))}
           {isSpectator && <span className="tag tag--spectator">{t('room.spectating')}</span>}
@@ -91,6 +119,7 @@ export function RoomShell({ room, center, footer, isMyTurn }: Props) {
                 isTurn={game?.turnPlayerId === seat.playerId}
                 isMe={false}
                 playing={playing}
+                gameType={room.gameType}
                 game={game}
                 chips={room.chips?.[seat.playerId]}
               />

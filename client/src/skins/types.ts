@@ -9,6 +9,12 @@ import type {
   HoldemHand,
   HoldemStreet,
   LogEvent,
+  MonopolyCardId,
+  MonopolyEndReason,
+  MonopolyGroup,
+  MonopolyOptionKey,
+  MonopolyPhase,
+  MonopolyTileId,
   SeatAction,
   SystemNotice,
 } from 'shared';
@@ -47,7 +53,21 @@ export interface Skin {
   bigTwoRule: Record<BigTwoRuleKey, string>;
   street: Record<HoldemStreet, string>;
   holdemCategory: Record<HoldemCategory, string>;
-  /** ack error code → 文案。查不到就退回伺服器給的訊息。 */
+
+  /** 棋盤上 40 格的名字。牌桌是街名，偽裝外觀是檔名或路徑。 */
+  monopolyTile: Record<MonopolyTileId, string>;
+  monopolyGroup: Record<MonopolyGroup, string>;
+  monopolyOption: Record<MonopolyOptionKey, string>;
+  monopolyCard: Record<MonopolyCardId, string>;
+  monopolyPhase: Record<MonopolyPhase, string>;
+  monopolyEnd: Record<MonopolyEndReason, string>;
+  /** 一塊地上的建物寫法，n 為 0~5，5 是飯店。 */
+  monopolyHouses(n: number): string;
+
+  /**
+   * ack error code → 文案。查不到就退回伺服器給的中文訊息 ——
+   * 也就是說偽裝外觀漏掉一條錯誤碼，玩家點錯一次就會看到中文。新增錯誤碼時要補齊。
+   */
   errors: Partial<Record<string, string>>;
 
   card(card: Card): CardFace;

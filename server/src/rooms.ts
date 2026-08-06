@@ -2,9 +2,16 @@ import {
   BIG_TWO_RULE_KEYS,
   CHAT_HISTORY,
   DEFAULT_BIG_TWO_RULES,
+  DEFAULT_MONOPOLY_OPTIONS,
+  GAME_TYPES,
   HOLDEM_START_CHIPS,
   LOG_HISTORY,
+  MONOPOLY_ESTATE_IDS,
+  MONOPOLY_OPTION_KEYS,
+  MONOPOLY_OPTION_SPEC,
   SEAT_LIMITS,
+  liquidValueOf,
+  netWorthOf,
   type BigTwoGameView,
   type BigTwoRuleKey,
   type BigTwoRules,
@@ -17,6 +24,11 @@ import {
   type HoldemSeatInfo,
   type JoinMode,
   type LogEvent,
+  type MonopolyEstateView,
+  type MonopolyGameView,
+  type MonopolyOptionKey,
+  type MonopolyOptions,
+  type MonopolySeatInfo,
   type PlayerId,
   type RoomStatus,
   type RoomSummary,
@@ -26,7 +38,14 @@ import {
 } from 'shared';
 import { seatOfPlayer, type GameState, type Seats } from './gameEngine.js';
 import { actionsFor, type HoldemState } from './holdemEngine.js';
-import type { TurnBased } from './turnBased.js';
+import {
+  actionsForMonopoly,
+  monopolyCashOf,
+  monopolyPositionOf,
+  type MonopolyEvent,
+  type MonopolyState,
+} from './monopolyEngine.js';
+import { assertNeverGame, type TurnBased } from './turnBased.js';
 
 export interface Member {
   playerId: PlayerId;
@@ -41,17 +60,20 @@ export interface PlayerMember extends Member {
   ready: boolean;
 }
 
-/** 依玩法分派的牌局。兩種 state 都滿足 TurnBased，計時與狀態判斷不必分支。 */
+/** 依玩法分派的牌局。三種 state 都滿足 TurnBased，計時與狀態判斷不必分支。 */
 export type RoomGame =
   | { type: 'bigTwo'; state: GameState }
-  | { type: 'holdem'; state: HoldemState };
+  | { type: 'holdem'; state: HoldemState }
+  | { type: 'monopoly'; state: MonopolyState };
 
 export interface Room {
   id: string;
   name: string;
   gameType: GameType;
-  /** 大老二的規則開關。建房時決定，德州撲克房用不到但一律有值。 */
+  /** 大老二的規則開關。建房時決定，其他玩法用不到但一律有值。 */
   bigTwoRules: BigTwoRules;
+  /** 大富翁的房間選項。建房時決定，其他玩法用不到但一律有值。 */
+  monopolyOptions: MonopolyOptions;
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -95,7 +117,8 @@ export function generateRoomId(taken: (id: string) => boolean): string {
 }
 
 export function normalizeGameType(value: unknown): GameType {
-  return value === 'holdem' ? 'holdem' : 'bigTwo';
+  // 照 GAME_TYPES 查，新增玩法時這裡不必再動 —— 寫死成三元的話新玩法會被默默吃成大老二
+  return GAME_TYPES.find((type) => type === value) ?? 'bigTwo';
 }
 
 /** 逐鍵消毒：只收布林值，缺的或來路不明的一律吃預設（台灣慣例）。 */
@@ -108,6 +131,34 @@ export function normalizeBigTwoRules(value: unknown): BigTwoRules {
   return rules;
 }
 
+/**
+ * 逐鍵消毒，型別與範圍照 MONOPOLY_OPTION_SPEC 走。
+ * 多一條大老二沒有的規則：三個結算條件全關的話強制補上破產淘汰，
+ * 否則這局永遠結束不了。
+ */
+export function normalizeMonopolyOptions(value: unknown): MonopolyOptions {
+  const input = (value ?? {}) as Partial<Record<MonopolyOptionKey, unknown>>;
+  // 選項有布林也有數字，逐鍵寫回聯集型別會被 TS 擋，所以先組成草稿再一次收斂
+  const draft: Record<string, boolean | number> = {};
+
+  for (const key of MONOPOLY_OPTION_KEYS) {
+    const spec = MONOPOLY_OPTION_SPEC[key];
+    const raw = input[key];
+    if (spec.kind === 'flag') {
+      draft[key] = typeof raw === 'boolean' ? raw : spec.default;
+    } else {
+      const n = Math.floor(Number(raw));
+      draft[key] = Number.isFinite(n) ? Math.min(spec.max, Math.max(spec.min, n)) : spec.default;
+    }
+  }
+
+  const options = { ...DEFAULT_MONOPOLY_OPTIONS, ...draft } as MonopolyOptions;
+  if (!options.lastStanding && options.roundLimit <= 0 && options.targetNetWorth <= 0) {
+    options.lastStanding = true;
+  }
+  return options;
+}
+
 export function clampMaxPlayers(value: unknown, gameType: GameType): number {
   const limits = SEAT_LIMITS[gameType];
   const n = Math.floor(Number(value));
@@ -115,19 +166,24 @@ export function clampMaxPlayers(value: unknown, gameType: GameType): number {
   return Math.min(limits.max, Math.max(limits.min, n));
 }
 
-export function createRoom(
-  id: string,
-  name: string,
-  gameType: GameType,
-  maxPlayers: number,
-  bigTwoRules: BigTwoRules,
-  host: Member,
-): Room {
+export interface CreateRoomInput {
+  id: string;
+  name: string;
+  gameType: GameType;
+  maxPlayers: number;
+  bigTwoRules: BigTwoRules;
+  monopolyOptions: MonopolyOptions;
+  host: Member;
+}
+
+export function createRoom(input: CreateRoomInput): Room {
+  const { id, name, gameType, maxPlayers, bigTwoRules, monopolyOptions, host } = input;
   const room: Room = {
     id,
     name,
     gameType,
     bigTwoRules,
+    monopolyOptions,
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -265,6 +321,89 @@ export function nicknameOf(room: Room, playerId: PlayerId): string {
   return memberOf(room, playerId)?.nickname ?? '(已離開)';
 }
 
+/**
+ * 大富翁引擎事件 → 戰報。
+ * 這一層存在的理由是「一個動作會生出好幾行戰報」（擲骰 → 移動 → 付租 → 破產），
+ * 另外兩種玩法在 handler 裡直接組一兩行就夠了。
+ */
+export function monopolyLogOf(room: Room, event: MonopolyEvent): LogEvent {
+  const who = (playerId: PlayerId) => nicknameOf(room, playerId);
+  switch (event.t) {
+    case 'move':
+      return { t: 'move', player: who(event.player), dice: event.dice, tile: event.tile };
+    case 'buy':
+      return { t: 'buy', player: who(event.player), tile: event.tile, price: event.price };
+    case 'rent':
+      return {
+        t: 'rent',
+        player: who(event.player),
+        owner: who(event.owner),
+        tile: event.tile,
+        amount: event.amount,
+      };
+    case 'tax':
+      return { t: 'tax', player: who(event.player), tile: event.tile, amount: event.amount };
+    case 'cash':
+      return {
+        t: 'monopolyCash',
+        player: who(event.player),
+        amount: event.amount,
+        source: event.source,
+      };
+    case 'auctionStart':
+      return { t: 'auctionStart', tile: event.tile };
+    case 'bid':
+      return { t: 'bid', player: who(event.player), amount: event.amount };
+    case 'auctionEnd':
+      return {
+        t: 'auctionEnd',
+        player: event.player ? who(event.player) : null,
+        tile: event.tile,
+        amount: event.amount,
+      };
+    case 'build':
+      return {
+        t: 'build',
+        player: who(event.player),
+        tile: event.tile,
+        houses: event.houses,
+        sold: event.sold,
+      };
+    case 'mortgage':
+      return {
+        t: 'mortgage',
+        player: who(event.player),
+        tile: event.tile,
+        amount: event.amount,
+        redeem: event.redeem,
+      };
+    case 'drawCard':
+      return { t: 'drawCard', player: who(event.player), card: event.card };
+    case 'jailed':
+      return { t: 'jailed', player: who(event.player) };
+    case 'freed':
+      return { t: 'freed', player: who(event.player), how: event.how };
+    case 'trade':
+      return {
+        t: 'trade',
+        from: who(event.from),
+        to: who(event.to),
+        give: event.give,
+        giveCash: event.giveCash,
+        want: event.want,
+        wantCash: event.wantCash,
+      };
+    case 'bankrupt':
+      return {
+        t: 'bankrupt',
+        player: who(event.player),
+        creditor: event.creditor ? who(event.creditor) : null,
+      };
+    case 'over':
+      return { t: 'monopolyOver', reason: event.reason, ranking: event.ranking.map(who) };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 快照
 // ---------------------------------------------------------------------------
@@ -280,6 +419,7 @@ export function buildSummary(room: Room): RoomSummary {
     name: room.name,
     gameType: room.gameType,
     bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
+    monopolyOptions: room.gameType === 'monopoly' ? room.monopolyOptions : null,
     hostNickname: nicknameOf(room, room.hostId),
     playerCount: room.players.size,
     maxPlayers: room.maxPlayers,
@@ -381,18 +521,116 @@ function buildHoldemGameView(room: Room, game: HoldemState, viewerId: PlayerId):
   };
 }
 
-function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
-  if (!room.game) return null;
-  return room.game.type === 'bigTwo'
-    ? buildBigTwoGameView(room, room.game.state)
-    : buildHoldemGameView(room, room.game.state, viewerId);
+function buildMonopolyGameView(
+  room: Room,
+  game: MonopolyState,
+  viewerId: PlayerId,
+): MonopolyGameView {
+  const seats: Record<number, MonopolySeatInfo> = {};
+  for (const [seat, playerId] of room.seats.entries()) {
+    if (!playerId || !room.players.has(playerId)) continue;
+    const cash = monopolyCashOf(game, playerId);
+    seats[seat] = {
+      cash,
+      position: monopolyPositionOf(game, playerId),
+      inJail: game.inJail.has(playerId),
+      jailTurns: game.jailTurns.get(playerId) ?? 0,
+      jailCards: game.jailCards.get(playerId) ?? 0,
+      bankrupt: game.bankrupt.has(playerId),
+      netWorth: netWorthOf(cash, game.estates, playerId),
+    };
+  }
+
+  const estates: MonopolyEstateView[] = MONOPOLY_ESTATE_IDS.map((tile) => ({
+    tile,
+    owner: game.estates[tile].owner,
+    houses: game.estates[tile].houses,
+    mortgaged: game.estates[tile].mortgaged,
+  }));
+
+  const debtor = game.debt ? (room.seats[game.debt.debtorSeat] ?? null) : null;
+
+  return {
+    type: 'monopoly',
+    turnPlayerId: game.over ? null : (room.seats[game.turnSeat] ?? null),
+    turnDeadline: game.turnDeadline,
+    over: game.over,
+    phase: game.phase,
+    round: game.round,
+    activePlayerId: game.over ? null : (room.seats[game.activeSeat] ?? null),
+    dice: game.dice ? [game.dice[0], game.dice[1]] : null,
+    parkingPot: game.parkingPot,
+    houseSupply: game.houseSupply,
+    hotelSupply: game.hotelSupply,
+    seats,
+    estates,
+    auction: game.auction
+      ? {
+          tile: game.auction.tile,
+          highBid: game.auction.highBid,
+          highBidderId: game.auction.highBidder,
+          bidderId: room.seats[game.auction.bidderSeat] ?? null,
+        }
+      : null,
+    trade: game.trade
+      ? {
+          fromId: room.seats[game.trade.fromSeat] ?? '',
+          toId: room.seats[game.trade.toSeat] ?? '',
+          give: game.trade.give.slice(),
+          giveCash: game.trade.giveCash,
+          want: game.trade.want.slice(),
+          wantCash: game.trade.wantCash,
+        }
+      : null,
+    debt:
+      game.debt && debtor
+        ? {
+            debtorId: debtor,
+            creditorId: game.debt.creditor,
+            amount: game.debt.amount,
+            shortfall: Math.max(0, game.debt.amount - monopolyCashOf(game, debtor)),
+            canRaise: liquidValueOf(game.estates, debtor),
+          }
+        : null,
+    result: game.result
+      ? { reason: game.result.reason, ranking: game.result.ranking.slice() }
+      : null,
+    myActions: room.players.has(viewerId)
+      ? actionsForMonopoly(room.seats, game, viewerId)
+      : null,
+  };
 }
 
-/** 這位玩家自己看得到的牌：大老二是手牌，德州撲克是底牌。 */
-function handOf(game: RoomGame, playerId: PlayerId): Card[] {
-  const cards =
-    game.type === 'bigTwo' ? game.state.hands.get(playerId) : game.state.hole.get(playerId);
-  return cards?.slice() ?? [];
+function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
+  const game = room.game;
+  if (!game) return null;
+  switch (game.type) {
+    case 'bigTwo':
+      return buildBigTwoGameView(room, game.state);
+    case 'holdem':
+      return buildHoldemGameView(room, game.state, viewerId);
+    case 'monopoly':
+      return buildMonopolyGameView(room, game.state, viewerId);
+    default:
+      return assertNeverGame(game);
+  }
+}
+
+/**
+ * 這位玩家自己看得到的牌：大老二是手牌，德州撲克是底牌。
+ * 大富翁沒有暗牌，回 null —— 呼叫端據此完全不建「上帝視角」面板。
+ */
+function handOf(game: RoomGame, playerId: PlayerId): Card[] | null {
+  switch (game.type) {
+    case 'bigTwo':
+      return game.state.hands.get(playerId)?.slice() ?? [];
+    case 'holdem':
+      return game.state.hole.get(playerId)?.slice() ?? [];
+    case 'monopoly':
+      return null;
+    default:
+      return assertNeverGame(game);
+  }
 }
 
 /**
@@ -406,10 +644,17 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
   const game = room.game;
   let allHands: Record<PlayerId, Card[]> | null = null;
   if (mode === 'spectate' && game) {
-    allHands = {};
+    const table: Record<PlayerId, Card[]> = {};
+    let any = false;
     for (const playerId of room.seats) {
-      if (playerId && room.players.has(playerId)) allHands[playerId] = handOf(game, playerId);
+      if (!playerId || !room.players.has(playerId)) continue;
+      const cards = handOf(game, playerId);
+      if (!cards) continue; // 這個玩法沒有暗牌
+      table[playerId] = cards;
+      any = true;
     }
+    // 全空就維持 null，觀戰面板才不會長出一個沒有內容的「上帝視角」標題
+    if (any) allHands = table;
   }
 
   let chips: Record<PlayerId, number> | null = null;
@@ -425,6 +670,7 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     name: room.name,
     gameType: room.gameType,
     bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
+    monopolyOptions: room.gameType === 'monopoly' ? room.monopolyOptions : null,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),

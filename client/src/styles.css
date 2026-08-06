@@ -943,6 +943,284 @@ select:focus {
   font-size: 0.9rem;
 }
 
+/* 大富翁 ------------------------------------------------------------------ */
+
+.monopoly__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.monopoly__phase {
+  color: var(--gold);
+  font-weight: 700;
+}
+.monopoly__active {
+  margin: 0.4rem 0 0;
+  font-size: 0.9rem;
+}
+
+.monopoly__panel {
+  margin: 0.6rem 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.monopoly__panel h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.9rem;
+}
+.monopoly__panel p {
+  margin: 0.15rem 0;
+  font-size: 0.85rem;
+}
+.monopoly__debt {
+  border-left-color: var(--red);
+}
+
+/* 棋盤：一列一格的清單，捲動容器高度固定 */
+.board {
+  margin-top: 0.8rem;
+}
+.board__title {
+  margin: 0 0 0.4rem;
+}
+.board__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 19rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.2);
+}
+.board__row {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr) 5.5rem 4.5rem 4.5rem;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.22rem 0.5rem;
+  font-size: 0.82rem;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.board__row:last-child {
+  border-bottom: none;
+}
+.board__row[data-here='true'] {
+  background: rgba(227, 179, 65, 0.12);
+}
+.board__row[data-mine='true'] .board__name {
+  color: var(--gold);
+}
+/* 色組 → 左側色條。這組代號跟花色的 a~d 是不同的一套，刻意取中性名 */
+.board__row[data-tone='a'] {
+  border-left-color: #8a5a3b;
+}
+.board__row[data-tone='b'] {
+  border-left-color: #7fc4e8;
+}
+.board__row[data-tone='c'] {
+  border-left-color: #d97fb0;
+}
+.board__row[data-tone='d'] {
+  border-left-color: #e0913f;
+}
+.board__row[data-tone='e'] {
+  border-left-color: #d94f4f;
+}
+.board__row[data-tone='f'] {
+  border-left-color: #e3d341;
+}
+.board__row[data-tone='g'] {
+  border-left-color: #5ac27a;
+}
+.board__row[data-tone='h'] {
+  border-left-color: #5a86d9;
+}
+.board__row[data-tone='i'] {
+  border-left-color: #b7b7b7;
+}
+.board__row[data-tone='j'] {
+  border-left-color: #6fd6c4;
+}
+.board__row[data-kind='go'],
+.board__row[data-kind='jail'],
+.board__row[data-kind='goToJail'],
+.board__row[data-kind='freeParking'],
+.board__row[data-kind='tax'],
+.board__row[data-kind='chance'],
+.board__row[data-kind='fate'] {
+  color: var(--muted);
+}
+.board__tokens {
+  display: flex;
+  gap: 0.15rem;
+  min-height: 1.2rem;
+}
+.board__token {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.board__token[data-mine='true'] {
+  background: var(--gold);
+  color: #201803;
+}
+.board__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board__owner,
+.board__value {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board__houses {
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+/* 底部：現金、地產清單與每塊地的四顆小鈕 */
+.monopoly__mine {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.monopoly__me-info {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.monopoly__estates h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.monopoly__estates ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.monopoly__estates li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.04);
+}
+.monopoly__estates li[data-mortgaged='true'] {
+  opacity: 0.5;
+}
+.monopoly__estate-actions {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+.btn--small {
+  padding: 0.15rem 0.4rem;
+  font-size: 0.72rem;
+}
+
+.monopoly__bid {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.monopoly__bid-input {
+  width: 6rem;
+}
+
+/* 提出交易的雙欄面板 */
+.monopoly__trade {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.monopoly__trade-target {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.monopoly__trade-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+.monopoly__trade-col h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.monopoly__trade-col ul {
+  list-style: none;
+  margin: 0 0 0.4rem;
+  padding: 0;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+.monopoly__trade-col li label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  padding: 0.1rem 0;
+  cursor: pointer;
+}
+.monopoly__trade-cash {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.monopoly__trade-cash input {
+  width: 6rem;
+}
+.monopoly__trade-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.lobby__rules--monopoly input[type='number'] {
+  width: 6rem;
+}
+
+.seat__tile {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 @media (max-width: 860px) {
   .lobby__body,
   .room__body {
@@ -951,6 +1229,16 @@ select:focus {
   .card,
   .holdem__slot {
     --card-w: 44px;
+  }
+  .board__row {
+    grid-template-columns: 3rem minmax(0, 1fr) 4rem;
+  }
+  .board__houses,
+  .board__value {
+    display: none;
+  }
+  .monopoly__trade-cols {
+    grid-template-columns: minmax(0, 1fr);
   }
   .room-row {
     grid-template-columns: minmax(0, 1fr);

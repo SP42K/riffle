@@ -1,4 +1,14 @@
 import type { HoldemCategory, HoldemGameView, HoldemStreet } from './holdem.js';
+import type {
+  MonopolyAction,
+  MonopolyCardId,
+  MonopolyEndReason,
+  MonopolyEstateId,
+  MonopolyGameView,
+  MonopolyOptions,
+  MonopolyPhase,
+  MonopolyTileId,
+} from './monopoly.js';
 
 // ---------------------------------------------------------------------------
 // 牌
@@ -122,13 +132,14 @@ export interface Combo {
 export type PlayerId = string;
 
 /** 一個房間只玩一種玩法，建房時決定。 */
-export type GameType = 'bigTwo' | 'holdem';
+export type GameType = 'bigTwo' | 'holdem' | 'monopoly';
 
-export const GAME_TYPES: readonly GameType[] = ['bigTwo', 'holdem'];
+export const GAME_TYPES: readonly GameType[] = ['bigTwo', 'holdem', 'monopoly'];
 
 export const GAME_TYPE_LABEL: Record<GameType, string> = {
   bigTwo: '大老二',
   holdem: '德州撲克',
+  monopoly: '大富翁',
 };
 
 /**
@@ -219,6 +230,7 @@ export function bigTwoPresetOf(rules: BigTwoRules): BigTwoPreset {
 export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
   bigTwo: { min: 2, max: 4 },
   holdem: { min: 2, max: 9 },
+  monopoly: { min: 2, max: 6 },
 };
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -250,8 +262,10 @@ export interface RoomSummary {
   id: string;
   name: string;
   gameType: GameType;
-  /** 大老二才有意義，德州撲克為 null。 */
+  /** 只有大老二房有值，其他玩法為 null。 */
   bigTwoRules: BigTwoRules | null;
+  /** 只有大富翁房有值，其他玩法為 null。 */
+  monopolyOptions: MonopolyOptions | null;
   hostNickname: string;
   playerCount: number;
   maxPlayers: number;
@@ -310,7 +324,7 @@ export interface BigTwoGameView {
 }
 
 /** 依 type 分派的玩法快照。前端用 game.type 收窄。 */
-export type GameView = BigTwoGameView | HoldemGameView;
+export type GameView = BigTwoGameView | HoldemGameView | MonopolyGameView;
 
 // ---------------------------------------------------------------------------
 // 戰報
@@ -338,9 +352,38 @@ export type LogEvent =
   | { t: 'board'; board: string[] }
   | { t: 'showdown'; player: string; category: HoldemCategory; tiebreak: number[]; won: number }
   | { t: 'uncontested'; player: string; won: number }
+  // 大富翁
+  | { t: 'monopolyStart'; players: number; startCash: number }
+  | { t: 'move'; player: string; dice: [number, number]; tile: MonopolyTileId }
+  | { t: 'buy'; player: string; tile: MonopolyEstateId; price: number }
+  | { t: 'rent'; player: string; owner: string; tile: MonopolyEstateId; amount: number }
+  | { t: 'tax'; player: string; tile: MonopolyTileId; amount: number }
+  /** 進出帳但不是租金也不是稅：薪水、停車場獎金、卡片、玩家之間的收付。 */
+  | { t: 'monopolyCash'; player: string; amount: number; source: 'salary' | 'parking' | 'card' | 'players' }
+  | { t: 'auctionStart'; tile: MonopolyEstateId }
+  | { t: 'bid'; player: string; amount: number }
+  | { t: 'auctionEnd'; player: string | null; tile: MonopolyEstateId; amount: number }
+  /** houses 是動完之後的等級（5 為飯店）；sold 為 true 表示拆掉一棟。 */
+  | { t: 'build'; player: string; tile: MonopolyEstateId; houses: number; sold: boolean }
+  | { t: 'mortgage'; player: string; tile: MonopolyEstateId; amount: number; redeem: boolean }
+  | { t: 'drawCard'; player: string; card: MonopolyCardId }
+  | { t: 'jailed'; player: string }
+  | { t: 'freed'; player: string; how: 'bail' | 'card' | 'doubles' | 'served' }
+  | {
+      t: 'trade';
+      from: string;
+      to: string;
+      give: MonopolyEstateId[];
+      giveCash: number;
+      want: MonopolyEstateId[];
+      wantCash: number;
+    }
+  | { t: 'bankrupt'; player: string; creditor: string | null }
+  | { t: 'monopolyOver'; reason: MonopolyEndReason; ranking: string[] }
   // 逾時代打
   | { t: 'timeout'; player: string; auto: 'pass' | 'check' | 'fold' }
-  | { t: 'timeoutPlay'; player: string; combo: ComboType; cards: string[] };
+  | { t: 'timeoutPlay'; player: string; combo: ComboType; cards: string[] }
+  | { t: 'timeoutMonopoly'; player: string; phase: MonopolyPhase };
 
 /**
  * 一次下注動作的結構化描述。座位上的「最近動作」與戰報共用。
@@ -358,8 +401,10 @@ export interface RoomView {
   id: string;
   name: string;
   gameType: GameType;
-  /** 大老二才有意義，德州撲克為 null。前端靠它決定要用哪一套規則算合法出牌。 */
+  /** 只有大老二房有值。前端靠它決定要用哪一套規則算合法出牌。 */
   bigTwoRules: BigTwoRules | null;
+  /** 只有大富翁房有值。 */
+  monopolyOptions: MonopolyOptions | null;
   hostId: PlayerId;
   maxPlayers: number;
   status: RoomStatus;
@@ -367,9 +412,9 @@ export interface RoomView {
   spectators: SpectatorView[];
   /** 收訊者自己的身分。 */
   me: { playerId: PlayerId; mode: JoinMode };
-  /** 只有玩家會拿到：大老二是手牌，德州撲克是自己的底牌。 */
+  /** 只有玩家會拿到：大老二是手牌，德州撲克是自己的底牌。大富翁沒有暗牌，為 null。 */
   hand: Card[] | null;
-  /** 只有觀戰者會拿到（上帝視角）。 */
+  /** 只有觀戰者、而且這個玩法有暗牌時才拿得到（上帝視角）。 */
   allHands: Record<PlayerId, Card[]> | null;
   /**
    * 德州撲克的房內籌碼，其他玩法為 null。
@@ -396,7 +441,13 @@ export interface ClientToServerEvents {
   'session:hello': (p: { playerId: PlayerId; nickname: string }, ack: Ack<{ roomId: string | null }>) => void;
   'lobby:chat': (p: { text: string }) => void;
   'room:create': (
-    p: { name: string; maxPlayers: number; gameType: GameType; bigTwoRules?: Partial<BigTwoRules> },
+    p: {
+      name: string;
+      maxPlayers: number;
+      gameType: GameType;
+      bigTwoRules?: Partial<BigTwoRules>;
+      monopolyOptions?: Partial<MonopolyOptions>;
+    },
     ack: Ack<{ roomId: string }>,
   ) => void;
   'room:join': (p: { roomId: string; mode: JoinMode }, ack: Ack<{ roomId: string }>) => void;
@@ -410,6 +461,8 @@ export interface ClientToServerEvents {
   'game:pass': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 德州撲克專用。amount 是「這一街總共加到多少」，不是增量。 */
   'game:action': (p: { action: BetAction; amount?: number }, ack: Ack<null>) => void;
+  /** 大富翁專用。17 種動作走同一個事件，靠 action.kind 收窄。 */
+  'game:monopoly': (p: { action: MonopolyAction }, ack: Ack<null>) => void;
 }
 
 export type BetAction = 'fold' | 'check' | 'call' | 'raise' | 'allin';

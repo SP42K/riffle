@@ -593,6 +593,68 @@
   font-weight: 400;
 }
 
+/* 棋盤 → Explorer 的檔案樹：無圓角、細密行距、選取列是整條藍底 */
+[data-skin='vscode'] .board__list {
+  border-radius: 2px;
+  background: #252526;
+  border-color: #3c3c3c;
+  max-height: 21rem;
+}
+[data-skin='vscode'] .board__row {
+  font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
+  font-size: 0.78rem;
+  padding: 0.1rem 0.5rem;
+  border-bottom: none;
+  border-left-width: 2px;
+}
+[data-skin='vscode'] .board__row[data-here='true'] {
+  background: #04395e;
+}
+[data-skin='vscode'] .board__row[data-mine='true'] .board__name {
+  color: #4fa6e8;
+}
+/* 未存檔的圓點 —— Explorer 就是用它標記「這個檔案是你的」 */
+[data-skin='vscode'] .board__token {
+  border-radius: 999px;
+  background: #3c3c3c;
+  color: #c5c5c5;
+  font-weight: 400;
+}
+[data-skin='vscode'] .board__token[data-mine='true'] {
+  background: #e2c08d;
+  color: #1e1e1e;
+}
+[data-skin='vscode'] .board__houses {
+  color: #cca700;
+}
+[data-skin='vscode'] .monopoly__phase {
+  color: #4fa6e8;
+  font-weight: 400;
+}
+[data-skin='vscode'] .monopoly__panel {
+  border-radius: 2px;
+  background: #252526;
+  border-color: #3c3c3c;
+  border-left: 2px solid #4fa6e8;
+}
+[data-skin='vscode'] .monopoly__debt {
+  border-left-color: #f14c4c;
+}
+[data-skin='vscode'] .monopoly__estates li,
+[data-skin='vscode'] .monopoly__trade {
+  border-radius: 2px;
+  background: #252526;
+  border-color: #3c3c3c;
+  font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
+}
+[data-skin='vscode'] .btn--small {
+  border-radius: 2px;
+}
+[data-skin='vscode'] .seat__tile {
+  font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
+  font-size: 0.72rem;
+}
+
 /* --------------------------------------------------------- 終端機外觀 */
 
 [data-skin='terminal'] {
@@ -824,4 +886,70 @@
   border: 1px solid #232a31;
   border-radius: 2px;
   font-weight: 400;
+}
+
+/* 棋盤 → `ls -l` 的輸出：無圓角、無框線、整片等寬字，色條收到剩一格寬 */
+[data-skin='terminal'] .board__list {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  max-height: 22rem;
+}
+[data-skin='terminal'] .board__row {
+  font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
+  font-size: 0.76rem;
+  padding: 0 0.4rem;
+  border-bottom: none;
+  border-left-width: 2px;
+}
+[data-skin='terminal'] .board__row[data-here='true'] {
+  background: #1b2128;
+}
+[data-skin='terminal'] .board__row[data-mine='true'] .board__name {
+  color: #4ee08a;
+}
+/* 棋子擠在 gutter，看起來像 ls 前面那欄的旗標 */
+[data-skin='terminal'] .board__token {
+  border-radius: 0;
+  width: 1rem;
+  height: 1rem;
+  background: transparent;
+  border: 1px solid #2b333c;
+  color: #6d7883;
+  font-weight: 400;
+}
+[data-skin='terminal'] .board__token[data-mine='true'] {
+  background: #4ee08a;
+  border-color: #4ee08a;
+  color: #0d0f12;
+}
+[data-skin='terminal'] .board__houses {
+  color: #e3d341;
+}
+[data-skin='terminal'] .monopoly__phase {
+  color: #4ee08a;
+  font-weight: 400;
+}
+[data-skin='terminal'] .monopoly__panel {
+  border-radius: 0;
+  background: transparent;
+  border-color: #232a31;
+  border-left: 2px solid #4ee08a;
+}
+[data-skin='terminal'] .monopoly__debt {
+  border-left-color: #d94f4f;
+}
+[data-skin='terminal'] .monopoly__estates li,
+[data-skin='terminal'] .monopoly__trade {
+  border-radius: 0;
+  background: transparent;
+  border-color: #232a31;
+  font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
+}
+[data-skin='terminal'] .btn--small {
+  border-radius: 0;
+}
+[data-skin='terminal'] .seat__tile {
+  font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
+  font-size: 0.72rem;
 }

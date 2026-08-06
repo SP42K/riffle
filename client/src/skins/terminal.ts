@@ -3,10 +3,20 @@ import {
   RANK_LABEL,
   type Card,
   type LogEvent,
+  type MonopolyEstateId,
   type SeatAction,
   type SystemNotice,
 } from 'shared';
 import { SUIT_TONE, labelCards } from './casino';
+import {
+  TERMINAL_CARD,
+  TERMINAL_END,
+  TERMINAL_GROUP,
+  TERMINAL_OPTION,
+  TERMINAL_PHASE,
+  TERMINAL_TILE,
+  terminalHouses,
+} from './monopolyVocab';
 import { ShellBoss } from './chrome/BossScreens';
 import { TerminalChrome } from './chrome/TerminalChrome';
 import type { TextTable } from './text';
@@ -91,6 +101,27 @@ function action(a: SeatAction): string {
   }
 }
 
+const TERMINAL_CASH = {
+  salary: 'cycle credit',
+  parking: 'reclaimed pool',
+  card: 'rand()',
+  players: 'peer transfer',
+} as const;
+
+const TERMINAL_FREED = {
+  bail: 'paid',
+  card: 'sudo token',
+  doubles: 'retry ok',
+  served: 'timeout',
+} as const;
+
+/** 交易的一邊：幾個路徑加多少額度。 */
+function terminalSide(tiles: readonly MonopolyEstateId[], cash: number): string {
+  const parts: string[] = tiles.map((id) => TERMINAL_TILE[id]);
+  if (cash > 0) parts.push(`${cash}u`);
+  return parts.length > 0 ? parts.join(' ') : '(none)';
+}
+
 function formatLog(event: LogEvent): string {
   switch (event.t) {
     case 'bigTwoStart':
@@ -129,6 +160,54 @@ function formatLog(event: LogEvent): string {
       }`;
     case 'timeoutPlay':
       return `${event.player} timeout — auto push ${COMBO[event.combo]} ${cards(event.cards)}`;
+    case 'monopolyStart':
+      return `$ mount --users ${event.players} --quota ${event.startCash}`;
+    case 'move':
+      return `${event.player} seek ${event.dice[0]}+${event.dice[1]} → ${TERMINAL_TILE[event.tile]}`;
+    case 'buy':
+      return `${event.player} alloc ${TERMINAL_TILE[event.tile]} (${event.price}u)`;
+    case 'rent':
+      return `${event.player} → ${event.owner} ${event.amount}u (${TERMINAL_TILE[event.tile]})`;
+    case 'tax':
+      return `${event.player} ${TERMINAL_TILE[event.tile]} −${event.amount}u`;
+    case 'monopolyCash':
+      return `${event.player} ${event.amount >= 0 ? '+' : '−'}${Math.abs(event.amount)}u (${
+        TERMINAL_CASH[event.source]
+      })`;
+    case 'auctionStart':
+      return `${TERMINAL_TILE[event.tile]} released — bidding open`;
+    case 'bid':
+      return `${event.player} bid ${event.amount}u`;
+    case 'auctionEnd':
+      return event.player
+        ? `${event.player} won ${TERMINAL_TILE[event.tile]} at ${event.amount}u`
+        : `${TERMINAL_TILE[event.tile]} — no bids`;
+    case 'build':
+      return event.sold
+        ? `${event.player} truncate ${TERMINAL_TILE[event.tile]} → lvl ${event.houses}`
+        : `${event.player} extend ${TERMINAL_TILE[event.tile]} → lvl ${event.houses}`;
+    case 'mortgage':
+      return event.redeem
+        ? `${event.player} swap in ${TERMINAL_TILE[event.tile]} (−${event.amount}u)`
+        : `${event.player} swap out ${TERMINAL_TILE[event.tile]} (+${event.amount}u)`;
+    case 'drawCard':
+      return `${event.player} rand() → ${TERMINAL_CARD[event.card]}`;
+    case 'jailed':
+      return `${event.player} held in var/lock`;
+    case 'freed':
+      return `${event.player} released (${TERMINAL_FREED[event.how]})`;
+    case 'trade':
+      return `chown ${event.from}:${event.to} — ${terminalSide(event.give, event.giveCash)} ⇄ ${terminalSide(event.want, event.wantCash)}`;
+    case 'bankrupt':
+      return event.creditor
+        ? `${event.player} oom — reassigned to ${event.creditor}`
+        : `${event.player} oom — freed to system`;
+    case 'monopolyOver':
+      return `umount (${TERMINAL_END[event.reason]}) — ${event.ranking
+        .map((n, i) => `#${i + 1} ${n}`)
+        .join(' ')}`;
+    case 'timeoutMonopoly':
+      return `${event.player} timeout in ${TERMINAL_PHASE[event.phase]} — auto`;
   }
 }
 
@@ -150,7 +229,7 @@ function notice(n: SystemNotice): string {
 const TEXT: TextTable = {
   'gate.title': 'shell',
   'gate.titleAccent': '1.9',
-  'gate.subtitle': 'Set a display name to attach to the job queue.',
+  'gate.subtitle': 'Set a display name to attach to the job queue. Modes: batch, stream, volume.',
   'gate.nicknamePlaceholder': 'name',
   'gate.submit': 'attach',
 
@@ -223,6 +302,7 @@ const TEXT: TextTable = {
   'start.cancelReady': 'unready',
   'start.startBigTwo': 'run',
   'start.startHoldem': 'run',
+  'start.startMonopoly': 'mount',
   'start.needPlayers': 'needs {min}+ workers, all ready',
 
   'bigTwo.idleTitle': 'waiting for owner to run',
@@ -283,6 +363,70 @@ const TEXT: TextTable = {
   'holdemHint.canCheck': 'wait, or push {n}+',
   'holdemHint.mustCall': 'sync {n} to continue',
   'holdemHint.yourTurn': 'your turn',
+
+  'monopoly.idleTitle': 'waiting for owner to mount',
+  'monopoly.idleHint': '{n}/{max} users, {min} required',
+  'monopoly.round': 'cycle {n}',
+  'monopoly.phase': 'state: {phase}',
+  'monopoly.dice': 'seek {a} + {b} = {n}',
+  'monopoly.noDice': 'no seek yet',
+  'monopoly.activePlayer': '{name} has the lock',
+  'monopoly.cash': 'quota {n}',
+  'monopoly.netWorth': 'usage {n}',
+  'monopoly.parkingPot': 'reclaimed {n}',
+  'monopoly.supply': 'free: {houses} inodes / {hotels} volumes',
+  'monopoly.jailTag': 'held',
+  'monopoly.jailTurns': 'held {n} cycles',
+  'monopoly.jailCards': 'sudo tokens {n}',
+  'monopoly.bankruptTag': 'oom',
+  'monopoly.boardTitle': 'ls -l',
+  'monopoly.here': 'cwd',
+  'monopoly.mine': 'owned',
+  'monopoly.ownerless': 'free',
+  'monopoly.mortgagedTag': 'swapped out',
+  'monopoly.price': '{n}u',
+  'monopoly.rent': 'fee {n}',
+  'monopoly.roll': 'seek',
+  'monopoly.buy': 'alloc ({n}u)',
+  'monopoly.decline': 'skip',
+  'monopoly.bid': 'bid',
+  'monopoly.bidAmountLabel': 'amount',
+  'monopoly.passBid': 'drop out',
+  'monopoly.auctionTitle': 'bidding: {tile}',
+  'monopoly.auctionHigh': 'high {n} ({name})',
+  'monopoly.auctionNoBid': 'no bids yet',
+  'monopoly.payBail': 'pay ({n}u)',
+  'monopoly.useJailCard': 'use sudo token',
+  'monopoly.rollForDoubles': 'retry seek',
+  'monopoly.build': 'extend',
+  'monopoly.sellHouse': 'truncate',
+  'monopoly.mortgage': 'swap out',
+  'monopoly.unmortgage': 'swap in',
+  'monopoly.endTurn': 'release lock',
+  'monopoly.offerTrade': 'chown',
+  'monopoly.cancelTrade': 'cancel',
+  'monopoly.declareBankrupt': 'kill -9 self',
+  'monopoly.debtTitle': 'owes {name} {n}u',
+  'monopoly.debtToBank': 'owes system {n}u',
+  'monopoly.debtShortfall': 'short {n}u, can free at most {max}u',
+  'monopoly.tradeTitle': '{name} proposes a chown',
+  'monopoly.tradeGive': 'gives',
+  'monopoly.tradeWant': 'wants',
+  'monopoly.tradeAccept': 'accept',
+  'monopoly.tradeReject': 'reject',
+  'monopoly.tradeTarget': 'target user',
+  'monopoly.tradeCashLabel': 'quota delta',
+  'monopoly.tradeNothing': '(no paths)',
+  'monopoly.resultTitle': 'umount',
+  'monopoly.resultReason': 'reason: {reason}',
+  'monopoly.playAgain': 'mount again',
+  'monopoly.waitHost': 'waiting for owner',
+  'monopoly.myEstates': 'my paths ({n})',
+  'monopoly.noEstates': 'no paths owned',
+  'monopolyHint.notPlaying': 'press ready, owner mounts',
+  'monopolyHint.waitOthers': 'waiting on other users',
+  'monopolyHint.yourTurn': 'your turn',
+  'monopolyHint.spectating': 'read-only',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -311,6 +455,31 @@ const ERRORS: Skin['errors'] = {
   RAISE_TOO_SMALL: 'push too small',
   NOT_ENOUGH_CHIPS: 'quota exceeded',
   BAD_AMOUNT: 'bad amount',
+
+  // 大富翁。漏一條的話 GameProvider.run 會退回伺服器的中文訊息，偽裝就破了
+  WRONG_PHASE: 'not valid in this state',
+  BANKRUPT: 'your process was killed',
+  NOT_ENOUGH_CASH: 'quota exceeded',
+  NOT_FOR_SALE: 'this path cannot be allocated',
+  BAD_TILE: 'no such path',
+  NOT_OWNER: 'you do not own this path',
+  NOT_FULL_SET: 'you need the whole mount before extending',
+  BUILD_UNEVEN: 'extend evenly — start with the smallest',
+  HOUSE_LIMIT: 'already at volume size',
+  NO_HOUSES: 'nothing to truncate here',
+  HAS_HOUSES: 'truncate the rest of the mount first',
+  MORTGAGED: 'already swapped out',
+  NOT_MORTGAGED: 'not swapped out',
+  MORTGAGED_IN_GROUP: 'a path in this mount is still swapped out',
+  NO_HOUSE_SUPPLY: 'no free inodes left',
+  NO_HOTEL_SUPPLY: 'no free volumes left',
+  BID_TOO_LOW: 'bid must beat the current high',
+  BID_TOO_HIGH: 'bid exceeds your quota',
+  NOT_IN_JAIL: 'you are not held',
+  NO_JAIL_CARD: 'no sudo token',
+  TRADES_DISABLED: 'chown is disabled on this job',
+  BAD_TRADE: 'invalid chown request',
+  CAN_STILL_PAY: 'you can still pay — cannot kill yourself',
 };
 
 /** 偽裝成終端機：等寬字、深色、牌變成短代號。 */
@@ -325,7 +494,7 @@ export const terminalSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume' },
   bigTwoPreset: { taiwan: 'strict', classic: 'legacy', custom: 'custom' },
   bigTwoRule: {
     cuts: '--cut',
@@ -336,6 +505,13 @@ export const terminalSkin: Skin = {
   },
   street: STREET,
   holdemCategory: CATEGORY,
+  monopolyTile: TERMINAL_TILE,
+  monopolyGroup: TERMINAL_GROUP,
+  monopolyOption: TERMINAL_OPTION,
+  monopolyCard: TERMINAL_CARD,
+  monopolyPhase: TERMINAL_PHASE,
+  monopolyEnd: TERMINAL_END,
+  monopolyHouses: terminalHouses,
   errors: ERRORS,
   card: face,
   medal: (rank_) => (rank_ <= 3 ? '*' : '·'),

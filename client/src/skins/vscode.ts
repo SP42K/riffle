@@ -3,12 +3,22 @@ import {
   RANK_LABEL,
   type Card,
   type LogEvent,
+  type MonopolyEstateId,
   type SeatAction,
   type SystemNotice,
 } from 'shared';
 import { CodeBoss } from './chrome/BossScreens';
 import { VSCodeChrome } from './chrome/VSCodeChrome';
 import { SUIT_TONE, labelCards } from './casino';
+import {
+  VSCODE_CARD,
+  VSCODE_END,
+  VSCODE_GROUP,
+  VSCODE_OPTION,
+  VSCODE_PHASE,
+  VSCODE_TILE,
+  vscodeHouses,
+} from './monopolyVocab';
 import type { TextTable } from './text';
 import type { CardFace, Skin } from './types';
 
@@ -96,6 +106,26 @@ function action(a: SeatAction): string {
   }
 }
 
+const VSCODE_CASH = {
+  salary: 'sprint budget',
+  parking: 'reclaimed pool',
+  card: 'backlog item',
+  players: 'between members',
+} as const;
+
+const VSCODE_FREED = {
+  bail: 'paid',
+  card: 'force-push token',
+  doubles: 'retry passed',
+  served: 'timeout expired',
+} as const;
+
+function vscodeSide(tiles: readonly MonopolyEstateId[], cash: number): string {
+  const parts: string[] = tiles.map((id) => VSCODE_TILE[id]);
+  if (cash > 0) parts.push(`${cash} budget`);
+  return parts.length > 0 ? parts.join(' + ') : 'nothing';
+}
+
 function formatLog(event: LogEvent): string {
   switch (event.t) {
     case 'bigTwoStart':
@@ -134,6 +164,54 @@ function formatLog(event: LogEvent): string {
       }`;
     case 'timeoutPlay':
       return `${event.player} timed out — auto commit ${COMBO[event.combo]} ${cards(event.cards)}`;
+    case 'monopolyStart':
+      return `workspace opened · ${event.players} members · budget ${event.startCash}`;
+    case 'move':
+      return `${event.player} stepped ${event.dice[0]}+${event.dice[1]} → ${VSCODE_TILE[event.tile]}`;
+    case 'buy':
+      return `${event.player} claimed ${VSCODE_TILE[event.tile]} for ${event.price}`;
+    case 'rent':
+      return `${event.player} paid ${event.owner} ${event.amount} for ${VSCODE_TILE[event.tile]}`;
+    case 'tax':
+      return `${event.player} charged ${event.amount} at ${VSCODE_TILE[event.tile]}`;
+    case 'monopolyCash':
+      return `${event.player} ${event.amount >= 0 ? '+' : '−'}${Math.abs(event.amount)} (${
+        VSCODE_CASH[event.source]
+      })`;
+    case 'auctionStart':
+      return `${VSCODE_TILE[event.tile]} is up for bidding`;
+    case 'bid':
+      return `${event.player} bid ${event.amount}`;
+    case 'auctionEnd':
+      return event.player
+        ? `${event.player} won ${VSCODE_TILE[event.tile]} at ${event.amount}`
+        : `${VSCODE_TILE[event.tile]} got no bids`;
+    case 'build':
+      return event.sold
+        ? `${event.player} reverted ${VSCODE_TILE[event.tile]} to level ${event.houses}`
+        : `${event.player} raised ${VSCODE_TILE[event.tile]} to level ${event.houses}`;
+    case 'mortgage':
+      return event.redeem
+        ? `${event.player} restored ${VSCODE_TILE[event.tile]} for ${event.amount}`
+        : `${event.player} archived ${VSCODE_TILE[event.tile]} for ${event.amount}`;
+    case 'drawCard':
+      return `${event.player} — ${VSCODE_CARD[event.card]}`;
+    case 'jailed':
+      return `${event.player} is blocked`;
+    case 'freed':
+      return `${event.player} unblocked (${VSCODE_FREED[event.how]})`;
+    case 'trade':
+      return `${event.from} ⇄ ${event.to}: ${vscodeSide(event.give, event.giveCash)} for ${vscodeSide(event.want, event.wantCash)}`;
+    case 'bankrupt':
+      return event.creditor
+        ? `${event.player} ran out — everything transferred to ${event.creditor}`
+        : `${event.player} ran out — everything released`;
+    case 'monopolyOver':
+      return `workspace closed (${VSCODE_END[event.reason]}): ${event.ranking
+        .map((n, i) => `#${i + 1} ${n}`)
+        .join(', ')}`;
+    case 'timeoutMonopoly':
+      return `${event.player} timed out during ${VSCODE_PHASE[event.phase]} — handled automatically`;
   }
 }
 
@@ -156,6 +234,7 @@ const TEXT: TextTable = {
   'gate.title': 'Workspace',
   'gate.titleAccent': 'v2.4',
   'gate.subtitle': 'Sign in to sync settings and open shared sessions.',
+  'start.startMonopoly': 'Open workspace',
   'gate.nicknamePlaceholder': 'Display name',
   'gate.submit': 'Continue',
 
@@ -288,6 +367,70 @@ const TEXT: TextTable = {
   'holdemHint.canCheck': 'You can hold, or bump to {n}+',
   'holdemHint.mustCall': 'Match {n} to stay in',
   'holdemHint.yourTurn': 'Your turn',
+
+  'monopoly.idleTitle': 'Waiting for the owner to open the workspace',
+  'monopoly.idleHint': '{n}/{max} members, {min} required',
+  'monopoly.round': 'iteration {n}',
+  'monopoly.phase': 'stage: {phase}',
+  'monopoly.dice': 'step {a} + {b} = {n}',
+  'monopoly.noDice': 'not dispatched yet',
+  'monopoly.activePlayer': "{name}'s turn",
+  'monopoly.cash': 'budget {n}',
+  'monopoly.netWorth': 'score {n}',
+  'monopoly.parkingPot': 'pool {n}',
+  'monopoly.supply': 'available: {houses} fixes / {hotels} rewrites',
+  'monopoly.jailTag': 'blocked',
+  'monopoly.jailTurns': 'blocked for {n}',
+  'monopoly.jailCards': '{n} tokens',
+  'monopoly.bankruptTag': 'out',
+  'monopoly.boardTitle': 'Explorer',
+  'monopoly.here': 'you are here',
+  'monopoly.mine': 'yours',
+  'monopoly.ownerless': 'unclaimed',
+  'monopoly.mortgagedTag': 'archived',
+  'monopoly.price': '{n}',
+  'monopoly.rent': 'fee {n}',
+  'monopoly.roll': 'Dispatch',
+  'monopoly.buy': 'Claim ({n})',
+  'monopoly.decline': 'Skip',
+  'monopoly.bid': 'Bid',
+  'monopoly.bidAmountLabel': 'bid',
+  'monopoly.passBid': 'Withdraw',
+  'monopoly.auctionTitle': 'Bidding: {tile}',
+  'monopoly.auctionHigh': 'leading {n} ({name})',
+  'monopoly.auctionNoBid': 'no bids yet',
+  'monopoly.payBail': 'Pay to unblock ({n})',
+  'monopoly.useJailCard': 'Use force-push token',
+  'monopoly.rollForDoubles': 'Retry',
+  'monopoly.build': 'Raise level',
+  'monopoly.sellHouse': 'Revert level',
+  'monopoly.mortgage': 'Archive',
+  'monopoly.unmortgage': 'Restore',
+  'monopoly.endTurn': 'Hand off',
+  'monopoly.offerTrade': 'Propose transfer',
+  'monopoly.cancelTrade': 'Cancel',
+  'monopoly.declareBankrupt': 'Give up',
+  'monopoly.debtTitle': 'owes {name} {n}',
+  'monopoly.debtToBank': 'owes {n}',
+  'monopoly.debtShortfall': 'short {n}, can raise up to {max}',
+  'monopoly.tradeTitle': '{name} proposes a transfer',
+  'monopoly.tradeGive': 'offers',
+  'monopoly.tradeWant': 'wants',
+  'monopoly.tradeAccept': 'Accept',
+  'monopoly.tradeReject': 'Decline',
+  'monopoly.tradeTarget': 'member',
+  'monopoly.tradeCashLabel': 'budget',
+  'monopoly.tradeNothing': '(nothing)',
+  'monopoly.resultTitle': 'Workspace closed',
+  'monopoly.resultReason': 'reason: {reason}',
+  'monopoly.playAgain': 'Open again',
+  'monopoly.waitHost': 'Waiting for the owner',
+  'monopoly.myEstates': 'My files ({n})',
+  'monopoly.noEstates': 'Nothing claimed yet',
+  'monopolyHint.notPlaying': 'Press Ready, then the owner starts',
+  'monopolyHint.waitOthers': 'Waiting for other members',
+  'monopolyHint.yourTurn': 'Your turn',
+  'monopolyHint.spectating': 'Read-only',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -316,6 +459,30 @@ const ERRORS: Skin['errors'] = {
   RAISE_TOO_SMALL: 'Bump is too small',
   NOT_ENOUGH_CHIPS: 'Not enough quota',
   BAD_AMOUNT: 'Invalid amount',
+  // 大富翁。漏一條的話 GameProvider.run 會退回伺服器的中文訊息，偽裝就破了
+  WRONG_PHASE: 'Not available at this stage',
+  BANKRUPT: 'You are out of this run',
+  NOT_ENOUGH_CASH: 'Not enough budget',
+  NOT_FOR_SALE: 'This one cannot be claimed',
+  BAD_TILE: 'Unknown file',
+  NOT_OWNER: 'You do not own this file',
+  NOT_FULL_SET: 'You need the whole directory first',
+  BUILD_UNEVEN: 'Raise the lowest file in the directory first',
+  HOUSE_LIMIT: 'Already at the top level',
+  NO_HOUSES: 'Nothing to revert here',
+  HAS_HOUSES: 'Revert the directory levels first',
+  MORTGAGED: 'Already archived',
+  NOT_MORTGAGED: 'Not archived',
+  MORTGAGED_IN_GROUP: 'Something in this directory is archived',
+  NO_HOUSE_SUPPLY: 'No fixes left',
+  NO_HOTEL_SUPPLY: 'No rewrites left',
+  BID_TOO_LOW: 'Bid must beat the current one',
+  BID_TOO_HIGH: 'Bid exceeds your budget',
+  NOT_IN_JAIL: 'You are not blocked',
+  NO_JAIL_CARD: 'No force-push token',
+  TRADES_DISABLED: 'Transfers are off in this run',
+  BAD_TRADE: 'That transfer is not valid',
+  CAN_STILL_PAY: 'You can still cover this',
 };
 
 /** 偽裝成編輯器：牌變成檔案、出牌變成 commit、戰報變成輸出面板。 */
@@ -330,7 +497,7 @@ export const vscodeSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace' },
   bigTwoPreset: { taiwan: 'strict', classic: 'default', custom: 'custom' },
   bigTwoRule: {
     cuts: 'override',
@@ -341,6 +508,13 @@ export const vscodeSkin: Skin = {
   },
   street: STREET,
   holdemCategory: CATEGORY,
+  monopolyTile: VSCODE_TILE,
+  monopolyGroup: VSCODE_GROUP,
+  monopolyOption: VSCODE_OPTION,
+  monopolyCard: VSCODE_CARD,
+  monopolyPhase: VSCODE_PHASE,
+  monopolyEnd: VSCODE_END,
+  monopolyHouses: vscodeHouses,
   errors: ERRORS,
   card: face,
   medal: (rank_) => (rank_ <= 3 ? '★' : '·'),

@@ -1,4 +1,11 @@
-import type { GameView, HoldemSeatInfo, SeatView } from 'shared';
+import {
+  tileAt,
+  type GameType,
+  type GameView,
+  type HoldemSeatInfo,
+  type MonopolySeatInfo,
+  type SeatView,
+} from 'shared';
 import { useSkin } from '../state/skinContext';
 import { CardBack } from './PlayingCard';
 
@@ -7,15 +14,22 @@ interface Props {
   isTurn: boolean;
   isMe: boolean;
   playing: boolean;
+  /**
+   * 房間的玩法。狀態列一定要照這個分派 ——
+   * 以前是看 chips 有沒有值來猜，大富翁也有現金，猜就會猜錯。
+   */
+  gameType: GameType;
   game: GameView | null;
   /** 德州撲克的房內籌碼，開局前也看得到。 */
   chips?: number;
 }
 
-export function Seat({ seat, isTurn, isMe, playing, game, chips }: Props) {
+export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Props) {
   const { skin, t } = useSkin();
   const holdem = game?.type === 'holdem' ? game.seats[seat.seat] : undefined;
-  const folded = holdem?.folded ?? false;
+  const monopoly = game?.type === 'monopoly' ? game.seats[seat.seat] : undefined;
+  // 蓋牌與破產都是「還在座位上但已經出局」，共用同一個淡出樣式
+  const folded = (holdem?.folded ?? false) || (monopoly?.bankrupt ?? false);
 
   return (
     <div
@@ -34,11 +48,15 @@ export function Seat({ seat, isTurn, isMe, playing, game, chips }: Props) {
       </div>
 
       <div className="seat__status">
-        {chips !== undefined ? (
-          <HoldemStatus info={holdem} chips={chips} playing={playing} ready={seat.ready} />
-        ) : (
-          <BigTwoStatus game={game} seat={seat} playing={playing} />
-        )}
+        <SeatStatus
+          gameType={gameType}
+          game={game}
+          seat={seat}
+          playing={playing}
+          holdem={holdem}
+          monopoly={monopoly}
+          chips={chips}
+        />
       </div>
 
       {game?.type === 'bigTwo' && playing && game.seats[seat.seat]?.passed && (
@@ -49,6 +67,35 @@ export function Seat({ seat, isTurn, isMe, playing, game, chips }: Props) {
       )}
     </div>
   );
+}
+
+function SeatStatus({
+  gameType,
+  game,
+  seat,
+  playing,
+  holdem,
+  monopoly,
+  chips,
+}: {
+  gameType: GameType;
+  game: GameView | null;
+  seat: SeatView;
+  playing: boolean;
+  holdem: HoldemSeatInfo | undefined;
+  monopoly: MonopolySeatInfo | undefined;
+  chips: number | undefined;
+}) {
+  switch (gameType) {
+    case 'bigTwo':
+      return <BigTwoStatus game={game} seat={seat} playing={playing} />;
+    case 'holdem':
+      return (
+        <HoldemStatus info={holdem} chips={chips ?? 0} playing={playing} ready={seat.ready} />
+      );
+    case 'monopoly':
+      return <MonopolyStatus info={monopoly} playing={playing} ready={seat.ready} />;
+  }
 }
 
 function BigTwoStatus({
@@ -99,6 +146,35 @@ function HoldemStatus({
       {info?.allIn && <span className="tag tag--allin">{t('seat.allIn')}</span>}
       {info && info.committed > 0 && (
         <span className="seat__bet">{t('seat.bet', { n: info.committed })}</span>
+      )}
+    </>
+  );
+}
+
+function MonopolyStatus({
+  info,
+  playing,
+  ready,
+}: {
+  info: MonopolySeatInfo | undefined;
+  playing: boolean;
+  ready: boolean;
+}) {
+  const { skin, t } = useSkin();
+  if (!playing || !info) {
+    return (
+      <span className={ready ? 'tag tag--ready' : 'tag tag--waiting'}>
+        {ready ? t('seat.ready') : t('seat.notReady')}
+      </span>
+    );
+  }
+  return (
+    <>
+      <span className="seat__chips">{t('monopoly.cash', { n: info.cash })}</span>
+      <span className="seat__tile">{skin.monopolyTile[tileAt(info.position).id]}</span>
+      {info.bankrupt && <span className="tag tag--offline">{t('monopoly.bankruptTag')}</span>}
+      {!info.bankrupt && info.inJail && (
+        <span className="tag tag--waiting">{t('monopoly.jailTag')}</span>
       )}
     </>
   );

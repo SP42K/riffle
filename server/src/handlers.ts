@@ -3,6 +3,8 @@ import {
   DISCONNECT_GRACE_MS,
   HOLDEM_SHOWDOWN_MS,
   HOLDEM_START_CHIPS,
+  MONOPOLY_ACTION_KINDS,
+  MONOPOLY_ESTATE_IDS,
   SEAT_LIMITS,
   TURN_MS,
   type Ack,
@@ -11,6 +13,8 @@ import {
   type ChatMessage,
   type ClientToServerEvents,
   type JoinMode,
+  type MonopolyAction,
+  type MonopolyEstateId,
   type PlayerId,
   type ServerToClientEvents,
   type SystemNotice,
@@ -33,6 +37,14 @@ import {
   type HoldemState,
 } from './holdemEngine.js';
 import {
+  MONOPOLY_ERROR_MESSAGE,
+  applyMonopolyAction,
+  autoActMonopoly,
+  removePlayerFromMonopoly,
+  startMonopoly,
+  type MonopolyEvent,
+} from './monopolyEngine.js';
+import {
   addSpectator,
   buildRoomView,
   buildSummary,
@@ -46,9 +58,11 @@ import {
   makeSystemMessage,
   memberOf,
   modeOf,
+  monopolyLogOf,
   nicknameOf,
   normalizeBigTwoRules,
   normalizeGameType,
+  normalizeMonopolyOptions,
   pushChat,
   pushLog,
   refillChips,
@@ -59,6 +73,7 @@ import {
   type Member,
   type Room,
 } from './rooms.js';
+import { assertNeverGame } from './turnBased.js';
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 type GameIo = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -85,6 +100,85 @@ function cardIdsOf(cards: readonly Card[]): string[] {
 function cleanText(input: unknown, max: number): string {
   if (typeof input !== 'string') return '';
   return input.replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function cleanNumber(input: unknown): number {
+  const n = Math.floor(Number(input));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function cleanEstateId(input: unknown): MonopolyEstateId | null {
+  return MONOPOLY_ESTATE_IDS.find((id) => id === input) ?? null;
+}
+
+function cleanEstateIds(input: unknown): MonopolyEstateId[] | null {
+  if (!Array.isArray(input)) return null;
+  const ids: MonopolyEstateId[] = [];
+  for (const raw of input) {
+    const id = cleanEstateId(raw);
+    if (!id) return null;
+    ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * 把來路不明的 payload 收成 MonopolyAction。
+ * 認不得的 kind、缺欄位、格子代號不存在 —— 一律回 null，由呼叫端吐 BAD_ACTION。
+ */
+function parseMonopolyAction(value: unknown): MonopolyAction | null {
+  const input = (value ?? {}) as { kind?: unknown };
+  const kind = MONOPOLY_ACTION_KINDS.find((k) => k === input.kind);
+  if (!kind) return null;
+
+  switch (kind) {
+    case 'roll':
+    case 'buy':
+    case 'decline':
+    case 'passBid':
+    case 'payBail':
+    case 'useJailCard':
+    case 'rollForDoubles':
+    case 'declareBankrupt':
+    case 'endTurn':
+      return { kind };
+
+    case 'bid':
+      return { kind, amount: cleanNumber((input as { amount?: unknown }).amount) };
+
+    case 'build':
+    case 'sellHouse':
+    case 'mortgage':
+    case 'unmortgage': {
+      const tile = cleanEstateId((input as { tile?: unknown }).tile);
+      return tile ? { kind, tile } : null;
+    }
+
+    case 'respondTrade':
+      return { kind, accept: (input as { accept?: unknown }).accept === true };
+
+    case 'offerTrade': {
+      const raw = input as {
+        to?: unknown;
+        give?: unknown;
+        want?: unknown;
+        giveCash?: unknown;
+        wantCash?: unknown;
+      };
+      const to = cleanText(raw.to, 64);
+      const give = cleanEstateIds(raw.give);
+      const want = cleanEstateIds(raw.want);
+      if (!to || !give || !want) return null;
+      return {
+        kind,
+        to,
+        give,
+        want,
+        giveCash: cleanNumber(raw.giveCash),
+        wantCash: cleanNumber(raw.wantCash),
+      };
+    }
+  }
 }
 
 function reply<T>(ack: unknown, payload: Parameters<Ack<T>>[0]): void {
@@ -121,6 +215,7 @@ export class GameServer {
     socket.on('game:play', (payload, ack) => this.onPlay(socket, payload, ack));
     socket.on('game:pass', (_payload, ack) => this.onPass(socket, ack));
     socket.on('game:action', (payload, ack) => this.onAction(socket, payload, ack));
+    socket.on('game:monopoly', (payload, ack) => this.onMonopoly(socket, payload, ack));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -284,7 +379,13 @@ export class GameServer {
 
   private onCreateRoom(
     socket: GameSocket,
-    payload: { name?: unknown; maxPlayers?: unknown; gameType?: unknown; bigTwoRules?: unknown },
+    payload: {
+      name?: unknown;
+      maxPlayers?: unknown;
+      gameType?: unknown;
+      bigTwoRules?: unknown;
+      monopolyOptions?: unknown;
+    },
     ack: unknown,
   ): void {
     const session = this.sessions.get(socket.id);
@@ -297,11 +398,20 @@ export class GameServer {
     const gameType = normalizeGameType(payload?.gameType);
     const maxPlayers = clampMaxPlayers(payload?.maxPlayers, gameType);
     const bigTwoRules = normalizeBigTwoRules(payload?.bigTwoRules);
+    const monopolyOptions = normalizeMonopolyOptions(payload?.monopolyOptions);
     const id = generateRoomId((candidate) => this.rooms.has(candidate));
 
     const host = this.memberFromSession(session);
     host.socketId = socket.id;
-    const room = createRoom(id, name, gameType, maxPlayers, bigTwoRules, host);
+    const room = createRoom({
+      id,
+      name,
+      gameType,
+      maxPlayers,
+      bigTwoRules,
+      monopolyOptions,
+      host,
+    });
     this.rooms.set(id, room);
 
     session.roomId = id;
@@ -414,12 +524,28 @@ export class GameServer {
     this.afterGameAction(room);
   }
 
-  /** 讓玩家從進行中的牌局退出：大老二是抽掉手牌，德州撲克是視同蓋牌。 */
+  /** 讓玩家從進行中的牌局退出：大老二是抽掉手牌，德州撲克視同蓋牌，大富翁是地產還給銀行。 */
   private removeFromGame(room: Room, playerId: PlayerId): void {
     const game = room.game;
     if (!game || game.state.over) return;
-    if (game.type === 'bigTwo') removePlayerFromGame(room.seats, game.state, playerId);
-    else removePlayerFromHoldem(room.seats, game.state, playerId);
+    switch (game.type) {
+      case 'bigTwo':
+        removePlayerFromGame(room.seats, game.state, playerId);
+        return;
+      case 'holdem':
+        removePlayerFromHoldem(room.seats, game.state, playerId);
+        return;
+      case 'monopoly':
+        this.logMonopoly(room, removePlayerFromMonopoly(room.seats, game.state, playerId));
+        return;
+      default:
+        assertNeverGame(game);
+    }
+  }
+
+  /** 引擎事件換上暱稱寫進戰報。 */
+  private logMonopoly(room: Room, events: readonly MonopolyEvent[]): void {
+    for (const event of events) pushLog(room, monopolyLogOf(room, event));
   }
 
   private onRoomChat(socket: GameSocket, payload: { text?: unknown }): void {
@@ -472,14 +598,30 @@ export class GameServer {
     room.log = [];
     for (const player of room.players.values()) player.ready = false;
 
-    if (room.gameType === 'bigTwo') {
-      const state = dealGame(room.seats, room.bigTwoRules);
-      room.game = { type: 'bigTwo', state };
-      pushLog(room, { t: 'bigTwoStart', players: seatedPlayers(room).length });
-      const leader = room.seats[state.turnSeat];
-      if (leader) pushLog(room, { t: 'lead', player: nicknameOf(room, leader) });
-    } else {
-      this.startHoldemHand(room);
+    switch (room.gameType) {
+      case 'bigTwo': {
+        const state = dealGame(room.seats, room.bigTwoRules);
+        room.game = { type: 'bigTwo', state };
+        pushLog(room, { t: 'bigTwoStart', players: seatedPlayers(room).length });
+        const leader = room.seats[state.turnSeat];
+        if (leader) pushLog(room, { t: 'lead', player: nicknameOf(room, leader) });
+        break;
+      }
+      case 'holdem':
+        this.startHoldemHand(room);
+        break;
+      case 'monopoly': {
+        const state = startMonopoly(room.seats, room.monopolyOptions);
+        room.game = { type: 'monopoly', state };
+        pushLog(room, {
+          t: 'monopolyStart',
+          players: seatedPlayers(room).length,
+          startCash: room.monopolyOptions.startCash,
+        });
+        break;
+      }
+      default:
+        assertNeverGame(room.gameType);
     }
 
     this.afterGameAction(room);
@@ -621,6 +763,32 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
+  private onMonopoly(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { room, game, playerId } = context;
+    if (game.type !== 'monopoly') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間玩的不是大富翁' } });
+    }
+
+    const action = parseMonopolyAction(payload?.action);
+    if (!action) {
+      return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的動作' } });
+    }
+
+    const result = applyMonopolyAction(room.seats, game.state, playerId, action);
+    if (!result.ok) {
+      return reply(ack, {
+        ok: false,
+        error: { code: result.error, message: MONOPOLY_ERROR_MESSAGE[result.error] },
+      });
+    }
+
+    this.logMonopoly(room, result.events);
+    this.afterGameAction(room);
+    reply(ack, { ok: true, data: null });
+  }
+
   private gameContext(socket: GameSocket, ack: unknown) {
     const session = this.sessions.get(socket.id);
     if (!session?.roomId) {
@@ -647,31 +815,47 @@ export class GameServer {
     this.scheduleNextHand(room);
   }
 
-  /** 大老二整局結束時公布名次。德州撲克是連續的現金局，不走這條路。 */
+  /**
+   * 整局結束時公布名次。
+   * 德州撲克是連續的現金局，沒有「整局結束」這回事，只寫攤牌戰報。
+   */
   private checkGameOver(room: Room): void {
     const game = room.game;
     if (!game) return;
 
-    if (game.type === 'holdem') {
-      this.logShowdown(room, game.state);
-      return;
+    switch (game.type) {
+      case 'holdem':
+        this.logShowdown(room, game.state);
+        return;
+      case 'bigTwo': {
+        if (!game.state.over) return;
+        const ranking = game.state.finished;
+        if (ranking.length > 0) {
+          pushLog(room, { t: 'bigTwoOver', ranking: ranking.map((id) => nicknameOf(room, id)) });
+        }
+        this.emitRanking(room, ranking);
+        return;
+      }
+      case 'monopoly': {
+        if (!game.state.over) return;
+        // 結束的那一行戰報由引擎事件帶出來了，這裡只負責公布名次
+        this.emitRanking(room, game.state.result?.ranking ?? []);
+        return;
+      }
+      default:
+        assertNeverGame(game);
     }
-    if (!game.state.over) return;
+  }
 
+  /** 大老二與大富翁共用：停掉回合計時，把名次推給房內所有人。 */
+  private emitRanking(room: Room, ranking: readonly PlayerId[]): void {
     if (room.turnTimer) {
       clearTimeout(room.turnTimer);
       room.turnTimer = null;
     }
-
-    const ranking = game.state.finished.map((playerId) => ({
-      playerId,
-      nickname: nicknameOf(room, playerId),
-    }));
-    if (ranking.length > 0) {
-      pushLog(room, { t: 'bigTwoOver', ranking: ranking.map((entry) => entry.nickname) });
-    }
-
-    this.io.to(roomChannel(room.id)).emit('game:over', { ranking });
+    this.io.to(roomChannel(room.id)).emit('game:over', {
+      ranking: ranking.map((playerId) => ({ playerId, nickname: nicknameOf(room, playerId) })),
+    });
   }
 
   /** 一手結束時寫戰報。同一手只會寫一次。 */
@@ -732,6 +916,11 @@ export class GameServer {
     }, delay);
   }
 
+  /**
+   * 逾時代打。
+   * 代打失敗（引擎回 null）也照樣走 afterGameAction —— 少了它就沒有人重新掛計時器，
+   * 房間會永遠停在同一個回合。寧可 45 秒後再試一次，也不要卡死。
+   */
   private runAutoAct(room: Room): void {
     const game = room.game;
     if (!game || game.state.over) return;
@@ -739,27 +928,39 @@ export class GameServer {
     const playerId = room.seats[game.state.turnSeat];
     const nickname = playerId ? nicknameOf(room, playerId) : '';
 
-    if (game.type === 'bigTwo') {
-      const acted = autoAct(room.seats, game.state);
-      if (!acted) return;
-
-      if (acted.action === 'pass') {
-        pushLog(room, { t: 'timeout', player: nickname, auto: 'pass' });
-      } else {
-        pushLog(room, {
-          t: 'timeoutPlay',
-          player: nickname,
-          combo: acted.result.combo.type,
-          cards: cardIdsOf(acted.result.combo.cards),
-        });
-        if (acted.result.rank !== null) {
-          pushLog(room, { t: 'finished', player: nickname, rank: acted.result.rank });
+    switch (game.type) {
+      case 'bigTwo': {
+        const acted = autoAct(room.seats, game.state);
+        if (acted?.action === 'pass') {
+          pushLog(room, { t: 'timeout', player: nickname, auto: 'pass' });
+        } else if (acted) {
+          pushLog(room, {
+            t: 'timeoutPlay',
+            player: nickname,
+            combo: acted.result.combo.type,
+            cards: cardIdsOf(acted.result.combo.cards),
+          });
+          if (acted.result.rank !== null) {
+            pushLog(room, { t: 'finished', player: nickname, rank: acted.result.rank });
+          }
         }
+        break;
       }
-    } else {
-      const acted = autoActHoldem(room.seats, game.state);
-      if (!acted) return;
-      pushLog(room, { t: 'timeout', player: nickname, auto: acted.action });
+      case 'holdem': {
+        const acted = autoActHoldem(room.seats, game.state);
+        if (acted) pushLog(room, { t: 'timeout', player: nickname, auto: acted.action });
+        break;
+      }
+      case 'monopoly': {
+        const acted = autoActMonopoly(room.seats, game.state);
+        if (acted) {
+          pushLog(room, { t: 'timeoutMonopoly', player: nickname, phase: acted.phase });
+          this.logMonopoly(room, acted.events);
+        }
+        break;
+      }
+      default:
+        assertNeverGame(game);
     }
 
     this.afterGameAction(room);

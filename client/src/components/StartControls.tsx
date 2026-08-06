@@ -1,7 +1,15 @@
-import { SEAT_LIMITS, type RoomView } from 'shared';
+import { SEAT_LIMITS, type GameType, type RoomView } from 'shared';
 import { emitWithAck, socket } from '../net/socket';
 import { useGame } from '../state/GameProvider';
 import { useSkin } from '../state/skinContext';
+import type { TextKey } from '../skins/text';
+
+/** 開始鈕的文案。用 Record 而不是三元 —— 新玩法漏了會編譯失敗。 */
+const START_LABEL_KEY: Record<GameType, TextKey> = {
+  bigTwo: 'start.startBigTwo',
+  holdem: 'start.startHoldem',
+  monopoly: 'start.startMonopoly',
+};
 
 /** 開局前的準備 / 開始遊戲，兩種玩法共用。 */
 export function StartControls({ room }: { room: RoomView }) {
@@ -13,7 +21,7 @@ export function StartControls({ room }: { room: RoomView }) {
   const min = SEAT_LIMITS[room.gameType].min;
   const everyoneReady = room.seats.every((seat) => seat.ready || seat.playerId === room.hostId);
   const canStart = isHost && room.seats.length >= min && everyoneReady;
-  const startLabel = room.gameType === 'holdem' ? t('start.startHoldem') : t('start.startBigTwo');
+  const startLabel = t(START_LABEL_KEY[room.gameType]);
 
   return (
     <>

@@ -4,12 +4,16 @@ import {
   BIG_TWO_PRESET_RULES,
   BIG_TWO_RULE_KEYS,
   DEFAULT_BIG_TWO_RULES,
+  DEFAULT_MONOPOLY_OPTIONS,
   GAME_TYPES,
+  MONOPOLY_OPTION_KEYS,
+  MONOPOLY_OPTION_SPEC,
   SEAT_LIMITS,
   bigTwoPresetOf,
   type BigTwoRules,
   type GameType,
   type JoinMode,
+  type MonopolyOptions,
   type RoomStatus,
 } from 'shared';
 import { ChatPanel } from '../components/ChatPanel';
@@ -31,6 +35,8 @@ export function Lobby() {
   const [gameType, setGameType] = useState<GameType>('bigTwo');
   const [maxPlayers, setMaxPlayers] = useState(SEAT_LIMITS.bigTwo.max);
   const [bigTwoRules, setBigTwoRules] = useState<BigTwoRules>(DEFAULT_BIG_TWO_RULES);
+  const [monopolyOptions, setMonopolyOptions] =
+    useState<MonopolyOptions>(DEFAULT_MONOPOLY_OPTIONS);
   const [joinCode, setJoinCode] = useState('');
   const [nicknameDraft, setNicknameDraft] = useState(nickname);
 
@@ -53,7 +59,13 @@ export function Lobby() {
   const createRoom = (event: FormEvent) => {
     event.preventDefault();
     run(() =>
-      emitWithAck('room:create', { name: roomName.trim(), maxPlayers, gameType, bigTwoRules }),
+      emitWithAck('room:create', {
+        name: roomName.trim(),
+        maxPlayers,
+        gameType,
+        bigTwoRules,
+        monopolyOptions,
+      }),
     );
     setRoomName('');
   };
@@ -165,6 +177,43 @@ export function Lobby() {
                     {skin.bigTwoRule[key]}
                   </label>
                 ))}
+              </fieldset>
+            )}
+            {gameType === 'monopoly' && (
+              <fieldset className="lobby__rules lobby__rules--monopoly">
+                <legend>{t('lobby.rulesOptionsLabel')}</legend>
+                {/* 整段由 MONOPOLY_OPTION_SPEC 生成，加選項不必回來改這裡 */}
+                {MONOPOLY_OPTION_KEYS.map((key) => {
+                  const spec = MONOPOLY_OPTION_SPEC[key];
+                  return (
+                    <label key={key}>
+                      {spec.kind === 'flag' ? (
+                        <input
+                          type="checkbox"
+                          checked={Boolean(monopolyOptions[key])}
+                          onChange={(event) =>
+                            setMonopolyOptions({ ...monopolyOptions, [key]: event.target.checked })
+                          }
+                        />
+                      ) : (
+                        <input
+                          type="number"
+                          min={spec.min}
+                          max={spec.max}
+                          step={spec.step}
+                          value={Number(monopolyOptions[key])}
+                          onChange={(event) =>
+                            setMonopolyOptions({
+                              ...monopolyOptions,
+                              [key]: Number(event.target.value),
+                            })
+                          }
+                        />
+                      )}
+                      {skin.monopolyOption[key]}
+                    </label>
+                  );
+                })}
               </fieldset>
             )}
           </form>
