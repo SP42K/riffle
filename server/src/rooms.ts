@@ -1,9 +1,13 @@
 import {
+  BIG_TWO_RULE_KEYS,
   CHAT_HISTORY,
+  DEFAULT_BIG_TWO_RULES,
   HOLDEM_START_CHIPS,
   LOG_HISTORY,
   SEAT_LIMITS,
   type BigTwoGameView,
+  type BigTwoRuleKey,
+  type BigTwoRules,
   type BigTwoSeatInfo,
   type ChatMessage,
   type Card,
@@ -46,6 +50,8 @@ export interface Room {
   id: string;
   name: string;
   gameType: GameType;
+  /** 大老二的規則開關。建房時決定，德州撲克房用不到但一律有值。 */
+  bigTwoRules: BigTwoRules;
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -92,6 +98,16 @@ export function normalizeGameType(value: unknown): GameType {
   return value === 'holdem' ? 'holdem' : 'bigTwo';
 }
 
+/** 逐鍵消毒：只收布林值，缺的或來路不明的一律吃預設（台灣慣例）。 */
+export function normalizeBigTwoRules(value: unknown): BigTwoRules {
+  const input = (value ?? {}) as Partial<Record<BigTwoRuleKey, unknown>>;
+  const rules = {} as BigTwoRules;
+  for (const key of BIG_TWO_RULE_KEYS) {
+    rules[key] = typeof input[key] === 'boolean' ? input[key] : DEFAULT_BIG_TWO_RULES[key];
+  }
+  return rules;
+}
+
 export function clampMaxPlayers(value: unknown, gameType: GameType): number {
   const limits = SEAT_LIMITS[gameType];
   const n = Math.floor(Number(value));
@@ -104,12 +120,14 @@ export function createRoom(
   name: string,
   gameType: GameType,
   maxPlayers: number,
+  bigTwoRules: BigTwoRules,
   host: Member,
 ): Room {
   const room: Room = {
     id,
     name,
     gameType,
+    bigTwoRules,
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -261,6 +279,7 @@ export function buildSummary(room: Room): RoomSummary {
     id: room.id,
     name: room.name,
     gameType: room.gameType,
+    bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
     hostNickname: nicknameOf(room, room.hostId),
     playerCount: room.players.size,
     maxPlayers: room.maxPlayers,
@@ -405,6 +424,7 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     id: room.id,
     name: room.name,
     gameType: room.gameType,
+    bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),

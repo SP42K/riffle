@@ -1,5 +1,17 @@
 import { useState, type FormEvent } from 'react';
-import { GAME_TYPES, SEAT_LIMITS, type GameType, type JoinMode, type RoomStatus } from 'shared';
+import {
+  BIG_TWO_PRESETS,
+  BIG_TWO_PRESET_RULES,
+  BIG_TWO_RULE_KEYS,
+  DEFAULT_BIG_TWO_RULES,
+  GAME_TYPES,
+  SEAT_LIMITS,
+  bigTwoPresetOf,
+  type BigTwoRules,
+  type GameType,
+  type JoinMode,
+  type RoomStatus,
+} from 'shared';
 import { ChatPanel } from '../components/ChatPanel';
 import { emitWithAck, getPlayerId, socket } from '../net/socket';
 import { useGame } from '../state/GameProvider';
@@ -18,6 +30,7 @@ export function Lobby() {
   const [roomName, setRoomName] = useState('');
   const [gameType, setGameType] = useState<GameType>('bigTwo');
   const [maxPlayers, setMaxPlayers] = useState(SEAT_LIMITS.bigTwo.max);
+  const [bigTwoRules, setBigTwoRules] = useState<BigTwoRules>(DEFAULT_BIG_TWO_RULES);
   const [joinCode, setJoinCode] = useState('');
   const [nicknameDraft, setNicknameDraft] = useState(nickname);
 
@@ -30,9 +43,18 @@ export function Lobby() {
     setMaxPlayers(SEAT_LIMITS[next].max);
   };
 
+  // 套組只是一鍵套用五個開關；動過任何一項，選單就自己變成「自訂」
+  const preset = bigTwoPresetOf(bigTwoRules);
+  const applyPreset = (next: string) => {
+    if (next === 'custom') return;
+    setBigTwoRules(BIG_TWO_PRESET_RULES[next as 'taiwan' | 'classic']);
+  };
+
   const createRoom = (event: FormEvent) => {
     event.preventDefault();
-    run(() => emitWithAck('room:create', { name: roomName.trim(), maxPlayers, gameType }));
+    run(() =>
+      emitWithAck('room:create', { name: roomName.trim(), maxPlayers, gameType, bigTwoRules }),
+    );
     setRoomName('');
   };
 
@@ -99,6 +121,20 @@ export function Lobby() {
                   </option>
                 ))}
               </select>
+              {gameType === 'bigTwo' && (
+                <select
+                  value={preset}
+                  onChange={(event) => applyPreset(event.target.value)}
+                  aria-label={t('lobby.rulesLabel')}
+                >
+                  {BIG_TWO_PRESETS.map((item) => (
+                    // 自訂只是顯示用的結果，選不了
+                    <option key={item} value={item} disabled={item === 'custom'}>
+                      {skin.bigTwoPreset[item]}
+                    </option>
+                  ))}
+                </select>
+              )}
               <select
                 value={maxPlayers}
                 onChange={(event) => setMaxPlayers(Number(event.target.value))}
@@ -114,6 +150,23 @@ export function Lobby() {
                 {t('lobby.create')}
               </button>
             </div>
+            {gameType === 'bigTwo' && (
+              <fieldset className="lobby__rules">
+                <legend>{t('lobby.rulesOptionsLabel')}</legend>
+                {BIG_TWO_RULE_KEYS.map((key) => (
+                  <label key={key}>
+                    <input
+                      type="checkbox"
+                      checked={bigTwoRules[key]}
+                      onChange={(event) =>
+                        setBigTwoRules({ ...bigTwoRules, [key]: event.target.checked })
+                      }
+                    />
+                    {skin.bigTwoRule[key]}
+                  </label>
+                ))}
+              </fieldset>
+            )}
           </form>
 
           <form className="panel lobby__code" onSubmit={joinByCode}>
@@ -144,6 +197,11 @@ export function Lobby() {
                       <span className="room-row__name">{room.name}</span>
                       <span className="room-row__code">#{room.id}</span>
                       <span className="tag tag--game">{skin.gameType[room.gameType]}</span>
+                      {room.bigTwoRules && (
+                        <span className="tag tag--rules">
+                          {skin.bigTwoPreset[bigTwoPresetOf(room.bigTwoRules)]}
+                        </span>
+                      )}
                       <span className={`badge badge--${room.status}`}>
                         {t(STATUS_KEY[room.status])}
                       </span>

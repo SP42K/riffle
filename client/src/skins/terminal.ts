@@ -39,6 +39,7 @@ const COMBO: Skin['combo'] = {
   fullHouse: '3+2',
   fourOfAKind: '4x',
   straightFlush: 'seq+grp',
+  dragon: 'seq13',
 };
 
 const CATEGORY: Skin['holdemCategory'] = {
@@ -162,6 +163,8 @@ const TEXT: TextTable = {
   'lobby.createTitle': 'new job',
   'lobby.roomNamePlaceholder': '{name}-job',
   'lobby.gameTypeLabel': 'mode',
+  'lobby.rulesLabel': 'ruleset',
+  'lobby.rulesOptionsLabel': 'flags',
   'lobby.maxPlayersLabel': 'workers',
   'lobby.seatOption': '{n} workers',
   'lobby.create': 'create',
@@ -246,8 +249,11 @@ const TEXT: TextTable = {
   'hint.invalidCombo': 'invalid batch',
   'hint.mustIncludeOpening': 'first push must include the first item',
   'hint.mustPlayN': 'must select {n} items',
+  'hint.mustMatchCombo': 'this round accepts {combo} only',
+  'hint.noFlush': '--suit is off: grp not allowed',
   'hint.cannotBeat': '{combo} does not supersede',
   'hint.canPlay': 'ok: {combo}',
+  'hint.canCut': 'override: {combo}',
 
   'holdem.idleTitle': 'waiting for owner to start',
   'holdem.idleHint': '{n}/{max} workers, {min} required',
@@ -295,6 +301,7 @@ const ERRORS: Skin['errors'] = {
   NOT_IN_HAND: 'those items are not in your queue',
   INVALID_COMBO: 'invalid batch',
   CANNOT_BEAT: 'does not supersede',
+  MUST_MATCH_COMBO: 'this round accepts one batch shape only',
   MUST_INCLUDE_OPENING: 'must include the first item',
   CANNOT_PASS_ON_LEAD: 'you hold the lead — cannot skip',
   ALREADY_FOLDED: 'already aborted',
@@ -319,6 +326,14 @@ export const terminalSkin: Skin = {
   text: TEXT,
   combo: COMBO,
   gameType: { bigTwo: 'batch', holdem: 'stream' },
+  bigTwoPreset: { taiwan: 'strict', classic: 'legacy', custom: 'custom' },
+  bigTwoRule: {
+    cuts: '--cut',
+    dragon: '--full',
+    flush: '--suit',
+    matchFiveCardType: '--same-type',
+    passLocksTrick: '--skip',
+  },
   street: STREET,
   holdemCategory: CATEGORY,
   errors: ERRORS,

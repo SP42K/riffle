@@ -1,4 +1,6 @@
 import {
+  BIG_TWO_PRESET_LABEL,
+  BIG_TWO_RULE_LABEL,
   COMBO_LABEL,
   GAME_TYPE_LABEL,
   HOLDEM_CATEGORY_LABEL,
@@ -134,6 +136,8 @@ export const casinoSkin: Skin = {
   text: CASINO_TEXT,
   combo: COMBO_LABEL,
   gameType: GAME_TYPE_LABEL,
+  bigTwoPreset: BIG_TWO_PRESET_LABEL,
+  bigTwoRule: BIG_TWO_RULE_LABEL,
   street: HOLDEM_STREET_LABEL,
   holdemCategory: HOLDEM_CATEGORY_LABEL,
   errors: {},

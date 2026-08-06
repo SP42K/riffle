@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDeck, makeCard, pickCards, sortCards } from './cards.js';
 import {
+  beatFailure,
   canBeat,
   compareCombo,
   findLegalPlays,
@@ -8,7 +9,19 @@ import {
   identifyCombo,
   smallestLegalPlay,
 } from './combos.js';
-import { RANK_LABEL, type Card, type Rank, type Suit } from './types.js';
+import {
+  CLASSIC_BIG_TWO_RULES,
+  RANK_LABEL,
+  TAIWAN_BIG_TWO_RULES,
+  type BigTwoRules,
+  type Card,
+  type Rank,
+  type Suit,
+} from './types.js';
+
+/** 兩個套組寫短一點，混搭的測試就用 { ...TW, cuts: false } 這種寫法。 */
+const TW = TAIWAN_BIG_TWO_RULES;
+const CL = CLASSIC_BIG_TWO_RULES;
 
 const RANK_BY_LABEL = new Map<string, Rank>(
   (Object.entries(RANK_LABEL) as Array<[string, string]>).map(([rank, label]) => [
@@ -30,16 +43,26 @@ function hand(spec: string): Card[] {
     });
 }
 
-function typeOf(spec: string): string | null {
-  return identifyCombo(hand(spec))?.type ?? null;
+/** 沒指定規則就用一般規則，跟這支的預設值無關 —— 台灣的部分都寫在 beatsTw／typeOfTw。 */
+function typeOf(spec: string, rules: BigTwoRules = CL): string | null {
+  return identifyCombo(hand(spec), rules)?.type ?? null;
 }
 
 /** a 是否壓得過 b。 */
-function beats(a: string, b: string): boolean {
-  const ca = identifyCombo(hand(a));
-  const cb = identifyCombo(hand(b));
+function beats(a: string, b: string, rules: BigTwoRules = CL): boolean {
+  const ca = identifyCombo(hand(a), rules);
+  const cb = identifyCombo(hand(b), rules);
   if (!ca || !cb) throw new Error(`invalid combo in "${a}" vs "${b}"`);
-  return canBeat(ca, cb);
+  return canBeat(ca, cb, rules);
+}
+
+function typeOfTw(spec: string): string | null {
+  return typeOf(spec, TW);
+}
+
+/** 台灣規則版的 beats。 */
+function beatsTw(a: string, b: string): boolean {
+  return beats(a, b, TW);
 }
 
 describe('牌型辨識', () => {
@@ -225,6 +248,159 @@ describe('找出可出的牌', () => {
     const myHand = hand('D3 C4 SA D2');
     const last = identifyCombo(hand('H5'))!;
     expect(smallestLegalPlay(myHand, last)?.cards[0]?.id).toBe('SA');
+  });
+});
+
+describe('台灣規則：牌型', () => {
+  const dragon = 'D3 C4 H5 S6 D7 C8 H9 S10 DJ CQ HK SA D2';
+
+  it('不收同花，湊成同花的五張只是散牌', () => {
+    expect(typeOfTw('D3 D5 D7 D9 DJ')).toBeNull();
+    expect(typeOf('D3 D5 D7 D9 DJ')).toBe('flush'); // 一般規則照舊
+  });
+
+  it('同花順不受影響，還是同花順', () => {
+    expect(typeOfTw('D3 D4 D5 D6 D7')).toBe('straightFlush');
+  });
+
+  it('一條龍是 3 到 2 各一張', () => {
+    expect(typeOfTw(dragon)).toBe('dragon');
+    expect(typeOf(dragon)).toBeNull(); // 一般規則沒有 13 張的牌型
+  });
+
+  it('13 張但點數有重複就不是一條龍', () => {
+    expect(typeOfTw('D3 C3 H5 S6 D7 C8 H9 S10 DJ CQ HK SA D2')).toBeNull();
+  });
+});
+
+describe('台灣規則：切', () => {
+  const single = 'S2';
+  const pair = 'S2 H2';
+  const straight = 'D3 C4 H5 S6 D7';
+  const fullHouse = 'D3 C3 H3 S4 D4';
+  const quads = 'D8 C8 H8 S8 D4';
+  const bigQuads = 'D9 C9 H9 S9 D4';
+  const straightFlush = 'C3 C4 C5 C6 C7';
+  const dragon = 'D3 C4 H5 S6 D7 C8 H9 S10 DJ CQ HK SA D2';
+
+  it('鐵支壓得過任何張數的牌', () => {
+    expect(beatsTw(quads, single)).toBe(true);
+    expect(beatsTw(quads, pair)).toBe(true);
+    expect(beatsTw(quads, straight)).toBe(true);
+    expect(beatsTw(quads, fullHouse)).toBe(true);
+  });
+
+  it('被切走之後只有更大的切拿得回來', () => {
+    expect(beatsTw(pair, quads)).toBe(false);
+    expect(beatsTw(straight, quads)).toBe(false);
+    expect(beatsTw(fullHouse, quads)).toBe(false);
+    expect(beatsTw(bigQuads, quads)).toBe(true); // 同樣是鐵支，比點數
+  });
+
+  it('一條龍 > 同花順 > 鐵支', () => {
+    expect(beatsTw(straightFlush, quads)).toBe(true);
+    expect(beatsTw(quads, straightFlush)).toBe(false);
+    expect(beatsTw(dragon, straightFlush)).toBe(true);
+    expect(beatsTw(dragon, quads)).toBe(true);
+    expect(beatsTw(straightFlush, dragon)).toBe(false);
+  });
+});
+
+describe('台灣規則：五張只能同型跟', () => {
+  const straight = 'D3 C4 H5 S6 D7';
+  const bigStraight = 'D4 C5 H6 S7 D8';
+  const fullHouse = 'D3 C3 H3 S4 D4';
+  const bigFullHouse = 'D9 C9 H9 S4 D4';
+
+  it('順子只能用順子接', () => {
+    expect(beatsTw(bigStraight, straight)).toBe(true);
+    expect(beatsTw(fullHouse, straight)).toBe(false); // 一般規則裡葫蘆壓得過順子
+    expect(beats(fullHouse, straight)).toBe(true);
+  });
+
+  it('葫蘆只能用葫蘆接', () => {
+    expect(beatsTw(bigFullHouse, fullHouse)).toBe(true);
+    expect(beatsTw(bigStraight, fullHouse)).toBe(false);
+  });
+
+  it('beatFailure 分得出「牌型不對」與「單純比不過」', () => {
+    const small = identifyCombo(hand(straight), TW)!;
+    const big = identifyCombo(hand(bigStraight), TW)!;
+    const house = identifyCombo(hand(fullHouse), TW)!;
+    const pair = identifyCombo(hand('S2 H2'), TW)!;
+
+    expect(beatFailure(big, small, TW)).toBeNull();
+    expect(beatFailure(small, big, TW)).toBe('tooSmall');
+    expect(beatFailure(house, small, TW)).toBe('comboType');
+    expect(beatFailure(pair, small, TW)).toBe('size');
+  });
+});
+
+describe('台灣規則：找出可出的牌', () => {
+  it('跟單張時也會把手上的切算進來', () => {
+    const myHand = hand('D8 C8 H8 S8 D4');
+    const last = identifyCombo(hand('SA'), TW)!;
+    const plays = findLegalPlays(myHand, last, { rules: TW });
+
+    // 沒有單張壓得過 ♠A，但鐵支可以切
+    expect(plays).toHaveLength(1);
+    expect(plays[0]!.type).toBe('fourOfAKind');
+  });
+
+  it('有得跟就不會浪費切', () => {
+    const myHand = hand('D3 C4 H5 S6 D7 D8 C8 H8 S8');
+    const last = identifyCombo(hand('D3 C4 H5 S6 C7'), TW)!;
+    const smallest = smallestLegalPlay(myHand, last, { rules: TW });
+    expect(smallest?.type).toBe('straight');
+  });
+
+  it('同花不會被列進可出的牌', () => {
+    const myHand = hand('D3 D5 D7 D9 DJ');
+    const plays = findLegalPlays(myHand, null, { rules: TW });
+    expect(plays.some((p) => p.type === 'flush')).toBe(false);
+    expect(plays.every((p) => p.size <= 3)).toBe(true); // 只剩單張，湊不出對子
+  });
+});
+
+describe('規則開關可以單獨拆開用', () => {
+  const straight = 'D3 C4 H5 S6 D7';
+  const fullHouse = 'D3 C3 H3 S4 D4';
+  const quads = 'D8 C8 H8 S8 D4';
+  const flush = 'D3 D5 D7 D9 DJ';
+  const dragon = 'D3 C4 H5 S6 D7 C8 H9 S10 DJ CQ HK SA D2';
+
+  it('關掉切之後，鐵支只是一種五張牌型', () => {
+    const noCuts = { ...TW, cuts: false };
+    expect(beats(quads, straight, noCuts)).toBe(false); // 五張同型跟還在，鐵支跟不了順子
+    expect(beats('S2', quads, noCuts)).toBe(false); // 張數不對
+  });
+
+  it('關掉五張同型跟，切還是切', () => {
+    const loose = { ...TW, matchFiveCardType: false };
+    expect(beats(fullHouse, straight, loose)).toBe(true); // 退回跨型比較
+    expect(beats(quads, straight, loose)).toBe(true); // 切照舊
+    expect(beats(straight, quads, loose)).toBe(false);
+  });
+
+  it('同花可以單獨開回來，而且照樣受同型跟限制', () => {
+    const withFlush = { ...TW, flush: true };
+    expect(typeOf(flush, withFlush)).toBe('flush');
+    expect(beats(flush, straight, withFlush)).toBe(false); // 順子只能用順子接
+    expect(beats(flush, straight, { ...withFlush, matchFiveCardType: false })).toBe(true);
+  });
+
+  it('一條龍可以在沒有切的情況下認：只有一條龍跟得起', () => {
+    const dragonOnly = { ...CL, dragon: true };
+    expect(typeOf(dragon, dragonOnly)).toBe('dragon');
+    expect(beats(quads, dragon, dragonOnly)).toBe(false); // 張數不對，也沒有切
+    // 領牌時 13 張是合法選項，等於一次出完
+    const plays = findLegalPlays(hand(dragon), null, { rules: dragonOnly });
+    expect(plays.some((p) => p.type === 'dragon')).toBe(true);
+  });
+
+  it('關掉一條龍時，findLegalPlays 不會去枚舉 13 張', () => {
+    const plays = findLegalPlays(hand(dragon), null, { rules: { ...TW, dragon: false } });
+    expect(plays.some((p) => p.size === 13)).toBe(false);
   });
 });
 

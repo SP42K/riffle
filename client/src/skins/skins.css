@@ -414,6 +414,13 @@
   border: 1px solid #333333;
   border-radius: 3px;
 }
+/* 規則開關看起來像 settings.json 的核取項 */
+[data-skin='vscode'] .lobby__rules {
+  background: #1e1e1e;
+  border: 1px solid #333333;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Cascadia Mono', monospace;
+}
 [data-skin='vscode'] .seat--turn {
   border-color: #4fa6e8;
   box-shadow: inset 2px 0 0 #4fa6e8;
@@ -651,6 +658,12 @@
 [data-skin='terminal'] .gate__card,
 [data-skin='terminal'] .seat,
 [data-skin='terminal'] .room-row {
+  background: transparent;
+  border: 1px solid #232a31;
+  border-radius: 2px;
+}
+/* 規則開關排成一列 flag */
+[data-skin='terminal'] .lobby__rules {
   background: transparent;
   border: 1px solid #232a31;
   border-radius: 2px;

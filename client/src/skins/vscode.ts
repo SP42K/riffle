@@ -43,6 +43,7 @@ const COMBO: Skin['combo'] = {
   fullHouse: 'compound',
   fourOfAKind: 'quad',
   straightFlush: 'rangeUnion',
+  dragon: 'fullRange',
 };
 
 const CATEGORY: Skin['holdemCategory'] = {
@@ -167,6 +168,8 @@ const TEXT: TextTable = {
   'lobby.createTitle': 'New session',
   'lobby.roomNamePlaceholder': '{name} / session',
   'lobby.gameTypeLabel': 'Pipeline',
+  'lobby.rulesLabel': 'Ruleset',
+  'lobby.rulesOptionsLabel': 'Flags',
   'lobby.maxPlayersLabel': 'Members',
   'lobby.seatOption': '{n} members',
   'lobby.create': 'Create',
@@ -251,8 +254,11 @@ const TEXT: TextTable = {
   'hint.invalidCombo': 'Not a valid change set',
   'hint.mustIncludeOpening': 'First commit must include the entry file',
   'hint.mustPlayN': 'Must select {n} files',
+  'hint.mustMatchCombo': 'This round only accepts {combo}',
+  'hint.noFlush': 'sameSuit is off in this run',
   'hint.cannotBeat': '{combo} does not supersede the last commit',
   'hint.canPlay': 'Ready: {combo}',
+  'hint.canCut': 'Override: {combo}',
 
   'holdem.idleTitle': 'Waiting for the owner to start the run',
   'holdem.idleHint': '{n}/{max} members, {min} required',
@@ -300,6 +306,7 @@ const ERRORS: Skin['errors'] = {
   NOT_IN_HAND: 'You do not have those files',
   INVALID_COMBO: 'Not a valid change set',
   CANNOT_BEAT: 'Does not supersede the last commit',
+  MUST_MATCH_COMBO: 'This round only accepts the same change set shape',
   MUST_INCLUDE_OPENING: 'Must include the entry file',
   CANNOT_PASS_ON_LEAD: 'You hold the lead — cannot skip',
   ALREADY_FOLDED: 'You already dropped',
@@ -324,6 +331,14 @@ export const vscodeSkin: Skin = {
   text: TEXT,
   combo: COMBO,
   gameType: { bigTwo: 'batch', holdem: 'stream' },
+  bigTwoPreset: { taiwan: 'strict', classic: 'default', custom: 'custom' },
+  bigTwoRule: {
+    cuts: 'override',
+    dragon: 'fullRange',
+    flush: 'sameSuit',
+    matchFiveCardType: 'sameType',
+    passLocksTrick: 'skipUntilReset',
+  },
   street: STREET,
   holdemCategory: CATEGORY,
   errors: ERRORS,

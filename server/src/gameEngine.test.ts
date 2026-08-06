@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CLASSIC_BIG_TWO_RULES,
   HAND_SIZE,
   RANK_LABEL,
+  TAIWAN_BIG_TWO_RULES,
   cardValue,
   makeCard,
   sortCards,
+  type BigTwoRules,
   type Card,
   type Rank,
   type Suit,
@@ -37,12 +40,16 @@ function hand(spec: string): Card[] {
 }
 
 /** 直接組出一個進行中的局，方便測回合流程。第一位玩家先手，且沒有開局牌限制。 */
-function setup(specs: Record<string, string>): { seats: Seats; state: GameState } {
+function setup(
+  specs: Record<string, string>,
+  rules: BigTwoRules = CLASSIC_BIG_TWO_RULES,
+): { seats: Seats; state: GameState } {
   const seats: Seats = Object.keys(specs);
   const hands = new Map(Object.entries(specs).map(([id, spec]) => [id, hand(spec)]));
   return {
     seats,
     state: {
+      rules,
       hands,
       turnSeat: 0,
       lastPlay: null,
@@ -222,6 +229,119 @@ describe('回合與領牌權', () => {
     // a 已出局，c PASS 後直接繞回 b，不會停在 a
     expect(turn(seats, state)).toBe('b');
     expect(state.lastPlay).toBeNull();
+  });
+});
+
+describe('台灣規則：PASS 之後這一輪就不能再出', () => {
+  it('PASS 掉的人不會再輪到，別人出牌也不解封', () => {
+    const { seats, state } = setup(
+      { a: 'D3 D4 D5', b: 'C6 C7 C8', c: 'H9 H10 HJ', d: 'SQ SK SA' },
+      TAIWAN_BIG_TWO_RULES,
+    );
+    playCards(seats, state, 'a', ['D3']);
+    passTurn(seats, state, 'b'); // b 退出這一輪
+    expect(turn(seats, state)).toBe('c');
+
+    playCards(seats, state, 'c', ['H9']);
+    expect(state.passedSeats.has(1)).toBe(true); // c 出牌並沒有把 b 放回來
+    expect(turn(seats, state)).toBe('d');
+
+    playCards(seats, state, 'd', ['SQ']);
+    expect(turn(seats, state)).toBe('a'); // 跳過 b
+  });
+
+  it('一般規則裡 PASS 過的人下一圈還是輪得到', () => {
+    const { seats, state } = setup({ a: 'D3 D4 D5', b: 'C6 C7 C8', c: 'H9 H10 HJ', d: 'SQ SK SA' });
+    playCards(seats, state, 'a', ['D3']);
+    passTurn(seats, state, 'b');
+    playCards(seats, state, 'c', ['H9']);
+    playCards(seats, state, 'd', ['SQ']);
+    passTurn(seats, state, 'a');
+    expect(turn(seats, state)).toBe('b');
+  });
+
+  it('三家都 PASS 之後由最後出牌者重新領牌，封印一起解開', () => {
+    const { seats, state } = setup(
+      { a: 'D3 D4', b: 'C6 C7', c: 'H9 H10', d: 'SQ SK' },
+      TAIWAN_BIG_TWO_RULES,
+    );
+    playCards(seats, state, 'a', ['D4']);
+    passTurn(seats, state, 'b');
+    passTurn(seats, state, 'c');
+    passTurn(seats, state, 'd');
+
+    expect(turn(seats, state)).toBe('a');
+    expect(state.lastPlay).toBeNull();
+    expect(state.passedSeats.size).toBe(0);
+  });
+
+  it('領牌者出完牌走人時，這一輪作廢，下一位自由出牌', () => {
+    const { seats, state } = setup(
+      { a: 'S2', b: 'C6 C7', c: 'H9 H10', d: 'SQ SK' },
+      TAIWAN_BIG_TWO_RULES,
+    );
+    state.passedSeats.add(1); // b 這一輪已經 PASS 過
+    playCards(seats, state, 'a', ['S2']); // a 出完出局
+
+    expect(turn(seats, state)).toBe('b');
+    expect(state.lastPlay).toBeNull();
+    expect(state.passedSeats.size).toBe(0);
+  });
+});
+
+describe('台灣規則：牌型限制與切', () => {
+  it('五張只能用同一種牌型跟，鐵支則可以切', () => {
+    const { seats, state } = setup(
+      { a: 'D3 C4 H5 S6 D7 SK', b: 'D9 C9 H9 S4 D4 C8 H8 S8 D8' },
+      TAIWAN_BIG_TWO_RULES,
+    );
+    playCards(seats, state, 'a', ['D3', 'C4', 'H5', 'S6', 'D7']); // 順子
+
+    expect(playCards(seats, state, 'b', ['D9', 'C9', 'H9', 'S4', 'D4'])).toEqual({
+      ok: false,
+      error: 'MUST_MATCH_COMBO',
+    });
+    expect(playCards(seats, state, 'b', ['C8', 'H8', 'S8', 'D8', 'S4']).ok).toBe(true);
+  });
+
+  it('同花不是合法牌型', () => {
+    const { seats, state } = setup(
+      { a: 'D3 D5 D7 D9 DJ', b: 'S2 SA' },
+      TAIWAN_BIG_TWO_RULES,
+    );
+    expect(playCards(seats, state, 'a', ['D3', 'D5', 'D7', 'D9', 'DJ'])).toEqual({
+      ok: false,
+      error: 'INVALID_COMBO',
+    });
+  });
+});
+
+describe('規則開關可以單獨拆開用', () => {
+  it('一般規則加上 PASS 鎖整輪，輪轉就跟著鎖', () => {
+    const { seats, state } = setup(
+      { a: 'D3 D4 D5', b: 'C6 C7 C8', c: 'H9 H10 HJ', d: 'SQ SK SA' },
+      { ...CLASSIC_BIG_TWO_RULES, passLocksTrick: true },
+    );
+    playCards(seats, state, 'a', ['D3']);
+    passTurn(seats, state, 'b');
+    playCards(seats, state, 'c', ['H9']);
+    expect(state.passedSeats.has(1)).toBe(true); // 出牌沒有把 b 放回來
+    playCards(seats, state, 'd', ['SQ']);
+    expect(turn(seats, state)).toBe('a'); // 跳過 b
+  });
+
+  it('台灣規則關掉 PASS 鎖整輪，同花仍然不合法但 PASS 過的人回得來', () => {
+    const { seats, state } = setup(
+      { a: 'D3 D4 D5', b: 'C6 C7 C8', c: 'H9 H10 HJ', d: 'SQ SK SA' },
+      { ...TAIWAN_BIG_TWO_RULES, passLocksTrick: false },
+    );
+    playCards(seats, state, 'a', ['D3']);
+    passTurn(seats, state, 'b');
+    playCards(seats, state, 'c', ['H9']);
+    expect(state.passedSeats.size).toBe(0); // 有人出牌就解封
+    playCards(seats, state, 'd', ['SQ']);
+    passTurn(seats, state, 'a');
+    expect(turn(seats, state)).toBe('b');
   });
 });
 

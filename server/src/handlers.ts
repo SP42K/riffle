@@ -47,6 +47,7 @@ import {
   memberOf,
   modeOf,
   nicknameOf,
+  normalizeBigTwoRules,
   normalizeGameType,
   pushChat,
   pushLog,
@@ -283,7 +284,7 @@ export class GameServer {
 
   private onCreateRoom(
     socket: GameSocket,
-    payload: { name?: unknown; maxPlayers?: unknown; gameType?: unknown },
+    payload: { name?: unknown; maxPlayers?: unknown; gameType?: unknown; bigTwoRules?: unknown },
     ack: unknown,
   ): void {
     const session = this.sessions.get(socket.id);
@@ -295,11 +296,12 @@ export class GameServer {
     const name = cleanText(payload?.name, 20) || `${session.nickname} 的房間`;
     const gameType = normalizeGameType(payload?.gameType);
     const maxPlayers = clampMaxPlayers(payload?.maxPlayers, gameType);
+    const bigTwoRules = normalizeBigTwoRules(payload?.bigTwoRules);
     const id = generateRoomId((candidate) => this.rooms.has(candidate));
 
     const host = this.memberFromSession(session);
     host.socketId = socket.id;
-    const room = createRoom(id, name, gameType, maxPlayers, host);
+    const room = createRoom(id, name, gameType, maxPlayers, bigTwoRules, host);
     this.rooms.set(id, room);
 
     session.roomId = id;
@@ -471,7 +473,7 @@ export class GameServer {
     for (const player of room.players.values()) player.ready = false;
 
     if (room.gameType === 'bigTwo') {
-      const state = dealGame(room.seats);
+      const state = dealGame(room.seats, room.bigTwoRules);
       room.game = { type: 'bigTwo', state };
       pushLog(room, { t: 'bigTwoStart', players: seatedPlayers(room).length });
       const leader = room.seats[state.turnSeat];

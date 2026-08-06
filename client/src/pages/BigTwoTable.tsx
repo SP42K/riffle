@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  CUT_ORDER,
+  DEFAULT_BIG_TWO_RULES,
   SEAT_LIMITS,
+  beatFailure,
   canBeat,
   identifyCombo,
   smallestLegalPlay,
   sortCards,
+  type BigTwoRules,
   type Card,
   type Combo,
   type RoomView,
@@ -36,6 +40,8 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
   const hand = useMemo(() => room.hand ?? [], [room.hand]);
   const lastCombo = game?.lastPlay?.combo ?? null;
   const openingCardId = game?.openingCardId ?? null;
+  // 規則跟伺服器同一份，按鈕開關與提示才不會跟實際驗證結果對不上
+  const rules: BigTwoRules = room.bigTwoRules ?? DEFAULT_BIG_TWO_RULES;
 
   const remainingMs = useCountdown(playing ? (game?.turnDeadline ?? 0) : 0);
 
@@ -58,17 +64,18 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
     });
   };
 
-  const combo = useMemo(() => identifyCombo(selectedCards), [selectedCards]);
+  const combo = useMemo(() => identifyCombo(selectedCards, rules), [selectedCards, rules]);
   const includesOpening = !openingCardId || selectedCards.some((c) => c.id === openingCardId);
-  const canPlay = Boolean(isMyTurn && combo && includesOpening && canBeat(combo, lastCombo));
+  const canPlay = Boolean(isMyTurn && combo && includesOpening && canBeat(combo, lastCombo, rules));
 
   const hint = buildHint({
     playing,
     isMyTurn: Boolean(isMyTurn),
-    selectedCount: selectedCards.length,
+    selectedCards,
     combo,
     lastCombo,
     includesOpening,
+    rules,
     skin,
     t,
   });
@@ -86,6 +93,7 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
   const suggest = () => {
     const suggestion = smallestLegalPlay(hand, lastCombo, {
       mustInclude: openingCardId ? [openingCardId] : undefined,
+      rules,
     });
     setSelectedIds(new Set(suggestion?.cards.map((c) => c.id) ?? []));
   };
@@ -226,24 +234,45 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
 function buildHint(input: {
   playing: boolean;
   isMyTurn: boolean;
-  selectedCount: number;
+  selectedCards: Card[];
   combo: Combo | null;
   lastCombo: Combo | null;
   includesOpening: boolean;
+  rules: BigTwoRules;
   skin: SkinContextValue['skin'];
   t: SkinContextValue['t'];
 }): string {
-  const { playing, isMyTurn, selectedCount, combo, lastCombo, includesOpening, skin, t } = input;
+  const { playing, isMyTurn, selectedCards, combo, lastCombo, includesOpening, rules, skin, t } =
+    input;
   if (!playing) return t('hint.notPlaying');
   if (!isMyTurn) return t('hint.waitOthers');
-  if (selectedCount === 0) {
+  if (selectedCards.length === 0) {
     return lastCombo ? t('hint.selectToFollow', { n: lastCombo.size }) : t('hint.selectCards');
   }
-  if (!combo) return t('hint.invalidCombo');
+  if (!combo) {
+    // 這一局不收同花時講明白一點，免得以為是自己選錯牌
+    if (!rules.flush && identifyCombo(selectedCards, { ...rules, flush: true })?.type === 'flush') {
+      return t('hint.noFlush');
+    }
+    return t('hint.invalidCombo');
+  }
   if (!includesOpening) return t('hint.mustIncludeOpening');
-  if (lastCombo && combo.size !== lastCombo.size) return t('hint.mustPlayN', { n: lastCombo.size });
-  if (lastCombo && !canBeat(combo, lastCombo)) {
-    return t('hint.cannotBeat', { combo: skin.combo[combo.type] });
+
+  if (lastCombo) {
+    const failure = beatFailure(combo, lastCombo, rules);
+    if (failure === 'size') return t('hint.mustPlayN', { n: lastCombo.size });
+    if (failure === 'comboType') {
+      return t('hint.mustMatchCombo', { combo: skin.combo[lastCombo.type] });
+    }
+    if (failure) return t('hint.cannotBeat', { combo: skin.combo[combo.type] });
+    // 用鐵支／同花順／一條龍蓋掉別種牌型，就是「切」
+    if (
+      rules.cuts &&
+      CUT_ORDER[combo.type] !== undefined &&
+      CUT_ORDER[lastCombo.type] === undefined
+    ) {
+      return t('hint.canCut', { combo: skin.combo[combo.type] });
+    }
   }
   return t('hint.canPlay', { combo: skin.combo[combo.type] });
 }

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { sortCards, type RoomView } from 'shared';
+import { BIG_TWO_RULE_KEYS, bigTwoPresetOf, sortCards, type RoomView } from 'shared';
 import { ChatPanel } from '../components/ChatPanel';
 import { PlayingCard } from '../components/PlayingCard';
 import { Seat } from '../components/Seat';
@@ -31,6 +31,11 @@ export function RoomShell({ room, center, footer, isMyTurn }: Props) {
   const allHands = room.allHands;
 
   const others = room.seats.filter((seat) => seat.playerId !== me.playerId);
+  const rules = room.bigTwoRules;
+  // 套組講得清楚就只掛套組名；自訂的話把開著的規則逐條列出來
+  const rulePreset = rules && bigTwoPresetOf(rules);
+  const ruleDetails =
+    rules && rulePreset === 'custom' ? BIG_TWO_RULE_KEYS.filter((key) => rules[key]) : [];
 
   return (
     <div className="room" data-myturn={isMyTurn ? 'true' : undefined}>
@@ -39,6 +44,12 @@ export function RoomShell({ room, center, footer, isMyTurn }: Props) {
           <h1>{room.name}</h1>
           <span className="room__code">{t('room.code', { id: room.id })}</span>
           <span className="tag tag--game">{skin.gameType[room.gameType]}</span>
+          {rulePreset && <span className="tag tag--rules">{skin.bigTwoPreset[rulePreset]}</span>}
+          {ruleDetails.map((key) => (
+            <span key={key} className="tag tag--rules">
+              {skin.bigTwoRule[key]}
+            </span>
+          ))}
           {isSpectator && <span className="tag tag--spectator">{t('room.spectating')}</span>}
         </div>
         <div className="room__header-actions">

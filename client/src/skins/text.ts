@@ -22,6 +22,8 @@ export const CASINO_TEXT = {
   'lobby.createTitle': '建立房間',
   'lobby.roomNamePlaceholder': '{name} 的房間',
   'lobby.gameTypeLabel': '玩法',
+  'lobby.rulesLabel': '規則',
+  'lobby.rulesOptionsLabel': '規則細項',
   'lobby.maxPlayersLabel': '人數上限',
   'lobby.seatOption': '{n} 人',
   'lobby.create': '開房',
@@ -112,8 +114,11 @@ export const CASINO_TEXT = {
   'hint.invalidCombo': '這不是合法的牌型',
   'hint.mustIncludeOpening': '第一手必須包含開局牌',
   'hint.mustPlayN': '必須出 {n} 張',
+  'hint.mustMatchCombo': '這一輪只能用{combo}跟',
+  'hint.noFlush': '這一局不能出同花',
   'hint.cannotBeat': '{combo} 壓不過上一手',
   'hint.canPlay': '可出：{combo}',
+  'hint.canCut': '切！{combo}',
 
   // 德州撲克
   'holdem.idleTitle': '等待房主開始牌局',

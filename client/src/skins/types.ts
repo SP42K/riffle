@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import type {
+  BigTwoPreset,
+  BigTwoRuleKey,
   Card,
   ComboType,
   GameType,
@@ -39,6 +41,10 @@ export interface Skin {
   text: TextTable;
   combo: Record<ComboType, string>;
   gameType: Record<GameType, string>;
+  /** 規則套組名（大廳與房間標頭的標籤）。 */
+  bigTwoPreset: Record<BigTwoPreset, string>;
+  /** 單一規則開關的名字（建房的勾選框、自訂房的細項標籤）。 */
+  bigTwoRule: Record<BigTwoRuleKey, string>;
   street: Record<HoldemStreet, string>;
   holdemCategory: Record<HoldemCategory, string>;
   /** ack error code → 文案。查不到就退回伺服器給的訊息。 */

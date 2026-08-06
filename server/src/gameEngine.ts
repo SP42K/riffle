@@ -1,7 +1,8 @@
 import {
+  DEFAULT_BIG_TWO_RULES,
   HAND_SIZE,
   TURN_MS,
-  canBeat,
+  beatFailure,
   cardValue,
   createDeck,
   identifyCombo,
@@ -10,6 +11,7 @@ import {
   shuffle,
   smallestLegalPlay,
   sortCards,
+  type BigTwoRules,
   type Card,
   type Combo,
   type PlayerId,
@@ -19,10 +21,16 @@ import {
 export type Seats = Array<PlayerId | null>;
 
 export interface GameState {
+  /** 這一局的規則開關。發牌時就定下來，中途不會變。 */
+  rules: BigTwoRules;
   hands: Map<PlayerId, Card[]>;
   turnSeat: number;
   lastPlay: { playerId: PlayerId; combo: Combo } | null;
-  /** 自上一次出牌之後已經 PASS 的座位。 */
+  /**
+   * 已經 PASS 的座位。
+   * passLocksTrick 關著時只記到下一次有人出牌為止；開著則是整輪有效 ——
+   * PASS 掉的人這一輪不會再輪到，要等其他人都 PASS、換人領牌才解禁。
+   */
   passedSeats: Set<number>;
   /** 已出完牌的玩家，index 0 為第一名。 */
   finished: PlayerId[];
@@ -41,6 +49,7 @@ export type PlayError =
   | 'NOT_IN_HAND'
   | 'INVALID_COMBO'
   | 'CANNOT_BEAT'
+  | 'MUST_MATCH_COMBO'
   | 'MUST_INCLUDE_OPENING'
   | 'CANNOT_PASS_ON_LEAD';
 
@@ -50,6 +59,7 @@ export const PLAY_ERROR_MESSAGE: Record<PlayError, string> = {
   NOT_IN_HAND: '你手上沒有這些牌',
   INVALID_COMBO: '這不是合法的牌型',
   CANNOT_BEAT: '壓不過上一手牌',
+  MUST_MATCH_COMBO: '這一輪只能用同一種五張牌型跟',
   MUST_INCLUDE_OPENING: '第一手必須包含開局牌',
   CANNOT_PASS_ON_LEAD: '你有領牌權，不能 PASS',
 };
@@ -71,7 +81,11 @@ function openingOrder(card: Card): number {
   return value >= CLUB_THREE_VALUE ? value : value + CARD_VALUE_RANGE;
 }
 
-export function dealGame(seats: Seats, rng: () => number = Math.random): GameState {
+export function dealGame(
+  seats: Seats,
+  rules: BigTwoRules = DEFAULT_BIG_TWO_RULES,
+  rng: () => number = Math.random,
+): GameState {
   const playerIds = seats.filter((id): id is PlayerId => id !== null);
   const deck = shuffle(createDeck(), rng);
 
@@ -94,6 +108,7 @@ export function dealGame(seats: Seats, rng: () => number = Math.random): GameSta
   }
 
   return {
+    rules,
     hands,
     turnSeat: openingSeat,
     lastPlay: null,
@@ -129,6 +144,16 @@ function nextActiveSeat(seats: Seats, state: GameState, from: number): number {
   return from;
 }
 
+/** passLocksTrick 專用：PASS 過的人這一輪整個跳過。 */
+function nextEligibleSeat(seats: Seats, state: GameState, from: number): number {
+  const active = activeSeats(seats, state);
+  for (let step = 1; step <= seats.length; step++) {
+    const seat = (from + step) % seats.length;
+    if (active.includes(seat) && !state.passedSeats.has(seat)) return seat;
+  }
+  return from;
+}
+
 /**
  * 換到下一位，並判斷他是不是拿到領牌權。
  * 只要「其他還在打的人都已經 PASS」，下一位就能自由出牌。
@@ -138,6 +163,11 @@ function advanceTurn(seats: Seats, state: GameState): void {
   const active = activeSeats(seats, state);
   if (active.length <= 1) {
     finishGame(seats, state);
+    return;
+  }
+
+  if (state.rules.passLocksTrick) {
+    advanceTurnLockedPass(seats, state, active);
     return;
   }
 
@@ -152,6 +182,30 @@ function advanceTurn(seats: Seats, state: GameState): void {
   }
 
   state.turnSeat = next;
+  state.turnDeadline = Date.now() + TURN_MS;
+}
+
+/**
+ * passLocksTrick 的輪轉：PASS 掉就等於退出這一輪，之後有人再出牌也輪不到你。
+ * 一直跳到只剩最後出牌的那一位還能動，這一輪才結束、由他重新領牌。
+ */
+function advanceTurnLockedPass(seats: Seats, state: GameState, active: number[]): void {
+  if (!state.lastPlay) {
+    // 領牌者把牌出完走人了，這一輪直接作廢，換下一位自由出牌
+    state.passedSeats.clear();
+    state.turnSeat = nextActiveSeat(seats, state, state.turnSeat);
+  } else {
+    const eligible = active.filter((seat) => !state.passedSeats.has(seat));
+    if (eligible.length <= 1) {
+      // 其他人都 PASS 光了，PASS 的封印在這裡一起解開
+      state.lastPlay = null;
+      state.turnSeat = eligible[0] ?? nextActiveSeat(seats, state, state.turnSeat);
+      state.passedSeats.clear();
+    } else {
+      state.turnSeat = nextEligibleSeat(seats, state, state.turnSeat);
+    }
+  }
+
   state.turnDeadline = Date.now() + TURN_MS;
 }
 
@@ -211,15 +265,16 @@ export function playCards(
   const picked = pickCards(hand, cardIds);
   if (!picked) return { ok: false, error: 'NOT_IN_HAND' };
 
-  const combo = identifyCombo(picked);
+  const combo = identifyCombo(picked, state.rules);
   if (!combo) return { ok: false, error: 'INVALID_COMBO' };
 
   if (state.openingCardId && !picked.some((c) => c.id === state.openingCardId)) {
     return { ok: false, error: 'MUST_INCLUDE_OPENING' };
   }
 
-  if (!canBeat(combo, state.lastPlay?.combo ?? null)) {
-    return { ok: false, error: 'CANNOT_BEAT' };
+  const failure = beatFailure(combo, state.lastPlay?.combo ?? null, state.rules);
+  if (failure) {
+    return { ok: false, error: failure === 'comboType' ? 'MUST_MATCH_COMBO' : 'CANNOT_BEAT' };
   }
 
   return { ok: true, result: commitPlay(seats, state, playerId, combo) };
@@ -235,7 +290,8 @@ function commitPlay(seats: Seats, state: GameState, playerId: PlayerId, combo: C
   );
 
   state.lastPlay = { playerId, combo };
-  state.passedSeats.clear();
+  // passLocksTrick 開著時 PASS 是整輪有效的，出牌不解封 —— 由 advanceTurn 在換人領牌時清掉
+  if (!state.rules.passLocksTrick) state.passedSeats.clear();
   state.openingCardId = null; // 開局限制只作用於第一手
 
   let rank: number | null = null;
@@ -284,6 +340,7 @@ export function autoAct(
   const hand = state.hands.get(playerId) ?? [];
   const combo = smallestLegalPlay(hand, null, {
     mustInclude: state.openingCardId ? [state.openingCardId] : undefined,
+    rules: state.rules,
   });
   if (!combo) return null;
 

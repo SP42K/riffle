@@ -119,6 +119,10 @@ select:focus {
   background: rgba(90, 210, 140, 0.22);
   color: #86e3af;
 }
+.tag--rules {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
 .tag--spectator,
 .tag--turn {
   background: rgba(227, 179, 65, 0.2);
@@ -320,6 +324,30 @@ select:focus {
 }
 .lobby__create-row input {
   flex: 1;
+}
+/* 規則開關：一排勾選框，窄畫面自己折行 */
+.lobby__rules {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.9rem;
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.lobby__rules legend {
+  padding: 0 0.3rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.lobby__rules label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  cursor: pointer;
 }
 .lobby__list ul {
   list-style: none;

@@ -63,7 +63,8 @@ export type ComboType =
   | 'flush' // 同花
   | 'fullHouse' // 葫蘆
   | 'fourOfAKind' // 鐵支
-  | 'straightFlush'; // 同花順
+  | 'straightFlush' // 同花順
+  | 'dragon'; // 一條龍：3 到 2 各一張，只有台灣規則認得
 
 /** 五張牌型之間的高低，數字越大越大。非五張牌型不參與跨型比較。 */
 export const FIVE_CARD_ORDER: Record<string, number> = {
@@ -83,7 +84,21 @@ export const COMBO_LABEL: Record<ComboType, string> = {
   fullHouse: '葫蘆',
   fourOfAKind: '鐵支',
   straightFlush: '同花順',
+  dragon: '一條龍',
 };
+
+/**
+ * 台灣規則的「切」：不管檯面上是什麼牌，這幾種牌型都蓋得過去。數字越大越大。
+ * 一條龍 > 同花順 > 鐵支，跟 FIVE_CARD_ORDER 的相對高低一致。
+ */
+export const CUT_ORDER: Partial<Record<ComboType, number>> = {
+  fourOfAKind: 1,
+  straightFlush: 2,
+  dragon: 3,
+};
+
+/** 一條龍的張數：3 到 2 各一張，剛好是一整手牌。 */
+export const DRAGON_SIZE = 13;
 
 export interface Combo {
   type: ComboType;
@@ -115,6 +130,90 @@ export const GAME_TYPE_LABEL: Record<GameType, string> = {
   bigTwo: '大老二',
   holdem: '德州撲克',
 };
+
+/**
+ * 大老二的規則開關。建房時逐項決定，中途不會變。
+ * 每一條都是獨立的 —— 想怎麼搭就怎麼搭，台灣慣例只是其中一種組合。
+ */
+export interface BigTwoRules {
+  /** 鐵支／同花順／一條龍是「切」，檯面上不管放什麼牌型都蓋得過去。 */
+  cuts: boolean;
+  /** 認一條龍：3 到 2 各一張，13 張一次出完。 */
+  dragon: boolean;
+  /** 同花算合法牌型。 */
+  flush: boolean;
+  /** 五張只能用同一種牌型跟 —— 出順子就只能拿順子接，葫蘆不行。 */
+  matchFiveCardType: boolean;
+  /** PASS 掉就得等這一輪結束才能再出牌。 */
+  passLocksTrick: boolean;
+}
+
+export type BigTwoRuleKey = keyof BigTwoRules;
+
+/** 顯示與消毒的固定順序。 */
+export const BIG_TWO_RULE_KEYS: readonly BigTwoRuleKey[] = [
+  'cuts',
+  'dragon',
+  'flush',
+  'matchFiveCardType',
+  'passLocksTrick',
+];
+
+export const BIG_TWO_RULE_LABEL: Record<BigTwoRuleKey, string> = {
+  cuts: '可以切',
+  dragon: '認一條龍',
+  flush: '同花',
+  matchFiveCardType: '五張同型跟',
+  passLocksTrick: 'PASS 鎖整輪',
+};
+
+/** 台灣慣例：不收同花，其餘全開。 */
+export const TAIWAN_BIG_TWO_RULES: BigTwoRules = {
+  cuts: true,
+  dragon: true,
+  flush: false,
+  matchFiveCardType: true,
+  passLocksTrick: true,
+};
+
+/** 一般規則：五張可以跨牌型壓、同花合法、沒有切、PASS 之後輪到還是能出。 */
+export const CLASSIC_BIG_TWO_RULES: BigTwoRules = {
+  cuts: false,
+  dragon: false,
+  flush: true,
+  matchFiveCardType: false,
+  passLocksTrick: false,
+};
+
+/** 沒指定就用台灣慣例。 */
+export const DEFAULT_BIG_TWO_RULES: BigTwoRules = TAIWAN_BIG_TWO_RULES;
+
+/** 顯示用的套組名。五項全中才算套組，只要動過一項就是自訂。 */
+export type BigTwoPreset = 'taiwan' | 'classic' | 'custom';
+
+export const BIG_TWO_PRESETS: readonly BigTwoPreset[] = ['taiwan', 'classic', 'custom'];
+
+/** custom 不在這裡 —— 它是「都不中」的結果，沒有對應的旗標組合。 */
+export const BIG_TWO_PRESET_RULES: Record<'taiwan' | 'classic', BigTwoRules> = {
+  taiwan: TAIWAN_BIG_TWO_RULES,
+  classic: CLASSIC_BIG_TWO_RULES,
+};
+
+export const BIG_TWO_PRESET_LABEL: Record<BigTwoPreset, string> = {
+  taiwan: '台灣規則',
+  classic: '一般規則',
+  custom: '自訂規則',
+};
+
+/** 這組旗標對應到哪個套組。 */
+export function bigTwoPresetOf(rules: BigTwoRules): BigTwoPreset {
+  for (const [preset, presetRules] of Object.entries(BIG_TWO_PRESET_RULES)) {
+    if (BIG_TWO_RULE_KEYS.every((key) => rules[key] === presetRules[key])) {
+      return preset as BigTwoPreset;
+    }
+  }
+  return 'custom';
+}
 
 /** 各玩法的人數上下限。 */
 export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
@@ -151,6 +250,8 @@ export interface RoomSummary {
   id: string;
   name: string;
   gameType: GameType;
+  /** 大老二才有意義，德州撲克為 null。 */
+  bigTwoRules: BigTwoRules | null;
   hostNickname: string;
   playerCount: number;
   maxPlayers: number;
@@ -257,6 +358,8 @@ export interface RoomView {
   id: string;
   name: string;
   gameType: GameType;
+  /** 大老二才有意義，德州撲克為 null。前端靠它決定要用哪一套規則算合法出牌。 */
+  bigTwoRules: BigTwoRules | null;
   hostId: PlayerId;
   maxPlayers: number;
   status: RoomStatus;
@@ -293,7 +396,7 @@ export interface ClientToServerEvents {
   'session:hello': (p: { playerId: PlayerId; nickname: string }, ack: Ack<{ roomId: string | null }>) => void;
   'lobby:chat': (p: { text: string }) => void;
   'room:create': (
-    p: { name: string; maxPlayers: number; gameType: GameType },
+    p: { name: string; maxPlayers: number; gameType: GameType; bigTwoRules?: Partial<BigTwoRules> },
     ack: Ack<{ roomId: string }>,
   ) => void;
   'room:join': (p: { roomId: string; mode: JoinMode }, ack: Ack<{ roomId: string }>) => void;

@@ -36,7 +36,7 @@ code uses `!` liberally after a length/sort invariant).
 
 The product, all UI copy, code comments, log lines, and test names are Traditional Chinese;
 identifiers are English. Match this — new comments and user-facing strings in Chinese.
-Domain vocabulary: 單張/對子/三條/順子/同花/葫蘆/鐵支/同花順 map to the `ComboType` union in
+Domain vocabulary: 單張/對子/三條/順子/同花/葫蘆/鐵支/同花順/一條龍 map to the `ComboType` union in
 `shared/src/types.ts`, and `COMBO_LABEL` is the single translation table. Texas hold'em has its
 own vocabulary (高牌/一對/兩對/三條/順子/同花/葫蘆/鐵支/同花順 → `HoldemCategory`, with
 `HOLDEM_CATEGORY_LABEL` in `shared/src/holdem.ts`) — note 三條/順子/同花/葫蘆/鐵支/同花順 are
@@ -56,6 +56,34 @@ strength and bet legality live. The server calls them for authoritative validati
 (`gameEngine.playCards`, `holdemEngine.applyBet`); the client calls the *same functions* in
 `client/src/pages/BigTwoTable.tsx` and `HoldemTable.tsx` to enable/disable buttons and build hints.
 Never reimplement a rule on one side — the two would drift.
+
+**Big Two rules are five independent toggles**, not a ruleset name. `BigTwoRules` is a flat
+`Record<BigTwoRuleKey, boolean>` picked per-toggle at room creation and fixed for the room's life:
+
+| key | when on |
+|---|---|
+| `cuts` | 鐵支/同花順/一條龍 are 「切」 and beat anything regardless of size, ordered by `CUT_ORDER` (一條龍 > 同花順 > 鐵支) |
+| `dragon` | 一條龍 (13 cards, 3 through 2) is a combo |
+| `flush` | 同花 is a combo |
+| `matchFiveCardType` | a five-card follow must repeat the leader's `ComboType` (順子 only follows 順子) |
+| `passLocksTrick` | PASS removes you from the trick until it ends |
+
+`TAIWAN_BIG_TWO_RULES` (everything but `flush`) is `DEFAULT_BIG_TWO_RULES`; `CLASSIC_BIG_TWO_RULES`
+is its mirror image. They are **presentation only** — `bigTwoPresetOf` matches a flag set back to
+`'taiwan' | 'classic' | 'custom'` for the lobby/room tag, and nothing in the engine ever asks which
+preset is in play. Any mix is legal and must work: the first four toggles live in `combos.ts` behind
+a `rules` argument on `identifyCombo` / `canBeat` / `beatFailure` / `findLegalPlays` (all defaulting
+to `DEFAULT_BIG_TWO_RULES`), the fifth in `gameEngine.advanceTurn` — with `passLocksTrick`,
+`commitPlay` does **not** clear `passedSeats`, so `advanceTurnLockedPass` skips passed seats and only
+clears when the trick ends. Never re-collapse these into a ruleset check (`rules === 'taiwan'`);
+branch on the individual flag.
+
+`beatFailure` exists so both ends can tell 「牌型不對」 from 「壓不過」 without duplicating the check:
+the server maps it to `MUST_MATCH_COMBO` vs `CANNOT_BEAT`, the client to two different hints.
+`Room.bigTwoRules` is the source of truth; `normalizeBigTwoRules` in `rooms.ts` sanitizes the wire
+value key-by-key (only booleans pass, anything missing falls back to the default), it reaches the
+engine via `dealGame` and the client via `RoomView.bigTwoRules` / `RoomSummary.bigTwoRules` (both
+`null` for hold'em).
 
 **Two games, one room layer.** A room picks its `gameType` (`'bigTwo' | 'holdem'`) at creation and
 never changes it. `SEAT_LIMITS` gives per-game seat counts (Big Two 2–4, hold'em 2–9). The pieces
@@ -169,7 +197,13 @@ Storage keys are neutral on purpose (`ws.sid` / `ws.user` / `ws.prefs`, migrated
 - New Big Two combo type → `ComboType` + `COMBO_LABEL` + `FIVE_CARD_ORDER` in `types.ts`, detection
   in `identifyCombo`, ordering in `compareCombo`, then tests in `shared/src/combos.test.ts`, and a
   label in each skin's `combo` map. Both the server validator and the client button pick it up for
-  free.
+  free. If it is optional, gate it on a `rules` flag and add it to `CUT_ORDER` / `sizesToTry`
+  instead of `FIVE_CARD_ORDER` when it is a 「切」 or not five cards.
+- New Big Two rule toggle → add the key to the `BigTwoRules` interface + `BIG_TWO_RULE_KEYS` +
+  `BIG_TWO_RULE_LABEL`, set it in **both** `TAIWAN_BIG_TWO_RULES` and `CLASSIC_BIG_TWO_RULES`, branch
+  on it in `combos.ts` / `gameEngine.ts`, and add a label to each skin's `bigTwoRule` map.
+  `normalizeBigTwoRules` and the Lobby checkbox row are driven by `BIG_TWO_RULE_KEYS`, so they pick
+  it up for free. Add a mixed-toggle test — the point of the split is that any combination works.
 - New user-facing string → add the key to `CASINO_TEXT` first; the compiler then demands it from
   `vscode.ts` and `terminal.ts`. Never put the literal in the component.
 - New socket event → add to `ClientToServerEvents` / `ServerToClientEvents` in `types.ts` first;
