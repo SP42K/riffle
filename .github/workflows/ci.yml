@@ -1,0 +1,37 @@
+# typecheck 與測試是這個 repo 唯一的閘門（沒有設 linter）。
+# 這裡只跑純函式層的東西：三個 workspace 的 tsc 加上 vitest，跑不到瀏覽器與 socket。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一支分支上連續推 commit 時，取消還在跑的舊次
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # shared 是以原始碼被引用的，沒有 build 步驟；npm ci 只是把三個 workspace 的相依裝好
+      - run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test
+        run: npm test
+
+      # 型別過了不等於打得包出來 —— vite 的解析（shared 的 alias）只有這一步會驗到
+      - name: build client
+        run: npm run build
