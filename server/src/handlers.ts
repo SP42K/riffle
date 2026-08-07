@@ -1094,7 +1094,14 @@ export class GameServer {
     if (!game || game.type !== 'snake' || game.state.over) return;
 
     this.logSnake(room, tickSnake(game.state));
-    this.afterGameAction(room);
-    if (!game.state.over) this.scheduleSnakeTick(room);
+    // 這裡不走 afterGameAction：它的 scheduleTurn／scheduleNextHand 對貪吃蛇本來就是空操作，
+    // 但 broadcastLobby 會每拍重建一次整份大廳快照 —— 而 RoomSummary 只有 status 會變
+    this.checkGameOver(room);
+    this.broadcastRoom(room);
+    if (game.state.over) {
+      this.broadcastLobby(); // status 從 playing 變 finished，這一拍才需要更新大廳
+      return;
+    }
+    this.scheduleSnakeTick(room);
   }
 }

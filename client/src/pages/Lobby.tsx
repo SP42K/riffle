@@ -20,6 +20,7 @@ import { ChatPanel } from '../components/ChatPanel';
 import { emitWithAck, getPlayerId, socket } from '../net/socket';
 import { useGame } from '../state/GameProvider';
 import { useSkin } from '../state/skinContext';
+import { GAME_DISGUISABLE } from '../skins/disguise';
 import type { TextKey } from '../skins/text';
 
 const STATUS_KEY: Record<RoomStatus, TextKey> = {
@@ -162,6 +163,9 @@ export function Lobby() {
                 {t('lobby.create')}
               </button>
             </div>
+            {!GAME_DISGUISABLE[gameType] && (
+              <p className="lobby__warn">{t('lobby.noDisguiseHint')}</p>
+            )}
             {gameType === 'bigTwo' && (
               <fieldset className="lobby__rules">
                 <legend>{t('lobby.rulesOptionsLabel')}</legend>
@@ -246,6 +250,9 @@ export function Lobby() {
                       <span className="room-row__name">{room.name}</span>
                       <span className="room-row__code">#{room.id}</span>
                       <span className="tag tag--game">{skin.gameType[room.gameType]}</span>
+                      {!GAME_DISGUISABLE[room.gameType] && (
+                        <span className="tag tag--exposed">{t('lobby.noDisguise')}</span>
+                      )}
                       {room.bigTwoRules && (
                         <span className="tag tag--rules">
                           {skin.bigTwoPreset[bigTwoPresetOf(room.bigTwoRules)]}

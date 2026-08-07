@@ -231,6 +231,10 @@ export const CASINO_TEXT = {
   'snake.resultTitle': '本局結束',
   'snake.playAgain': '再來一局',
   'snake.waitHost': '等房主開下一局',
+
+  // 沒有偽裝的玩法：大廳提示。文案本身也要能見人，別直接寫「這個沒有偽裝」
+  'lobby.noDisguise': '畫面明顯',
+  'lobby.noDisguiseHint': '這個玩法是彩色格子畫面，換外觀也藏不住，請自行斟酌',
 } as const;
 
 export type TextKey = keyof typeof CASINO_TEXT;

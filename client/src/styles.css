@@ -127,6 +127,16 @@ select:focus {
   background: rgba(255, 255, 255, 0.08);
   color: var(--muted);
 }
+/* 這個玩法的畫面藏不住，大廳先標出來 */
+.tag--exposed {
+  background: rgba(217, 79, 79, 0.16);
+  color: var(--red);
+}
+.lobby__warn {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--red);
+}
 .tag--spectator,
 .tag--turn {
   background: rgba(227, 179, 65, 0.2);

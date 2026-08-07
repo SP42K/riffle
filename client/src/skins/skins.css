@@ -450,6 +450,14 @@
   background: rgba(224, 108, 117, 0.16);
   color: #e06c75;
 }
+/* 藏不住的玩法：用警告黃，跟編輯器的 warning 一樣，不要紅到像壞掉 */
+[data-skin='vscode'] .tag--exposed {
+  background: rgba(215, 186, 125, 0.16);
+  color: #d7ba7d;
+}
+[data-skin='vscode'] .lobby__warn {
+  color: #d7ba7d;
+}
 [data-skin='vscode'] .tag--button {
   background: #37373d;
   color: #d7ba7d;
@@ -754,6 +762,14 @@
 [data-skin='terminal'] .tag--allin {
   color: #ff7b72;
   border-color: rgba(255, 123, 114, 0.4);
+}
+/* 藏不住的玩法：警告黃，跟終端機的 warning 同一個色 */
+[data-skin='terminal'] .tag--exposed {
+  color: #e3b341;
+  border-color: rgba(227, 179, 65, 0.4);
+}
+[data-skin='terminal'] .lobby__warn {
+  color: #e3b341;
 }
 [data-skin='terminal'] .dot--on {
   background: #4ee08a;

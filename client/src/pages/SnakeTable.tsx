@@ -5,7 +5,7 @@ import { StartControls } from '../components/StartControls';
 import { useCountdown } from '../hooks/useCountdown';
 import { emitWithAck } from '../net/socket';
 import { useGame } from '../state/GameProvider';
-import { useSkin } from '../state/skinContext';
+import { isTyping, useSkin } from '../state/skinContext';
 import { RoomShell } from './RoomShell';
 
 /** 方向鍵與 WASD 都吃，用 event.code 判斷才不受輸入法/大小寫影響。 */
@@ -136,6 +136,7 @@ export function SnakeRoom({ room }: { room: RoomView }) {
     if (!canSteer) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return; // 長按只送一次，剩下的重複事件不必再打去伺服器
+      if (isTyping(event.target)) return; // 焦點在聊天框裡就不吃方向鍵，WASD 要打得出字
       const dir = KEY_TO_DIR[event.code];
       if (!dir) return;
       event.preventDefault();

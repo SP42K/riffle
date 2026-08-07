@@ -76,6 +76,9 @@ const OPPOSITE: Record<SnakeDirection, SnakeDirection> = {
   right: 'left',
 };
 
+/** 出生與重生的蛇身長度（節）。 */
+const START_LENGTH = 3;
+
 /** 四個角落的出生點，往盤面內側斜對角延伸三節，彼此離得夠遠不會一開局就撞在一起。 */
 function spawnFor(seat: number, width: number, height: number): { head: SnakeCell; dir: SnakeDirection } {
   const configs: Array<{ head: SnakeCell; dir: SnakeDirection }> = [
@@ -128,18 +131,24 @@ function spawnFood(state: SnakeState, rng: () => number): SnakeCell | null {
   return null;
 }
 
-/** 重生用：找一個安全空格，順便挑一個往前走不會馬上撞牆的方向。 */
+/**
+ * 重生用：找一個放得下「整條蛇」的空位，順便挑一個往前走不會馬上撞牆的方向。
+ * 只檢查頭那一格是不夠的 —— 身體是往反方向長出去的，頭合法不代表尾巴也在盤內。
+ */
 function findSafeRespawn(
   state: SnakeState,
   rng: () => number,
 ): { cell: SnakeCell; dir: SnakeDirection } | null {
   const occupied = occupiedByBoard(state);
+  // 整條蛇身都要在界內、都不能疊到別人；頭往前一格也要在界內，復活後第一拍才不會直接撞牆
+  const fits = (cell: SnakeCell, dir: SnakeDirection): boolean =>
+    bodyFrom(cell, dir, START_LENGTH).every(
+      (c) => inBounds(c, state.width, state.height) && !occupied.has(cellKey(c)),
+    ) && inBounds({ x: cell.x + DELTA[dir].x, y: cell.y + DELTA[dir].y }, state.width, state.height);
+
   for (let attempt = 0; attempt < 200; attempt++) {
     const cell = { x: Math.floor(rng() * state.width), y: Math.floor(rng() * state.height) };
-    if (occupied.has(cellKey(cell))) continue;
-    const safeDirs = SNAKE_DIRECTIONS.filter((d) =>
-      inBounds({ x: cell.x + DELTA[d].x, y: cell.y + DELTA[d].y }, state.width, state.height),
-    );
+    const safeDirs = SNAKE_DIRECTIONS.filter((d) => fits(cell, d));
     if (safeDirs.length === 0) continue;
     const dir = safeDirs[Math.floor(rng() * safeDirs.length)]!;
     return { cell, dir };
@@ -194,7 +203,7 @@ export function initSnake(
     snakes.set(playerId, {
       playerId,
       seat,
-      body: bodyFrom(head, dir, 3),
+      body: bodyFrom(head, dir, START_LENGTH),
       dir,
       pendingDir: dir,
       lives: SNAKE_LIVES,
@@ -300,7 +309,7 @@ function killSnake(state: SnakeState, snake: Snake, rng: () => number, events: S
   }
 
   // 閃爍期間就顯示完整 3 節，玩家才看得出頭在哪、準備往哪走 —— 幽靈狀態靠 respawnAt 標記，不靠身體長度
-  snake.body = bodyFrom(spot.cell, spot.dir, 3);
+  snake.body = bodyFrom(spot.cell, spot.dir, START_LENGTH);
   snake.dir = spot.dir;
   snake.pendingDir = spot.dir;
   snake.respawnAt = Date.now() + SNAKE_RESPAWN_MS;
@@ -318,6 +327,9 @@ export function tickSnake(state: SnakeState, rng: () => number = Math.random): S
   const events: SnakeEvent[] = [];
   if (state.over) return events;
   const now = Date.now();
+  // 開局倒數還沒結束：棋盤看得到但不推進。房間層的 scheduleSnakeStart 也擋了一次，
+  // 但這個契約是 startAt 自己的意思，屬於引擎，不該只存在於計時器裡
+  if (now < state.startAt) return events;
 
   // 0. 重生倒數結束的蛇，正式復活 —— 身體在死掉當下就已經是完整 3 節了，這裡只要解除幽靈狀態
   for (const snake of state.snakes.values()) {

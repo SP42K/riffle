@@ -456,6 +456,9 @@ const TEXT: TextTable = {
   'snake.resultTitle': 'Watch stopped',
   'snake.playAgain': 'Restart watch',
   'snake.waitHost': 'Waiting for the owner',
+
+  'lobby.noDisguise': 'GUI',
+  'lobby.noDisguiseHint': 'This task renders a graphical preview — it will not look like an editor.',
 };
 
 const ERRORS: Skin['errors'] = {

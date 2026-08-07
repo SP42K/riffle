@@ -21,6 +21,7 @@ const ID = (i: number) => String.fromCharCode(97 + i);
 function board(count: number, width = 20, height = 20): { seats: Seats; state: SnakeState } {
   const seats: Seats = Array.from({ length: count }, (_, i) => ID(i));
   const state = initSnake(seats, () => 0.5, width, height);
+  state.startAt = 0; // 直接從「已經開打」起跳；開局倒數本身另外測，不然每個 case 都在空轉
   return { seats, state };
 }
 
@@ -44,6 +45,12 @@ function livesOf(state: SnakeState, playerId: string): number {
 
 function isRespawning(state: SnakeState, playerId: string): boolean {
   return state.snakes.get(playerId)!.respawnAt !== null;
+}
+
+/** 照腳本吐值的 rng；用完最後一個就一直重複它，方便鎖定某一次隨機抽選的結果。 */
+function scriptedRng(values: readonly number[]): () => number {
+  let i = 0;
+  return () => values[Math.min(i++, values.length - 1)]!;
 }
 
 /** 讓某條蛇只剩一條命，這樣下一次碰撞就會直接徹底出局，方便測試單純的碰撞判定。 */
@@ -216,18 +223,34 @@ describe('貪吃蛇：移動與果實', () => {
 });
 
 describe('貪吃蛇：開局倒數', () => {
+  // 這一段不能用 board()，它為了讓其他測試直接開打會把 startAt 歸零
+  const counting = () => initSnake([ID(0), ID(1)], () => 0.5, 20, 20);
+
   it('initSnake 把 startAt 設在現在起 SNAKE_START_DELAY_MS 之後，讓房間層可以延後真正開始 tick', () => {
     const before = Date.now();
-    const { state } = board(2);
+    const state = counting();
     const after = Date.now();
 
     expect(state.startAt).toBeGreaterThanOrEqual(before + SNAKE_START_DELAY_MS);
     expect(state.startAt).toBeLessThanOrEqual(after + SNAKE_START_DELAY_MS);
   });
+
+  it('倒數還沒結束就 tick：棋盤完全不動，也不吐任何事件', () => {
+    const state = counting();
+    const bodiesBefore = [...state.snakes.values()].map((s) => JSON.stringify(s.body));
+    const foodBefore = JSON.stringify(state.food);
+
+    const events = tickSnake(state);
+
+    expect(events).toEqual([]);
+    expect([...state.snakes.values()].map((s) => JSON.stringify(s.body))).toEqual(bodiesBefore);
+    expect(JSON.stringify(state.food)).toBe(foodBefore);
+    expect(state.mine).toBeNull(); // 倒數期間也不生地雷
+  });
 });
 
 describe('貪吃蛇：雙命與重生', () => {
-  it('第一次死掉還有命：進入重生倒數，body 只剩一格，不算徹底出局', () => {
+  it('第一次死掉還有命：進入重生倒數，body 是完整 3 節，不算徹底出局', () => {
     const { state } = board(3, 10, 10);
     place(state, 'a', [{ x: 0, y: 5 }, { x: 1, y: 5 }, { x: 2, y: 5 }], 'left');
     place(state, 'b', [{ x: 8, y: 8 }, { x: 7, y: 8 }, { x: 6, y: 8 }], 'right');
@@ -307,6 +330,23 @@ describe('貪吃蛇：雙命與重生', () => {
     setSnakeDirection(state, 'a', 'down');
 
     expect(state.snakes.get('a')!.pendingDir).toBe('up'); // 沒被改動
+  });
+
+  it('重生點靠邊時，整條蛇身仍然全部落在盤內（不是只有頭合法）', () => {
+    const { state } = board(2, 10, 10);
+    state.food = [];
+    state.mineGapUntil = Date.now() + 10_000_000; // 這一拍不生地雷，rng 只被重生點消費
+    // 重生點抽到 (1,1)：往下／往右的話身體會長到 y=-1 / x=-1 去，只有往上／往左放得下
+    const rng = scriptedRng([0.1, 0.1, 0.99]); // x, y, 然後挑「最後一個」可用方向
+    place(state, 'a', [{ x: 0, y: 5 }, { x: 1, y: 5 }, { x: 2, y: 5 }], 'left'); // 下一拍撞左牆
+    place(state, 'b', [{ x: 8, y: 8 }, { x: 7, y: 8 }, { x: 6, y: 8 }], 'right');
+
+    tickSnake(state, rng);
+
+    const a = state.snakes.get('a')!;
+    expect(isRespawning(state, 'a')).toBe(true);
+    expect(a.body).toHaveLength(3);
+    expect(a.body.filter((c) => c.x < 0 || c.y < 0 || c.x >= 10 || c.y >= 10)).toEqual([]);
   });
 });
 

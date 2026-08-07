@@ -50,11 +50,11 @@ export interface SnakeMineView {
 }
 
 export interface SnakeSeatInfo {
-  /** 蛇身，index 0 是頭。重生閃爍中只有一格（重生點），徹底出局時為空陣列。 */
+  /** 蛇身，index 0 是頭。重生閃爍中也是完整長度（畫在重生點上），徹底出局時為空陣列。 */
   body: SnakeCell[];
   /** 還在遊戲裡（含正在重生閃爍中）就是 true；兩條命都用完才是 false。 */
   alive: boolean;
-  /** 正在重生閃爍中：body 只有一格、不參與碰撞，畫面上要讓它看起來在閃。 */
+  /** 正在重生閃爍中：body 畫得出來但不參與碰撞，畫面上要讓它看起來在閃。 */
   respawning: boolean;
   /** 剩餘命數，用完（0）就是徹底出局。 */
   lives: number;

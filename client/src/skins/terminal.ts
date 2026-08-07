@@ -452,6 +452,9 @@ const TEXT: TextTable = {
   'snake.resultTitle': 'watch exited',
   'snake.playAgain': 'watch again',
   'snake.waitHost': 'waiting for owner',
+
+  'lobby.noDisguise': 'tty',
+  'lobby.noDisguiseHint': 'renders a framebuffer — will not look like a shell',
 };
 
 const ERRORS: Skin['errors'] = {
