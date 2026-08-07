@@ -2,6 +2,7 @@ import type { RoomView } from 'shared';
 import { BigTwoRoom } from './BigTwoTable';
 import { HoldemRoom } from './HoldemTable';
 import { MonopolyRoom } from './MonopolyTable';
+import { SnakeRoom } from './SnakeTable';
 
 /** 依房間的玩法挑桌面。共用的外殼在 RoomShell。 */
 export function Room({ room }: { room: RoomView }) {
@@ -13,5 +14,7 @@ export function Room({ room }: { room: RoomView }) {
       return <HoldemRoom room={room} />;
     case 'monopoly':
       return <MonopolyRoom room={room} />;
+    case 'snake':
+      return <SnakeRoom room={room} />;
   }
 }

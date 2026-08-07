@@ -5,9 +5,11 @@ import {
   type HoldemSeatInfo,
   type MonopolySeatInfo,
   type SeatView,
+  type SnakeSeatInfo,
 } from 'shared';
 import { useSkin } from '../state/skinContext';
 import { CardBack } from './PlayingCard';
+import { SnakeColorDot } from './SnakeColorDot';
 
 interface Props {
   seat: SeatView;
@@ -28,8 +30,9 @@ export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Pro
   const { skin, t } = useSkin();
   const holdem = game?.type === 'holdem' ? game.seats[seat.seat] : undefined;
   const monopoly = game?.type === 'monopoly' ? game.seats[seat.seat] : undefined;
-  // 蓋牌與破產都是「還在座位上但已經出局」，共用同一個淡出樣式
-  const folded = (holdem?.folded ?? false) || (monopoly?.bankrupt ?? false);
+  const snake = game?.type === 'snake' ? game.seats[seat.seat] : undefined;
+  // 蓋牌、破產、蛇死掉都是「還在座位上但已經出局」，共用同一個淡出樣式
+  const folded = (holdem?.folded ?? false) || (monopoly?.bankrupt ?? false) || snake?.alive === false;
 
   return (
     <div
@@ -38,6 +41,7 @@ export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Pro
         .join(' ')}
     >
       <div className="seat__name">
+        {gameType === 'snake' && <SnakeColorDot seat={seat.seat} />}
         {seat.nickname}
         {isMe && <span className="tag tag--me">{t('seat.you')}</span>}
         {seat.isHost && <span className="tag tag--host">{t('seat.host')}</span>}
@@ -55,6 +59,7 @@ export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Pro
           playing={playing}
           holdem={holdem}
           monopoly={monopoly}
+          snake={snake}
           chips={chips}
         />
       </div>
@@ -76,6 +81,7 @@ function SeatStatus({
   playing,
   holdem,
   monopoly,
+  snake,
   chips,
 }: {
   gameType: GameType;
@@ -84,6 +90,7 @@ function SeatStatus({
   playing: boolean;
   holdem: HoldemSeatInfo | undefined;
   monopoly: MonopolySeatInfo | undefined;
+  snake: SnakeSeatInfo | undefined;
   chips: number | undefined;
 }) {
   switch (gameType) {
@@ -95,6 +102,8 @@ function SeatStatus({
       );
     case 'monopoly':
       return <MonopolyStatus info={monopoly} playing={playing} ready={seat.ready} />;
+    case 'snake':
+      return <SnakeStatus info={snake} playing={playing} ready={seat.ready} />;
   }
 }
 
@@ -176,6 +185,33 @@ function MonopolyStatus({
       {!info.bankrupt && info.inJail && (
         <span className="tag tag--waiting">{t('monopoly.jailTag')}</span>
       )}
+    </>
+  );
+}
+
+function SnakeStatus({
+  info,
+  playing,
+  ready,
+}: {
+  info: SnakeSeatInfo | undefined;
+  playing: boolean;
+  ready: boolean;
+}) {
+  const { t } = useSkin();
+  if (!playing || !info) {
+    return (
+      <span className={ready ? 'tag tag--ready' : 'tag tag--waiting'}>
+        {ready ? t('seat.ready') : t('seat.notReady')}
+      </span>
+    );
+  }
+  return (
+    <>
+      <span className="seat__chips">{t('snake.score', { n: info.score })}</span>
+      <span className="seat__chips">{t('snake.lives', { n: info.lives })}</span>
+      {info.respawning && <span className="tag tag--waiting">{t('snake.respawning')}</span>}
+      {!info.alive && <span className="tag tag--offline">{t('snake.dead')}</span>}
     </>
   );
 }

@@ -9,6 +9,7 @@ import type {
   MonopolyPhase,
   MonopolyTileId,
 } from './monopoly.js';
+import type { SnakeDirection, SnakeGameView } from './snake.js';
 
 // ---------------------------------------------------------------------------
 // 牌
@@ -132,14 +133,15 @@ export interface Combo {
 export type PlayerId = string;
 
 /** 一個房間只玩一種玩法，建房時決定。 */
-export type GameType = 'bigTwo' | 'holdem' | 'monopoly';
+export type GameType = 'bigTwo' | 'holdem' | 'monopoly' | 'snake';
 
-export const GAME_TYPES: readonly GameType[] = ['bigTwo', 'holdem', 'monopoly'];
+export const GAME_TYPES: readonly GameType[] = ['bigTwo', 'holdem', 'monopoly', 'snake'];
 
 export const GAME_TYPE_LABEL: Record<GameType, string> = {
   bigTwo: '大老二',
   holdem: '德州撲克',
   monopoly: '大富翁',
+  snake: '貪吃蛇',
 };
 
 /**
@@ -231,6 +233,7 @@ export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
   bigTwo: { min: 2, max: 4 },
   holdem: { min: 2, max: 9 },
   monopoly: { min: 2, max: 6 },
+  snake: { min: 2, max: 4 },
 };
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -324,7 +327,7 @@ export interface BigTwoGameView {
 }
 
 /** 依 type 分派的玩法快照。前端用 game.type 收窄。 */
-export type GameView = BigTwoGameView | HoldemGameView | MonopolyGameView;
+export type GameView = BigTwoGameView | HoldemGameView | MonopolyGameView | SnakeGameView;
 
 // ---------------------------------------------------------------------------
 // 戰報
@@ -380,6 +383,15 @@ export type LogEvent =
     }
   | { t: 'bankrupt'; player: string; creditor: string | null }
   | { t: 'monopolyOver'; reason: MonopolyEndReason; ranking: string[] }
+  // 貪吃蛇
+  | { t: 'snakeStart'; players: number }
+  /** 死掉但還有命，進入重生倒數。 */
+  | { t: 'snakeRespawn'; player: string }
+  /** 兩條命用完，徹底出局。 */
+  | { t: 'snakeDeath'; player: string }
+  /** 吃到自己顏色的地雷果實拿到加分。 */
+  | { t: 'snakeMineEaten'; player: string }
+  | { t: 'snakeOver'; ranking: string[] }
   // 逾時代打
   | { t: 'timeout'; player: string; auto: 'pass' | 'check' | 'fold' }
   | { t: 'timeoutPlay'; player: string; combo: ComboType; cards: string[] }
@@ -463,6 +475,11 @@ export interface ClientToServerEvents {
   'game:action': (p: { action: BetAction; amount?: number }, ack: Ack<null>) => void;
   /** 大富翁專用。17 種動作走同一個事件，靠 action.kind 收窄。 */
   'game:monopoly': (p: { action: MonopolyAction }, ack: Ack<null>) => void;
+  /**
+   * 貪吃蛇專用。只是把方向意圖寫進緩衝，下一拍 tick 才會真的套用 ——
+   * 跟其他玩法的「這一手就是這一手」不同，這裡送出不代表這一拍已經轉向。
+   */
+  'game:snake': (p: { dir: SnakeDirection }, ack: Ack<null>) => void;
 }
 
 export type BetAction = 'fold' | 'check' | 'call' | 'raise' | 'allin';
