@@ -6,6 +6,8 @@ import {
   MONOPOLY_ACTION_KINDS,
   MONOPOLY_ESTATE_IDS,
   SEAT_LIMITS,
+  SNAKE_DIRECTIONS,
+  SNAKE_TICK_MS,
   TURN_MS,
   type Ack,
   type BetAction,
@@ -69,10 +71,18 @@ import {
   removeMember,
   seatPlayer,
   seatedPlayers,
+  snakeLogOf,
   statusOf,
   type Member,
   type Room,
 } from './rooms.js';
+import {
+  initSnake,
+  removePlayerFromSnake,
+  setSnakeDirection,
+  tickSnake,
+  type SnakeEvent,
+} from './snakeEngine.js';
 import { assertNeverGame } from './turnBased.js';
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -216,6 +226,7 @@ export class GameServer {
     socket.on('game:pass', (_payload, ack) => this.onPass(socket, ack));
     socket.on('game:action', (payload, ack) => this.onAction(socket, payload, ack));
     socket.on('game:monopoly', (payload, ack) => this.onMonopoly(socket, payload, ack));
+    socket.on('game:snake', (payload, ack) => this.onSnake(socket, payload, ack));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -514,6 +525,7 @@ export class GameServer {
     if (isEmpty(room)) {
       if (room.turnTimer) clearTimeout(room.turnTimer);
       if (room.handTimer) clearTimeout(room.handTimer);
+      if (room.tickTimer) clearTimeout(room.tickTimer);
       this.rooms.delete(room.id);
       this.loggedHand.delete(room.id);
       this.broadcastLobby();
@@ -538,6 +550,9 @@ export class GameServer {
       case 'monopoly':
         this.logMonopoly(room, removePlayerFromMonopoly(room.seats, game.state, playerId));
         return;
+      case 'snake':
+        this.logSnake(room, removePlayerFromSnake(game.state, playerId));
+        return;
       default:
         assertNeverGame(game);
     }
@@ -546,6 +561,11 @@ export class GameServer {
   /** 引擎事件換上暱稱寫進戰報。 */
   private logMonopoly(room: Room, events: readonly MonopolyEvent[]): void {
     for (const event of events) pushLog(room, monopolyLogOf(room, event));
+  }
+
+  /** 跟 logMonopoly 同一個道理，貪吃蛇的事件種類少很多。 */
+  private logSnake(room: Room, events: readonly SnakeEvent[]): void {
+    for (const event of events) pushLog(room, snakeLogOf(room, event));
   }
 
   private onRoomChat(socket: GameSocket, payload: { text?: unknown }): void {
@@ -618,6 +638,13 @@ export class GameServer {
           players: seatedPlayers(room).length,
           startCash: room.monopolyOptions.startCash,
         });
+        break;
+      }
+      case 'snake': {
+        const state = initSnake(room.seats);
+        room.game = { type: 'snake', state };
+        pushLog(room, { t: 'snakeStart', players: seatedPlayers(room).length });
+        this.scheduleSnakeStart(room);
         break;
       }
       default:
@@ -789,6 +816,27 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
+  /**
+   * 貪吃蛇專用：只把方向意圖寫進緩衝就回覆，不走 afterGameAction ——
+   * 移動、碰撞判定與廣播全部發生在 tick 迴圈，按方向鍵不該立刻重播一次整包快照。
+   */
+  private onSnake(socket: GameSocket, payload: { dir?: unknown }, ack: unknown): void {
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { game, playerId } = context;
+    if (game.type !== 'snake') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間不是貪吃蛇' } });
+    }
+
+    const dir = SNAKE_DIRECTIONS.find((d) => d === payload?.dir);
+    if (!dir) {
+      return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的方向' } });
+    }
+
+    setSnakeDirection(game.state, playerId, dir);
+    reply(ack, { ok: true, data: null });
+  }
+
   private gameContext(socket: GameSocket, ack: unknown) {
     const session = this.sessions.get(socket.id);
     if (!session?.roomId) {
@@ -840,6 +888,12 @@ export class GameServer {
         if (!game.state.over) return;
         // 結束的那一行戰報由引擎事件帶出來了，這裡只負責公布名次
         this.emitRanking(room, game.state.result?.ranking ?? []);
+        return;
+      }
+      case 'snake': {
+        if (!game.state.over) return;
+        // 跟大富翁一樣，snakeOver 那行戰報已經在 tick 迴圈裡由引擎事件帶出來了
+        this.emitRanking(room, game.state.ranking);
         return;
       }
       default:
@@ -898,6 +952,8 @@ export class GameServer {
 
     const game = room.game;
     if (!game || game.state.over) return;
+    // 貪吃蛇是即時制，沒有「輪到誰」——回合計時器對它沒有意義，交給 scheduleSnakeTick
+    if (game.type === 'snake') return;
 
     const playerId = room.seats[game.state.turnSeat];
     const player = playerId ? room.players.get(playerId) : undefined;
@@ -959,6 +1015,9 @@ export class GameServer {
         }
         break;
       }
+      case 'snake':
+        // scheduleTurn 對貪吃蛇一律提早 return，這裡永遠不會被排到；留著只是為了窮盡檢查
+        break;
       default:
         assertNeverGame(game);
     }
@@ -983,5 +1042,66 @@ export class GameServer {
       this.startHoldemHand(room);
       this.afterGameAction(room);
     }, HOLDEM_SHOWDOWN_MS);
+  }
+
+  // -------------------------------------------------------------------------
+  // 貪吃蛇：即時 tick 迴圈
+  // -------------------------------------------------------------------------
+
+  /**
+   * 開局倒數：狀態已經初始化好了（棋盤、出生位置都看得到），但要等 startAt 那一刻
+   * 才真的開始跑 tick。這段期間 room.tickTimer 借來扛「倒數結束」這一次性事件，
+   * 時間到了才交棒給 scheduleSnakeTick 開始真正的每拍迴圈。
+   */
+  private scheduleSnakeStart(room: Room): void {
+    if (room.tickTimer) {
+      clearTimeout(room.tickTimer);
+      room.tickTimer = null;
+    }
+
+    const game = room.game;
+    if (!game || game.type !== 'snake') return;
+
+    const delay = Math.max(0, game.state.startAt - Date.now());
+    room.tickTimer = setTimeout(() => {
+      room.tickTimer = null;
+      this.scheduleSnakeTick(room);
+    }, delay);
+  }
+
+  /**
+   * 排下一拍。跟 scheduleTurn／scheduleNextHand 是平行的第三套計時機制 ——
+   * 貪吃蛇沒有回合、也沒有「下一手」，這個迴圈只負責每隔 SNAKE_TICK_MS 推進一次棋盤。
+   */
+  private scheduleSnakeTick(room: Room): void {
+    if (room.tickTimer) {
+      clearTimeout(room.tickTimer);
+      room.tickTimer = null;
+    }
+
+    const game = room.game;
+    if (!game || game.type !== 'snake' || game.state.over) return;
+
+    room.tickTimer = setTimeout(() => {
+      room.tickTimer = null;
+      this.runSnakeTick(room);
+    }, SNAKE_TICK_MS);
+  }
+
+  private runSnakeTick(room: Room): void {
+    if (this.rooms.get(room.id) !== room) return; // 房間已經被砍掉了
+    const game = room.game;
+    if (!game || game.type !== 'snake' || game.state.over) return;
+
+    this.logSnake(room, tickSnake(game.state));
+    // 這裡不走 afterGameAction：它的 scheduleTurn／scheduleNextHand 對貪吃蛇本來就是空操作，
+    // 但 broadcastLobby 會每拍重建一次整份大廳快照 —— 而 RoomSummary 只有 status 會變
+    this.checkGameOver(room);
+    this.broadcastRoom(room);
+    if (game.state.over) {
+      this.broadcastLobby(); // status 從 playing 變 finished，這一拍才需要更新大廳
+      return;
+    }
+    this.scheduleSnakeTick(room);
   }
 }

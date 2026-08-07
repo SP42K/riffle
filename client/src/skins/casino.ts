@@ -206,6 +206,16 @@ function formatLog(event: LogEvent): string {
         .join('、')}`;
     case 'timeoutMonopoly':
       return `${event.player} 在${MONOPOLY_PHASE_LABEL[event.phase]}階段逾時，自動處理`;
+    case 'snakeStart':
+      return `新的一局開始，共 ${event.players} 人`;
+    case 'snakeRespawn':
+      return `${event.player} 死了一次，重生倒數中`;
+    case 'snakeDeath':
+      return `${event.player} 出局了`;
+    case 'snakeMineEaten':
+      return `${event.player} 吃到自己的地雷果實，大加分`;
+    case 'snakeOver':
+      return `本局結束：${event.ranking.map((n, i) => `第 ${i + 1} 名 ${n}`).join('、')}`;
   }
 }
 

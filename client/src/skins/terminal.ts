@@ -208,6 +208,16 @@ function formatLog(event: LogEvent): string {
         .join(' ')}`;
     case 'timeoutMonopoly':
       return `${event.player} timeout in ${TERMINAL_PHASE[event.phase]} — auto`;
+    case 'snakeStart':
+      return `$ watch --members ${event.players}`;
+    case 'snakeRespawn':
+      return `${event.player} segfault — auto-restart`;
+    case 'snakeDeath':
+      return `${event.player} segfault (no retries left)`;
+    case 'snakeMineEaten':
+      return `${event.player} caught their own trap — bonus`;
+    case 'snakeOver':
+      return `watch exited — ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(' ')}`;
   }
 }
 
@@ -303,6 +313,7 @@ const TEXT: TextTable = {
   'start.startBigTwo': 'run',
   'start.startHoldem': 'run',
   'start.startMonopoly': 'mount',
+  'start.startSnake': 'watch',
   'start.needPlayers': 'needs {min}+ workers, all ready',
 
   'bigTwo.idleTitle': 'waiting for owner to run',
@@ -427,6 +438,23 @@ const TEXT: TextTable = {
   'monopolyHint.waitOthers': 'waiting on other users',
   'monopolyHint.yourTurn': 'your turn',
   'monopolyHint.spectating': 'read-only',
+
+  'snake.idleTitle': 'waiting for owner to start the watch',
+  'snake.idleHint': '{n}/{max} workers, {min} required',
+  'snake.startingIn': 'boot in {n}s',
+  'snake.controlsHint': 'arrow keys to move — hit a wall or any buffer and you burn a retry',
+  'snake.yourColor': 'your color',
+  'snake.lives': 'retries {n}',
+  'snake.respawning': 'restarting',
+  'snake.score': '{n} lines',
+  'snake.alive': 'running',
+  'snake.dead': 'segfault',
+  'snake.resultTitle': 'watch exited',
+  'snake.playAgain': 'watch again',
+  'snake.waitHost': 'waiting for owner',
+
+  'lobby.noDisguise': 'tty',
+  'lobby.noDisguiseHint': 'renders a framebuffer — will not look like a shell',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -494,7 +522,7 @@ export const terminalSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume', snake: 'watch' },
   bigTwoPreset: { taiwan: 'strict', classic: 'legacy', custom: 'custom' },
   bigTwoRule: {
     cuts: '--cut',

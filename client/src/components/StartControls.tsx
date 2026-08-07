@@ -9,6 +9,7 @@ const START_LABEL_KEY: Record<GameType, TextKey> = {
   bigTwo: 'start.startBigTwo',
   holdem: 'start.startHoldem',
   monopoly: 'start.startMonopoly',
+  snake: 'start.startSnake',
 };
 
 /** 開局前的準備 / 開始遊戲，兩種玩法共用。 */

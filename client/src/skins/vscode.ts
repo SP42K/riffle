@@ -212,6 +212,16 @@ function formatLog(event: LogEvent): string {
         .join(', ')}`;
     case 'timeoutMonopoly':
       return `${event.player} timed out during ${VSCODE_PHASE[event.phase]} — handled automatically`;
+    case 'snakeStart':
+      return `watch started · ${event.players} members`;
+    case 'snakeRespawn':
+      return `${event.player} crashed once — restarting`;
+    case 'snakeDeath':
+      return `${event.player} crashed`;
+    case 'snakeMineEaten':
+      return `${event.player} claimed their own trap — big bonus`;
+    case 'snakeOver':
+      return `watch stopped: ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(', ')}`;
   }
 }
 
@@ -307,6 +317,7 @@ const TEXT: TextTable = {
   'start.cancelReady': 'Unready',
   'start.startBigTwo': 'Run task',
   'start.startHoldem': 'Start run',
+  'start.startSnake': 'Start watch',
   'start.needPlayers': 'Needs {min}+ members, all ready',
 
   'bigTwo.idleTitle': 'Waiting for the owner to run the task',
@@ -431,6 +442,23 @@ const TEXT: TextTable = {
   'monopolyHint.waitOthers': 'Waiting for other members',
   'monopolyHint.yourTurn': 'Your turn',
   'monopolyHint.spectating': 'Read-only',
+
+  'snake.idleTitle': 'Waiting for the owner to start the watch',
+  'snake.idleHint': '{n}/{max} members, {min} required',
+  'snake.startingIn': 'watch starts in {n}s',
+  'snake.controlsHint': 'Arrow keys to move — hitting a wall or any buffer costs a retry',
+  'snake.yourColor': 'your color',
+  'snake.lives': 'retries {n}',
+  'snake.respawning': 'restarting',
+  'snake.score': '{n} lines',
+  'snake.alive': 'running',
+  'snake.dead': 'crashed',
+  'snake.resultTitle': 'Watch stopped',
+  'snake.playAgain': 'Restart watch',
+  'snake.waitHost': 'Waiting for the owner',
+
+  'lobby.noDisguise': 'GUI',
+  'lobby.noDisguiseHint': 'This task renders a graphical preview — it will not look like an editor.',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -497,7 +525,7 @@ export const vscodeSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace', snake: 'watch' },
   bigTwoPreset: { taiwan: 'strict', classic: 'default', custom: 'custom' },
   bigTwoRule: {
     cuts: 'override',

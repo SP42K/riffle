@@ -8,7 +8,7 @@ export const CASINO_TEXT = {
   // 進入畫面
   'gate.title': '線上牌桌',
   'gate.titleAccent': 'Online',
-  'gate.subtitle': '大老二 2~4 人、德州撲克 2~9 人、大富翁 2~6 人，可開房、加入、觀戰',
+  'gate.subtitle': '大老二 2~4 人、德州撲克 2~9 人、大富翁 2~6 人、貪吃蛇 2~4 人，可開房、加入、觀戰',
   'gate.nicknamePlaceholder': '輸入暱稱',
   'gate.submit': '開始',
 
@@ -88,6 +88,7 @@ export const CASINO_TEXT = {
   'start.startBigTwo': '開始遊戲',
   'start.startHoldem': '開始牌局',
   'start.startMonopoly': '開始遊戲',
+  'start.startSnake': '開始遊戲',
   'start.needPlayers': '需要至少 {min} 人，且所有人都已準備',
 
   // 大老二
@@ -215,6 +216,25 @@ export const CASINO_TEXT = {
   'monopolyHint.waitOthers': '等待其他玩家',
   'monopolyHint.yourTurn': '輪到你了',
   'monopolyHint.spectating': '觀戰中',
+
+  // 貪吃蛇
+  'snake.idleTitle': '等待房主開始遊戲',
+  'snake.idleHint': '目前 {n}/{max} 人，至少 {min} 人可開始',
+  'snake.startingIn': '{n} 秒後開始移動',
+  'snake.controlsHint': '方向鍵移動，撞牆、撞到自己或別人都會扣一條命',
+  'snake.yourColor': '你的顏色',
+  'snake.score': '分數 {n}',
+  'snake.lives': '❤ {n}',
+  'snake.alive': '存活中',
+  'snake.respawning': '重生中',
+  'snake.dead': '已出局',
+  'snake.resultTitle': '本局結束',
+  'snake.playAgain': '再來一局',
+  'snake.waitHost': '等房主開下一局',
+
+  // 沒有偽裝的玩法：大廳提示。文案本身也要能見人，別直接寫「這個沒有偽裝」
+  'lobby.noDisguise': '畫面明顯',
+  'lobby.noDisguiseHint': '這個玩法是彩色格子畫面，換外觀也藏不住，請自行斟酌',
 } as const;
 
 export type TextKey = keyof typeof CASINO_TEXT;

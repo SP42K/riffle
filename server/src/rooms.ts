@@ -34,6 +34,8 @@ import {
   type RoomSummary,
   type RoomView,
   type SeatView,
+  type SnakeGameView,
+  type SnakeSeatInfo,
   type SystemNotice,
 } from 'shared';
 import { seatOfPlayer, type GameState, type Seats } from './gameEngine.js';
@@ -45,6 +47,7 @@ import {
   type MonopolyEvent,
   type MonopolyState,
 } from './monopolyEngine.js';
+import type { SnakeEvent, SnakeState } from './snakeEngine.js';
 import { assertNeverGame, type TurnBased } from './turnBased.js';
 
 export interface Member {
@@ -60,11 +63,12 @@ export interface PlayerMember extends Member {
   ready: boolean;
 }
 
-/** 依玩法分派的牌局。三種 state 都滿足 TurnBased，計時與狀態判斷不必分支。 */
+/** 依玩法分派的牌局。四種 state 都滿足 TurnBased，計時與狀態判斷不必分支。 */
 export type RoomGame =
   | { type: 'bigTwo'; state: GameState }
   | { type: 'holdem'; state: HoldemState }
-  | { type: 'monopoly'; state: MonopolyState };
+  | { type: 'monopoly'; state: MonopolyState }
+  | { type: 'snake'; state: SnakeState };
 
 export interface Room {
   id: string;
@@ -92,6 +96,8 @@ export interface Room {
   turnTimer: NodeJS.Timeout | null;
   /** 德州撲克：攤牌後自動發下一手的計時器，跟 turnTimer 分開才不會被清掉。 */
   handTimer: NodeJS.Timeout | null;
+  /** 貪吃蛇：即時 tick 迴圈，跟回合制的 turnTimer 是平行的兩套機制，互不相干。 */
+  tickTimer: NodeJS.Timeout | null;
 }
 
 /** 取出玩法無關的回合資訊。 */
@@ -196,6 +202,7 @@ export function createRoom(input: CreateRoomInput): Room {
     buttonSeat: -1, // 還沒發過牌；第一手會往後推一位，也就是從座位 0 開始坐莊
     turnTimer: null,
     handTimer: null,
+    tickTimer: null,
   };
   seatPlayer(room, host);
   return room;
@@ -404,6 +411,21 @@ export function monopolyLogOf(room: Room, event: MonopolyEvent): LogEvent {
   }
 }
 
+/** 貪吃蛇引擎事件 → 戰報。跟大富翁那份是同一個道理，只是事件種類少很多。 */
+export function snakeLogOf(room: Room, event: SnakeEvent): LogEvent {
+  const who = (playerId: PlayerId) => nicknameOf(room, playerId);
+  switch (event.t) {
+    case 'respawn':
+      return { t: 'snakeRespawn', player: who(event.player) };
+    case 'death':
+      return { t: 'snakeDeath', player: who(event.player) };
+    case 'mine':
+      return { t: 'snakeMineEaten', player: who(event.player) };
+    case 'over':
+      return { t: 'snakeOver', ranking: event.ranking.map(who) };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 快照
 // ---------------------------------------------------------------------------
@@ -601,6 +623,37 @@ function buildMonopolyGameView(
   };
 }
 
+function buildSnakeGameView(game: SnakeState): SnakeGameView {
+  const seats: Record<number, SnakeSeatInfo> = {};
+  for (const snake of game.snakes.values()) {
+    seats[snake.seat] = {
+      body: snake.body.map((cell) => ({ ...cell })),
+      alive: snake.lives > 0,
+      respawning: snake.respawnAt !== null,
+      lives: snake.lives,
+      score: snake.score,
+      dir: snake.dir,
+    };
+  }
+
+  return {
+    type: 'snake',
+    // 貪吃蛇沒有「輪到誰」，turnPlayerId 恆為惰性值；turnDeadline 借來扛開局倒數，
+    // 倒數結束後歸零 —— 前端沿用既有的 useCountdown，不必為它另開一條欄位
+    turnPlayerId: null,
+    turnDeadline: !game.over && Date.now() < game.startAt ? game.startAt : 0,
+    over: game.over,
+    width: game.width,
+    height: game.height,
+    food: game.food.map((cell) => ({ ...cell })),
+    mine: game.mine
+      ? { seat: game.mine.seat, cell: { ...game.mine.cell }, warning: Date.now() < game.mine.telegraphUntil }
+      : null,
+    seats,
+    ranking: game.ranking.slice(),
+  };
+}
+
 function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
   const game = room.game;
   if (!game) return null;
@@ -611,6 +664,8 @@ function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
       return buildHoldemGameView(room, game.state, viewerId);
     case 'monopoly':
       return buildMonopolyGameView(room, game.state, viewerId);
+    case 'snake':
+      return buildSnakeGameView(game.state);
     default:
       return assertNeverGame(game);
   }
@@ -627,6 +682,8 @@ function handOf(game: RoomGame, playerId: PlayerId): Card[] | null {
     case 'holdem':
       return game.state.hole.get(playerId)?.slice() ?? [];
     case 'monopoly':
+      return null;
+    case 'snake':
       return null;
     default:
       return assertNeverGame(game);
