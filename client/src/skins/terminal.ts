@@ -218,6 +218,28 @@ function formatLog(event: LogEvent): string {
       return `${event.player} caught their own trap — bonus`;
     case 'snakeOver':
       return `watch exited — ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(' ')}`;
+    case 'minesweeperStart':
+      return `probe started — ${event.players} users`;
+    case 'minesweeperReveal':
+      return `${event.player} probe (${event.r + 1},${event.c + 1}) — ${event.points > 0 ? 'ok (+1)' : 'err (-1)'}`;
+    case 'minesweeperFlag':
+      return `${event.player} set flag (${event.r + 1},${event.c + 1}) — ${event.flagged ? 'on' : 'off'}`;
+    case 'minesweeperOver':
+      return `probe done — ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(' ')}`;
+    case 'timeoutMinesweeper':
+      return `${event.player} timeout — auto probe`;
+    case 'dndStart':
+      return `dungeon party active — ${event.players} members`;
+    case 'dndMove':
+      return `${event.player} move ${event.dir}`;
+    case 'dndAttack':
+      return `${event.player} attack ${event.target} (roll ${event.roll}) — ${event.hit ? `HIT (${event.damage} dmg)` : 'MISS'}`;
+    case 'dndMonsterTurn':
+      return `monsters executing AI routines...`;
+    case 'dndOver':
+      return `dungeon session ended — ${event.won ? 'SUCCESS' : 'FAILED'}`;
+    case 'timeoutDnd':
+      return `${event.player} timeout — auto action`;
   }
 }
 
@@ -459,6 +481,34 @@ const TEXT: TextTable = {
 
   'lobby.noDisguise': 'tty',
   'lobby.noDisguiseHint': 'renders a framebuffer — will not look like a shell',
+
+  // 踩地雷
+  'start.startMinesweeper': 'mount probe',
+  'minesweeper.idleTitle': 'waiting to probe',
+  'minesweeper.idleHint': '{n}/{max} users, {min} required',
+  'minesweeper.score': 'ok {n}',
+  'minesweeper.finalScore': 'total {n}',
+  'minesweeper.remainingMines': 'mines remaining: {n}',
+  'minesweeper.playAgain': 'probe again',
+  'minesweeper.waitHost': 'waiting for owner',
+  'minesweeperHint.notPlaying': 'press ready, owner mounts',
+  'minesweeperHint.waitOthers': 'scanning memory...',
+  'minesweeperHint.yourTurn': 'your turn to scan',
+  'minesweeperHint.spectating': 'read-only',
+
+  // 龍與地下城 (D&D)
+  'start.startDnd': 'exec dungeon',
+  'dnd.idleTitle': 'waiting to dungeon',
+  'dnd.idleHint': '{n}/{max} users, {min} required',
+  'dnd.hp': 'HP {hp}/{maxHp}',
+  'dnd.alive': 'ALIVE',
+  'dnd.dead': 'DEAD',
+  'dnd.playAgain': 'exec again',
+  'dnd.waitHost': 'waiting for owner',
+  'dndHint.notPlaying': 'press ready, owner mounts',
+  'dndHint.waitOthers': 'waiting on other adventurers',
+  'dndHint.yourTurn': 'your turn to act',
+  'dndHint.spectating': 'read-only',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -512,6 +562,10 @@ const ERRORS: Skin['errors'] = {
   TRADES_DISABLED: 'chown is disabled on this job',
   BAD_TRADE: 'invalid chown request',
   CAN_STILL_PAY: 'you can still pay — cannot kill yourself',
+  INVALID_CELL: 'invalid cell coordinates',
+  CELL_REVEALED: 'this block is already scanned',
+  CELL_FLAGGED: 'block is flagged — unflag first',
+  CANNOT_FLAG_REVEALED: 'cannot flag a scanned block',
 };
 
 /** 偽裝成終端機：等寬字、深色、牌變成短代號。 */
@@ -526,7 +580,7 @@ export const terminalSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume', snake: 'watch', downstairs: 'descent'  },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume', snake: 'watch', downstairs: 'descent', minesweeper: 'probe', dnd: 'dungeon' },
   bigTwoPreset: { taiwan: 'strict', classic: 'legacy', custom: 'custom' },
   bigTwoRule: {
     cuts: '--cut',

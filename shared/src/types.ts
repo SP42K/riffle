@@ -134,7 +134,7 @@ export interface Combo {
 export type PlayerId = string;
 
 /** 一個房間只玩一種玩法，建房時決定。 */
-export type GameType = 'bigTwo' | 'holdem' | 'monopoly' | 'downstairs' | 'snake';
+export type GameType = 'bigTwo' | 'holdem' | 'monopoly' | 'downstairs' | 'snake' | 'minesweeper' | 'dnd';
 
 export const GAME_TYPES: readonly GameType[] = [
   'bigTwo',
@@ -142,6 +142,8 @@ export const GAME_TYPES: readonly GameType[] = [
   'monopoly',
   'downstairs',
   'snake',
+  'minesweeper',
+  'dnd',
 ];
 
 export const GAME_TYPE_LABEL: Record<GameType, string> = {
@@ -150,6 +152,8 @@ export const GAME_TYPE_LABEL: Record<GameType, string> = {
   monopoly: '大富翁',
   downstairs: '樓梯小勇者',
   snake: '貪吃蛇',
+  minesweeper: '踩地雷',
+  dnd: '龍與地下城',
 };
 
 /**
@@ -243,6 +247,8 @@ export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
   monopoly: { min: 2, max: 6 },
   downstairs: { min: 1, max: 4 },
   snake: { min: 2, max: 4 },
+  minesweeper: { min: 1, max: 4 },
+  dnd: { min: 1, max: 4 },
 };
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -337,13 +343,40 @@ export interface BigTwoGameView {
   seats: Record<number, BigTwoSeatInfo>;
 }
 
+export interface MinesweeperCellView {
+  r: number;
+  c: number;
+  revealed: boolean;
+  flaggedBy: PlayerId | null;
+  exploded: boolean;
+  adjacentMines: number | null;
+}
+
+export interface MinesweeperSeatInfo {
+  score: number;
+  finalScore: number | null;
+}
+
+export interface MinesweeperGameView {
+  type: 'minesweeper';
+  turnPlayerId: PlayerId | null;
+  turnDeadline: number;
+  over: boolean;
+  board: MinesweeperCellView[][];
+  seats: Record<number, MinesweeperSeatInfo>;
+  remainingMines: number;
+  ranking: PlayerId[];
+}
+
 /** 依 type 分派的玩法快照。前端用 game.type 收窄。 */
 export type GameView =
   | BigTwoGameView
   | HoldemGameView
   | MonopolyGameView
   | DownstairsGameView
-  | SnakeGameView;
+  | SnakeGameView
+  | MinesweeperGameView
+  | DndGameView;
 
 // ---------------------------------------------------------------------------
 // 戰報
@@ -408,10 +441,23 @@ export type LogEvent =
   /** 吃到自己顏色的地雷果實拿到加分。 */
   | { t: 'snakeMineEaten'; player: string }
   | { t: 'snakeOver'; ranking: string[] }
+  // 踩地雷
+  | { t: 'minesweeperStart'; players: number }
+  | { t: 'minesweeperReveal'; player: string; r: number; c: number; points: number }
+  | { t: 'minesweeperFlag'; player: string; r: number; c: number; flagged: boolean }
+  | { t: 'minesweeperOver'; ranking: string[] }
   // 逾時代打
   | { t: 'timeout'; player: string; auto: 'pass' | 'check' | 'fold' }
   | { t: 'timeoutPlay'; player: string; combo: ComboType; cards: string[] }
-  | { t: 'timeoutMonopoly'; player: string; phase: MonopolyPhase };
+  | { t: 'timeoutMonopoly'; player: string; phase: MonopolyPhase }
+  | { t: 'timeoutMinesweeper'; player: string }
+  // 龍與地下城
+  | { t: 'dndStart'; players: number }
+  | { t: 'dndMove'; player: string; dir: string }
+  | { t: 'dndAttack'; player: string; target: string; roll: number; hit: boolean; damage: number }
+  | { t: 'dndMonsterTurn' }
+  | { t: 'dndOver'; won: boolean }
+  | { t: 'timeoutDnd'; player: string };
 
 /**
  * 一次下注動作的結構化描述。座位上的「最近動作」與戰報共用。
@@ -500,6 +546,16 @@ export interface ClientToServerEvents {
    * 跟其他玩法的「這一手就是這一手」不同，這裡送出不代表這一拍已經轉向。
    */
   'game:snake': (p: { dir: SnakeDirection }, ack: Ack<null>) => void;
+  /** 踩地雷專用。 */
+  'game:minesweeper': (p: { action: MinesweeperAction }, ack: Ack<null>) => void;
+  /** 龍與地下城專用。 */
+  'game:dnd': (p: { action: DndAction }, ack: Ack<null>) => void;
+}
+
+export interface MinesweeperAction {
+  kind: 'reveal' | 'flag' | 'chord';
+  r: number;
+  c: number;
 }
 
 export type BetAction = 'fold' | 'check' | 'call' | 'raise' | 'allin';
@@ -526,3 +582,47 @@ export const TURN_MS = 45_000;
 export const DISCONNECT_GRACE_MS = 30_000;
 export const CHAT_HISTORY = 100;
 export const LOG_HISTORY = 60;
+
+// ---------------------------------------------------------------------------
+// 龍與地下城
+// ---------------------------------------------------------------------------
+
+export interface DndPiece {
+  id: string;
+  type: 'player' | 'goblin';
+  playerId?: PlayerId;
+  name: string;
+  hp: number;
+  maxHp: number;
+  ac: number;
+}
+
+export interface DndCellView {
+  r: number;
+  c: number;
+  piece: DndPiece | null;
+}
+
+export interface DndSeatInfo {
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  isNpc?: boolean;
+  name?: string;
+}
+
+export interface DndGameView {
+  type: 'dnd';
+  turnPlayerId: PlayerId | null;
+  turnDeadline: number;
+  over: boolean;
+  board: DndCellView[][];
+  seats: Record<number, DndSeatInfo>;
+  ranking: PlayerId[];
+}
+
+export interface DndAction {
+  kind: 'move' | 'attack';
+  dir?: 'up' | 'down' | 'left' | 'right';
+  targetId?: string;
+}

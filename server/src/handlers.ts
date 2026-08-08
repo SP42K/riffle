@@ -28,6 +28,8 @@ import {
   startDownstairs,
   DOWNSTAIRS_CHARACTERS,
   DOWNSTAIRS_TICK_MS,
+  type MinesweeperAction,
+  type DndAction,
 } from 'shared';
 import {
   PLAY_ERROR_MESSAGE,
@@ -37,6 +39,20 @@ import {
   playCards,
   removePlayerFromGame,
 } from './gameEngine.js';
+import {
+  MINESWEEPER_ERROR_MESSAGE,
+  applyMinesweeperAction,
+  autoActMinesweeper,
+  dealMinesweeper,
+  removePlayerFromMinesweeper,
+} from './minesweeperEngine.js';
+import {
+  DND_ERROR_MESSAGE,
+  applyDndAction,
+  autoActDnd,
+  dealDnd,
+  removePlayerFromDnd,
+} from './dndEngine.js';
 import {
   BET_ERROR_MESSAGE,
   applyBet,
@@ -238,6 +254,8 @@ export class GameServer {
     socket.on('game:downstairs', (payload) => this.onDownstairs(socket, payload));
     socket.on('game:downstairsSkill', () => this.onDownstairsSkill(socket));
     socket.on('game:snake', (payload, ack) => this.onSnake(socket, payload, ack));
+    socket.on('game:minesweeper', (payload, ack) => this.onMinesweeper(socket, payload, ack));
+    socket.on('game:dnd', (payload, ack) => this.onDnd(socket, payload, ack));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -569,6 +587,12 @@ export class GameServer {
       case 'snake':
         this.logSnake(room, removePlayerFromSnake(game.state, playerId));
         return;
+      case 'minesweeper':
+        removePlayerFromMinesweeper(room.seats, game.state, playerId);
+        return;
+      case 'dnd':
+        removePlayerFromDnd(room.seats, game.state, playerId);
+        return;
       default:
         assertNeverGame(game);
     }
@@ -668,7 +692,6 @@ export class GameServer {
         });
         break;
       }
-
       case 'downstairs': {
         const players = seatedPlayers(room);
         const state = startDownstairs(
@@ -687,6 +710,18 @@ export class GameServer {
         room.game = { type: 'snake', state };
         pushLog(room, { t: 'snakeStart', players: seatedPlayers(room).length });
         this.scheduleSnakeStart(room);
+        break;
+      }
+      case 'minesweeper': {
+        const state = dealMinesweeper(room.seats);
+        room.game = { type: 'minesweeper', state };
+        pushLog(room, { t: 'minesweeperStart', players: seatedPlayers(room).length });
+        break;
+      }
+      case 'dnd': {
+        const state = dealDnd(room.seats);
+        room.game = { type: 'dnd', state };
+        pushLog(room, { t: 'dndStart', players: seatedPlayers(room).length });
         break;
       }
       default:
@@ -922,6 +957,90 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
+  private onMinesweeper(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { room, game, playerId } = context;
+    if (game.type !== 'minesweeper') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間玩的不是踩地雷' } });
+    }
+
+    const rawAction = payload?.action as Partial<MinesweeperAction>;
+    if (!rawAction || typeof rawAction.r !== 'number' || typeof rawAction.c !== 'number' || (rawAction.kind !== 'reveal' && rawAction.kind !== 'flag' && rawAction.kind !== 'chord')) {
+      return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的動作' } });
+    }
+    const action: MinesweeperAction = {
+      kind: rawAction.kind,
+      r: Math.floor(rawAction.r),
+      c: Math.floor(rawAction.c),
+    };
+
+    const result = applyMinesweeperAction(room.seats, game.state, playerId, action);
+    if (!result.ok) {
+      return reply(ack, {
+        ok: false,
+        error: { code: result.error, message: MINESWEEPER_ERROR_MESSAGE[result.error] },
+      });
+    }
+
+    const nickname = nicknameOf(room, playerId);
+    if (result.result.kind === 'reveal' || result.result.kind === 'chord') {
+      pushLog(room, {
+        t: 'minesweeperReveal',
+        player: nickname,
+        r: result.result.r,
+        c: result.result.c,
+        points: result.result.points,
+      });
+    } else {
+      pushLog(room, {
+        t: 'minesweeperFlag',
+        player: nickname,
+        r: result.result.r,
+        c: result.result.c,
+        flagged: result.result.flagged,
+      });
+    }
+
+    this.afterGameAction(room);
+    reply(ack, { ok: true, data: null });
+  }
+
+  private onDnd(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { room, game, playerId } = context;
+    if (game.type !== 'dnd') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間玩的不是龍與地下城' } });
+    }
+
+    const rawAction = payload?.action as Partial<DndAction>;
+    if (!rawAction || (rawAction.kind !== 'move' && rawAction.kind !== 'attack')) {
+      return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的動作' } });
+    }
+
+    const action: DndAction = {
+      kind: rawAction.kind,
+      dir: rawAction.dir,
+      targetId: rawAction.targetId,
+    };
+
+    const result = applyDndAction(room.seats, game.state, playerId, action);
+    if (!result.ok) {
+      return reply(ack, {
+        ok: false,
+        error: { code: result.error, message: DND_ERROR_MESSAGE[result.error] },
+      });
+    }
+
+    for (const ev of result.events) {
+      pushLog(room, ev);
+    }
+
+    this.afterGameAction(room);
+    reply(ack, { ok: true, data: null });
+  }
+
   private gameContext(socket: GameSocket, ack: unknown) {
     const session = this.sessions.get(socket.id);
     if (!session?.roomId) {
@@ -975,18 +1094,30 @@ export class GameServer {
         this.emitRanking(room, game.state.result?.ranking ?? []);
         return;
       }
-
       case 'downstairs':
         if (game.state.over) this.emitRanking(room, game.state.ranking);
         return;
 
       case 'snake': {
         if (!game.state.over) return;
-        // 跟大富翁一樣，snakeOver 那行戰報已經在 tick 迴圈裡由引擎事件帶出來了
         this.emitRanking(room, game.state.ranking);
         return;
       }
-
+      case 'minesweeper': {
+        if (!game.state.over) return;
+        const ranking = game.state.ranking;
+        if (ranking.length > 0) {
+          pushLog(room, { t: 'minesweeperOver', ranking: ranking.map((id) => nicknameOf(room, id)) });
+        }
+        this.emitRanking(room, ranking);
+        return;
+      }
+      case 'dnd': {
+        if (!game.state.over) return;
+        const ranking = game.state.ranking;
+        this.emitRanking(room, ranking);
+        return;
+      }
       default:
         assertNeverGame(game);
     }
@@ -1114,6 +1245,32 @@ export class GameServer {
       case 'snake':
         // scheduleTurn 對貪吃蛇一律提早 return，這裡永遠不會被排到；留著只是為了窮盡檢查
         break;
+      case 'minesweeper': {
+        const acted = autoActMinesweeper(room.seats, game.state);
+        if (acted && acted.ok) {
+          pushLog(room, { t: 'timeoutMinesweeper', player: nickname });
+          if (acted.result.kind === 'reveal') {
+            pushLog(room, {
+              t: 'minesweeperReveal',
+              player: nickname,
+              r: acted.result.r,
+              c: acted.result.c,
+              points: acted.result.points,
+            });
+          }
+        }
+        break;
+      }
+      case 'dnd': {
+        const acted = autoActDnd(room.seats, game.state);
+        if (acted && acted.ok) {
+          pushLog(room, { t: 'timeoutDnd', player: nickname });
+          for (const ev of acted.events) {
+            pushLog(room, ev);
+          }
+        }
+        break;
+      }
       default:
         assertNeverGame(game);
     }

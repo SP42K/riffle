@@ -41,6 +41,10 @@ import {
   type DownstairsState,
   type DownstairsCharacterId,
   downstairsView,
+  type MinesweeperGameView,
+  type MinesweeperSeatInfo,
+  type MinesweeperCellView,
+  type DndGameView,
 } from 'shared';
 import { seatOfPlayer, type GameState, type Seats } from './gameEngine.js';
 import { actionsFor, type HoldemState } from './holdemEngine.js';
@@ -53,6 +57,8 @@ import {
 } from './monopolyEngine.js';
 import type { SnakeEvent, SnakeState } from './snakeEngine.js';
 import { assertNeverGame, type TurnBased } from './turnBased.js';
+import { type MinesweeperState, countAdjacentMines } from './minesweeperEngine.js';
+import { type DndState } from './dndEngine.js';
 
 export interface Member {
   playerId: PlayerId;
@@ -77,7 +83,9 @@ export type RoomGame =
   | { type: 'holdem'; state: HoldemState }
   | { type: 'monopoly'; state: MonopolyState }
   | { type: 'downstairs'; state: DownstairsState }
-  | { type: 'snake'; state: SnakeState };
+  | { type: 'snake'; state: SnakeState }
+  | { type: 'minesweeper'; state: MinesweeperState }
+  | { type: 'dnd'; state: DndState };
 
 export interface Room {
   id: string;
@@ -668,6 +676,59 @@ function buildSnakeGameView(game: SnakeState): SnakeGameView {
   };
 }
 
+function buildMinesweeperGameView(room: Room, game: MinesweeperState): MinesweeperGameView {
+  const board: MinesweeperCellView[][] = [];
+  for (let r = 0; r < game.board.length; r++) {
+    const gameRow = game.board[r]!;
+    const row: MinesweeperCellView[] = [];
+    for (let c = 0; c < gameRow.length; c++) {
+      const cell = gameRow[c]!;
+      const adjacentMines = cell.revealed && !cell.hasMine ? countAdjacentMines(game.board, r, c) : null;
+      row.push({
+        r,
+        c,
+        revealed: cell.revealed,
+        flaggedBy: cell.flaggedBy,
+        exploded: cell.exploded,
+        adjacentMines,
+      });
+    }
+    board.push(row);
+  }
+
+  const seats: Record<number, MinesweeperSeatInfo> = {};
+  for (const [seat, playerId] of room.seats.entries()) {
+    if (!playerId || !room.players.has(playerId)) continue;
+    seats[seat] = {
+      score: game.scores[playerId] ?? 0,
+      finalScore: game.finalScores ? (game.finalScores[playerId] ?? null) : null,
+    };
+  }
+
+  let foundMines = 0;
+  for (let r = 0; r < game.board.length; r++) {
+    const gameRow = game.board[r]!;
+    for (let c = 0; c < gameRow.length; c++) {
+      const cell = gameRow[c]!;
+      if (cell.hasMine && (cell.exploded || cell.flaggedBy !== null)) {
+        foundMines++;
+      }
+    }
+  }
+  const remainingMines = Math.max(0, 15 - foundMines);
+
+  return {
+    type: 'minesweeper',
+    turnPlayerId: game.over ? null : (room.seats[game.turnSeat] ?? null),
+    turnDeadline: game.turnDeadline,
+    over: game.over,
+    board,
+    seats,
+    remainingMines,
+    ranking: game.ranking.slice(),
+  };
+}
+
 function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
   const game = room.game;
   if (!game) return null;
@@ -682,9 +743,25 @@ function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
       return downstairsView(game.state) satisfies DownstairsGameView;
     case 'snake':
       return buildSnakeGameView(game.state);
+    case 'minesweeper':
+      return buildMinesweeperGameView(room, game.state);
+    case 'dnd':
+      return buildDndGameView(room, game.state);
     default:
       return assertNeverGame(game);
   }
+}
+
+function buildDndGameView(room: Room, game: DndState): DndGameView {
+  return {
+    type: 'dnd',
+    turnPlayerId: game.over ? null : (room.seats[game.turnSeat] ?? null),
+    turnDeadline: game.turnDeadline,
+    over: game.over,
+    board: game.board,
+    seats: game.seats,
+    ranking: game.ranking.slice(),
+  };
 }
 
 /**
@@ -701,6 +778,8 @@ function handOf(game: RoomGame, playerId: PlayerId): Card[] | null {
       return null;
     case 'downstairs':
     case 'snake':
+    case 'minesweeper':
+    case 'dnd':
       return null;
     default:
       return assertNeverGame(game);

@@ -4,7 +4,8 @@ import { HoldemRoom } from './HoldemTable';
 import { MonopolyRoom } from './MonopolyTable';
 import { DownstairsRoom } from './DownstairsTable';
 import { SnakeRoom } from './SnakeTable';
-
+import { MinesweeperRoom } from './MinesweeperTable';
+import { DndRoom } from './DndTable';
 
 /** 依房間的玩法挑桌面。共用的外殼在 RoomShell。 */
 export function Room({ room }: { room: RoomView }) {
@@ -20,6 +21,9 @@ export function Room({ room }: { room: RoomView }) {
       return <DownstairsRoom room={room} />;
     case 'snake':
       return <SnakeRoom room={room} />;
-
+    case 'minesweeper':
+      return <MinesweeperRoom room={room} />;
+    case 'dnd':
+      return <DndRoom room={room} />;
   }
 }
