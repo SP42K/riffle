@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo } from 'react';
 import {
   type RoomView,
   type DndAction,
@@ -106,54 +106,11 @@ export function DndRoom({ room }: { room: RoomView }) {
 
   const remainingMs = useCountdown(playing ? (game?.turnDeadline ?? 0) : 0);
 
-  // Roll Animation States and Queue
-  const prevLogLengthRef = useRef(room.log.length);
-  const [rollQueue, setRollQueue] = useState<any[]>([]);
-  const [activeRoll, setActiveRoll] = useState<any | null>(null);
-  const [isRolling, setIsRolling] = useState(false);
-
-  // Monitor logs to collect attack events into queue
-  useEffect(() => {
-    const oldLen = prevLogLengthRef.current;
-    const newLen = room.log.length;
-    prevLogLengthRef.current = newLen;
-
-    if (newLen > oldLen) {
-      const newEvents = room.log.slice(oldLen, newLen);
-      const attackEvents = newEvents.filter((e) => e.t === 'dndAttack');
-      if (attackEvents.length > 0) {
-        setRollQueue((prev) => [...prev, ...attackEvents]);
-      }
-    }
-  }, [room.log.length]);
-
-  // Consume queue items one by one
-  useEffect(() => {
-    if (!activeRoll && rollQueue.length > 0) {
-      const nextRoll = rollQueue[0];
-      setRollQueue((prev) => prev.slice(1));
-      setActiveRoll(nextRoll);
-    }
-  }, [activeRoll, rollQueue]);
-
-  // Handle rolling animation and timer lifecycles for activeRoll
-  useEffect(() => {
-    if (activeRoll) {
-      setIsRolling(true);
-      const timer1 = setTimeout(() => {
-        setIsRolling(false);
-      }, 700);
-
-      const timer2 = setTimeout(() => {
-        setActiveRoll(null);
-      }, 2200);
-
-      return () => {
-        clearTimeout(timer1);
-        clearTimeout(timer2);
-      };
-    }
-  }, [activeRoll]);
+  // Retrieve the latest dndAttack log event instantly
+  const lastAttackEvent = useMemo(() => {
+    const attacks = room.log.filter((e) => e.t === 'dndAttack');
+    return attacks.length > 0 ? attacks[attacks.length - 1] : null;
+  }, [room.log]);
 
   // Find current player position
   const myPosition = useMemo(() => {
@@ -300,6 +257,48 @@ export function DndRoom({ room }: { room: RoomView }) {
             remainingMs={remainingMs}
           />
 
+          {/* Last Combat Roll Card - Placed Outside Map, updates instantly without blocking overlay */}
+          {lastAttackEvent && (
+            <div className="dnd-dice-sidebar-card" style={{
+              background: 'rgba(255, 255, 255, 0.02)',
+              padding: '1rem',
+              borderRadius: 'var(--radius)',
+              border: '1px solid var(--line)',
+              textAlign: 'center',
+              marginBottom: '1rem',
+              animation: 'cardPopIn 0.2s ease-out'
+            }}>
+              <h4 style={{ margin: '0 0 0.8rem 0', fontSize: '0.85rem', color: 'var(--gold)' }}>🎲 最後戰鬥判定 (Instant Roll)</h4>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', marginBottom: '0.6rem' }}>
+                <div className="dnd-d20-mini" style={{
+                  fontSize: '1.6rem',
+                  width: '42px',
+                  height: '42px',
+                  lineHeight: '42px',
+                  background: 'radial-gradient(circle, rgba(243,156,18,0.1) 0%, rgba(211,84,0,0.2) 100%)',
+                  border: '2px solid var(--gold)',
+                  borderRadius: '50%',
+                  color: 'var(--gold)',
+                  fontWeight: '900',
+                  userSelect: 'none'
+                }}>
+                  {lastAttackEvent.damage < 0 ? '✨' : lastAttackEvent.roll}
+                </div>
+                <div style={{ textAlign: 'left' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>
+                    {lastAttackEvent.damage < 0 ? `${lastAttackEvent.player} 治療 ${lastAttackEvent.target}` : `${lastAttackEvent.player} ➔ ${lastAttackEvent.target}`}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>
+                    {lastAttackEvent.damage < 0 ? '神聖法術' : `D20 擲骰判定`}
+                  </div>
+                </div>
+              </div>
+              <div className={`dnd-dice-hit-text ${lastAttackEvent.hit ? 'hit' : 'miss'}`} style={{ fontSize: '0.85rem', padding: '4px', borderRadius: '4px' }}>
+                {lastAttackEvent.damage < 0 ? `恢復了 ${-lastAttackEvent.damage} 點生命` : (lastAttackEvent.hit ? `命中！💥 造成 ${lastAttackEvent.damage} 傷害` : '未命中 🛡️')}
+              </div>
+            </div>
+          )}
+
           <div className="dnd-party-status">
             <h3>🛡️ 冒險者隊伍狀態</h3>
             {[0, 1, 2, 3].map((seatIndex) => {
@@ -404,40 +403,5 @@ export function DndRoom({ room }: { room: RoomView }) {
     </div>
   ) : null;
 
-  return (
-    <>
-      <RoomShell room={room} center={center} footer={footer} isMyTurn={isMyTurn} />
-      {activeRoll && (
-        <div className="dnd-dice-overlay">
-          <div className="dnd-dice-card">
-            <div className="dnd-dice-title">
-              {activeRoll.damage < 0 ? `✨ ${activeRoll.player} 治療 ${activeRoll.target}` : `⚔️ ${activeRoll.player} 攻擊 ${activeRoll.target}`}
-            </div>
-            <div className={`dnd-d20 ${isRolling ? 'rolling' : ''}`}>
-              {isRolling ? '🎲' : (activeRoll.damage < 0 ? '✨' : activeRoll.roll)}
-            </div>
-            {!isRolling && (
-              <div className="dnd-dice-result">
-                {activeRoll.damage < 0 ? (
-                  <>
-                    <div className="dnd-dice-roll-label">神聖醫療施展成功</div>
-                    <div className="dnd-dice-hit-text hit" style={{ color: '#2ecc71', background: 'rgba(46, 204, 113, 0.1)', boxShadow: '0 0 10px rgba(46, 204, 113, 0.2)' }}>
-                      ✨ 治療！恢復了 {-activeRoll.damage} 點生命！
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="dnd-dice-roll-label">D20 擲骰判定對抗怪物 AC</div>
-                    <div className={`dnd-dice-hit-text ${activeRoll.hit ? 'hit' : 'miss'}`}>
-                      {activeRoll.hit ? `命中！💥 造成 ${activeRoll.damage} 傷害` : '未命中 🛡️'}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </>
-  );
+  return <RoomShell room={room} center={center} footer={footer} isMyTurn={isMyTurn} />;
 }
