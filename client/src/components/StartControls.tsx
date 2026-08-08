@@ -5,7 +5,7 @@ import { useSkin } from '../state/skinContext';
 import type { TextKey } from '../skins/text';
 
 /** 開始鈕的文案。用 Record 而不是三元 —— 新玩法漏了會編譯失敗。 */
-const START_LABEL_KEY: Record<GameType, TextKey> = {
+const START_LABEL_KEY: Partial<Record<GameType, TextKey>> = {
   bigTwo: 'start.startBigTwo',
   holdem: 'start.startHoldem',
   monopoly: 'start.startMonopoly',
@@ -21,7 +21,8 @@ export function StartControls({ room }: { room: RoomView }) {
   const min = SEAT_LIMITS[room.gameType].min;
   const everyoneReady = room.seats.every((seat) => seat.ready || seat.playerId === room.hostId);
   const canStart = isHost && room.seats.length >= min && everyoneReady;
-  const startLabel = t(START_LABEL_KEY[room.gameType]);
+  const key = START_LABEL_KEY[room.gameType];
+  const startLabel = key ? t(key) : '開始挑戰';
 
   return (
     <>

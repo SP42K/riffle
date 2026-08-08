@@ -494,7 +494,7 @@ export const terminalSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume', downstairs: 'descent' },
   bigTwoPreset: { taiwan: 'strict', classic: 'legacy', custom: 'custom' },
   bigTwoRule: {
     cuts: '--cut',

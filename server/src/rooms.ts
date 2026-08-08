@@ -35,6 +35,10 @@ import {
   type RoomView,
   type SeatView,
   type SystemNotice,
+  type DownstairsGameView,
+  type DownstairsState,
+  type DownstairsCharacterId,
+  downstairsView,
 } from 'shared';
 import { seatOfPlayer, type GameState, type Seats } from './gameEngine.js';
 import { actionsFor, type HoldemState } from './holdemEngine.js';
@@ -54,6 +58,7 @@ export interface Member {
   connected: boolean;
   /** 斷線寬限計時器，重新連上時要清掉。 */
   graceTimer: NodeJS.Timeout | null;
+  characterId: DownstairsCharacterId;
 }
 
 export interface PlayerMember extends Member {
@@ -64,7 +69,8 @@ export interface PlayerMember extends Member {
 export type RoomGame =
   | { type: 'bigTwo'; state: GameState }
   | { type: 'holdem'; state: HoldemState }
-  | { type: 'monopoly'; state: MonopolyState };
+  | { type: 'monopoly'; state: MonopolyState }
+  | { type: 'downstairs'; state: DownstairsState };
 
 export interface Room {
   id: string;
@@ -92,11 +98,14 @@ export interface Room {
   turnTimer: NodeJS.Timeout | null;
   /** 德州撲克：攤牌後自動發下一手的計時器，跟 turnTimer 分開才不會被清掉。 */
   handTimer: NodeJS.Timeout | null;
+  /** 小朋友下樓梯 authoritative fixed tick。 */
+  gameTimer: NodeJS.Timeout | null;
 }
 
 /** 取出玩法無關的回合資訊。 */
 export function turnStateOf(room: Room): TurnBased | null {
-  return room.game?.state ?? null;
+  if (!room.game || room.game.type === 'downstairs') return null;
+  return room.game.state;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +205,7 @@ export function createRoom(input: CreateRoomInput): Room {
     buttonSeat: -1, // 還沒發過牌；第一手會往後推一位，也就是從座位 0 開始坐莊
     turnTimer: null,
     handTimer: null,
+    gameTimer: null,
   };
   seatPlayer(room, host);
   return room;
@@ -441,6 +451,7 @@ function buildSeats(room: Room): SeatView[] {
         isHost: playerId === room.hostId,
         ready: player.ready,
         connected: player.connected,
+        characterId: player.characterId,
       } satisfies SeatView,
     ];
   });
@@ -611,6 +622,8 @@ function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
       return buildHoldemGameView(room, game.state, viewerId);
     case 'monopoly':
       return buildMonopolyGameView(room, game.state, viewerId);
+    case 'downstairs':
+      return downstairsView(game.state) satisfies DownstairsGameView;
     default:
       return assertNeverGame(game);
   }
@@ -627,6 +640,8 @@ function handOf(game: RoomGame, playerId: PlayerId): Card[] | null {
     case 'holdem':
       return game.state.hole.get(playerId)?.slice() ?? [];
     case 'monopoly':
+      return null;
+    case 'downstairs':
       return null;
     default:
       return assertNeverGame(game);

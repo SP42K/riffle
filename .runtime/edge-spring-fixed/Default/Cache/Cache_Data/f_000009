@@ -1,0 +1,372 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/pages/SkinSettings.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=8e688395"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/user/riffle/client/src/pages/SkinSettings.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$(), _s2 = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=8e688395"; const useEffect = __vite__cjsImport3_react["useEffect"]; const useState = __vite__cjsImport3_react["useState"];
+import { SKINS } from "/src/skins/index.ts?t=1786160035707";
+import { hotkeyOf, useSkin } from "/src/state/skinContext.ts?t=1786160035707";
+function HotkeyField({
+  value,
+  onChange
+}) {
+  _s();
+  const [recording, setRecording] = useState(false);
+  useEffect(() => {
+    if (!recording) return;
+    const onKeyDown = (event) => {
+      event.preventDefault();
+      if (event.key === "Escape") {
+        setRecording(false);
+        return;
+      }
+      const combo = hotkeyOf(event);
+      if (!combo) return;
+      onChange(combo);
+      setRecording(false);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [recording, onChange]);
+  return /* @__PURE__ */ jsxDEV(
+    "button",
+    {
+      type: "button",
+      className: recording ? "btn btn--primary skin-settings__hotkey" : "btn skin-settings__hotkey",
+      onClick: () => setRecording((prev) => !prev),
+      children: recording ? "按下想用的按鍵…（Esc 取消）" : value
+    },
+    void 0,
+    false,
+    {
+      fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+      lineNumber: 52,
+      columnNumber: 5
+    },
+    this
+  );
+}
+_s(HotkeyField, "NDO9ielisdJ+TIctZQVIGS5bURc=");
+_c = HotkeyField;
+export function SkinSettings() {
+  _s2();
+  const { prefs, setPrefs, setSettingsOpen } = useSkin();
+  return /* @__PURE__ */ jsxDEV("div", { className: "skin-settings__backdrop", onClick: () => setSettingsOpen(false), children: /* @__PURE__ */ jsxDEV(
+    "div",
+    {
+      className: "skin-settings",
+      role: "dialog",
+      "aria-label": "外觀與隱匿設定",
+      onClick: (event) => event.stopPropagation(),
+      children: [
+        /* @__PURE__ */ jsxDEV("header", { className: "skin-settings__head", children: [
+          /* @__PURE__ */ jsxDEV("h2", { children: "外觀與隱匿" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 75,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("button", { type: "button", className: "btn", onClick: () => setSettingsOpen(false), children: "關閉" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 76,
+            columnNumber: 11
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+          lineNumber: 74,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV("section", { className: "skin-settings__group", children: [
+          /* @__PURE__ */ jsxDEV("h3", { children: "外觀" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 82,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { className: "skin-settings__skins", children: SKINS.map(
+            (skin) => /* @__PURE__ */ jsxDEV(
+              "button",
+              {
+                type: "button",
+                className: prefs.skin === skin.id ? "btn btn--primary" : "btn",
+                onClick: () => setPrefs({ skin: skin.id }),
+                children: skin.label
+              },
+              skin.id,
+              false,
+              {
+                fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+                lineNumber: 85,
+                columnNumber: 13
+              },
+              this
+            )
+          ) }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 83,
+            columnNumber: 11
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+          lineNumber: 81,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV("section", { className: "skin-settings__group", children: [
+          /* @__PURE__ */ jsxDEV("h3", { children: "快捷鍵" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 98,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("label", { className: "skin-settings__row", children: [
+            /* @__PURE__ */ jsxDEV("span", { children: "循環切換外觀" }, void 0, false, {
+              fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+              lineNumber: 100,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              HotkeyField,
+              {
+                value: prefs.hotkeyCycle,
+                onChange: (combo) => setPrefs({ hotkeyCycle: combo })
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+                lineNumber: 101,
+                columnNumber: 13
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 99,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("label", { className: "skin-settings__row", children: [
+            /* @__PURE__ */ jsxDEV("span", { children: "一鍵全遮（再按一次還原）" }, void 0, false, {
+              fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+              lineNumber: 107,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              HotkeyField,
+              {
+                value: prefs.hotkeyBoss,
+                onChange: (combo) => setPrefs({ hotkeyBoss: combo })
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+                lineNumber: 108,
+                columnNumber: 13
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 106,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { className: "muted", children: "在輸入框裡打字時不會觸發快捷鍵。" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 113,
+            columnNumber: 11
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+          lineNumber: 97,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV("section", { className: "skin-settings__group", children: [
+          /* @__PURE__ */ jsxDEV("h3", { children: "自動遮蔽" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 117,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("label", { className: "skin-settings__row", children: [
+            /* @__PURE__ */ jsxDEV("span", { children: "切到別的分頁或視窗失焦時" }, void 0, false, {
+              fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+              lineNumber: 119,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                type: "checkbox",
+                checked: prefs.autoHideOnBlur,
+                onChange: (event) => setPrefs({ autoHideOnBlur: event.target.checked })
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+                lineNumber: 120,
+                columnNumber: 13
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 118,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("label", { className: "skin-settings__row", children: [
+            /* @__PURE__ */ jsxDEV("span", { children: "滑鼠移出視窗時" }, void 0, false, {
+              fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+              lineNumber: 127,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                type: "checkbox",
+                checked: prefs.autoHideOnMouseLeave,
+                onChange: (event) => setPrefs({ autoHideOnMouseLeave: event.target.checked })
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+                lineNumber: 128,
+                columnNumber: 13
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 126,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("label", { className: "skin-settings__row", children: [
+            /* @__PURE__ */ jsxDEV("span", { children: [
+              "延遲 ",
+              (prefs.autoHideDelayMs / 1e3).toFixed(1),
+              " 秒後遮蔽"
+            ] }, void 0, true, {
+              fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+              lineNumber: 135,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                type: "range",
+                min: 0,
+                max: 5e3,
+                step: 100,
+                value: prefs.autoHideDelayMs,
+                onChange: (event) => setPrefs({ autoHideDelayMs: Number(event.target.value) })
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+                lineNumber: 136,
+                columnNumber: 13
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 134,
+            columnNumber: 11
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+          lineNumber: 116,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV("section", { className: "skin-settings__group", children: [
+          /* @__PURE__ */ jsxDEV("h3", { children: "其他" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 148,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("label", { className: "skin-settings__row", children: [
+            /* @__PURE__ */ jsxDEV("span", { children: "分頁標題與圖示跟著外觀換" }, void 0, false, {
+              fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+              lineNumber: 150,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                type: "checkbox",
+                checked: prefs.swapTitle,
+                onChange: (event) => setPrefs({ swapTitle: event.target.checked })
+              },
+              void 0,
+              false,
+              {
+                fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+                lineNumber: 151,
+                columnNumber: 13
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 149,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { className: "muted", children: "提醒：暱稱、房名與聊天內容是你自己打的字，外觀換不掉，取名時避開會露餡的詞。" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+            lineNumber: 157,
+            columnNumber: 11
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+          lineNumber: 147,
+          columnNumber: 9
+        }, this)
+      ]
+    },
+    void 0,
+    true,
+    {
+      fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+      lineNumber: 68,
+      columnNumber: 7
+    },
+    this
+  ) }, void 0, false, {
+    fileName: "C:/Users/user/riffle/client/src/pages/SkinSettings.tsx",
+    lineNumber: 67,
+    columnNumber: 5
+  }, this);
+}
+_s2(SkinSettings, "LneIOoUMEgS6kuPzGLku6gaqpME=", false, function() {
+  return [useSkin];
+});
+_c2 = SkinSettings;
+var _c, _c2;
+$RefreshReg$(_c, "HotkeyField");
+$RefreshReg$(_c2, "SkinSettings");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/user/riffle/client/src/pages/SkinSettings.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/user/riffle/client/src/pages/SkinSettings.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QU1pRjtBQUFBLGVBUm5GO0FBQUE7QUFBQTtBQUFBO0FBQUEsaUJBVUE7QUFBQSxhQTVCRjtBQUFBO0FBQUE7QUFBQTtBQUFBLGVBNkJBO0FBQUEsUUFFQSx1QkFBQyxhQUFRLFdBQVUsd0JBQ2pCO0FBQUEsaUNBQUMsUUFBRyxrQkFBSjtBQUFBO0FBQUE7QUFBQTtBQUFBLGlCQUFNO0FBQUEsVUFDTix1QkFBQyxXQUFNLFdBQVUsc0JBQ2Y7QUFBQSxtQ0FBQyxVQUFLLDRCQUFOO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQWtCO0FBQUEsWUFDbEI7QUFBQSxjQUFDO0FBQUE7QUFBQSxnQkFDQyxNQUFLO0FBQUEsZ0JBQ0wsU0FBU2dCLE1BQU1pQjtBQUFBQSxnQkFDZixVQUFVLENBQUMzQixVQUFVVyxTQUFTLEVBQUVnQixXQUFXM0IsTUFBTXFCLE9BQU9DLFFBQVEsQ0FBQztBQUFBO0FBQUEsY0FIbkU7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLFlBR3FFO0FBQUEsZUFMdkU7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFPQTtBQUFBLFVBQ0EsdUJBQUMsT0FBRSxXQUFVLFNBQVEsc0RBQXJCO0FBQUE7QUFBQTtBQUFBO0FBQUEsaUJBRUE7QUFBQSxhQVpGO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFhQTtBQUFBO0FBQUE7QUFBQSxJQTVGRjtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsRUE2RkEsS0E5RkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQStGQTtBQUVKO0FBQUNiLElBckdlRCxjQUFZO0FBQUEsVUFDbUJoQixPQUFPO0FBQUE7QUFBQSxNQUR0Q2dCO0FBQVksSUFBQW9CLElBQUFDO0FBQUEsYUFBQUQsSUFBQTtBQUFBLGFBQUFDLEtBQUEiLCJuYW1lcyI6WyJ1c2VFZmZlY3QiLCJ1c2VTdGF0ZSIsIlNLSU5TIiwiaG90a2V5T2YiLCJ1c2VTa2luIiwiSG90a2V5RmllbGQiLCJ2YWx1ZSIsIm9uQ2hhbmdlIiwiX3MiLCJyZWNvcmRpbmciLCJzZXRSZWNvcmRpbmciLCJvbktleURvd24iLCJldmVudCIsInByZXZlbnREZWZhdWx0Iiwia2V5IiwiY29tYm8iLCJ3aW5kb3ciLCJhZGRFdmVudExpc3RlbmVyIiwicmVtb3ZlRXZlbnRMaXN0ZW5lciIsInByZXYiLCJTa2luU2V0dGluZ3MiLCJfczIiLCJwcmVmcyIsInNldFByZWZzIiwic2V0U2V0dGluZ3NPcGVuIiwic3RvcFByb3BhZ2F0aW9uIiwibWFwIiwic2tpbiIsImlkIiwibGFiZWwiLCJob3RrZXlDeWNsZSIsImhvdGtleUJvc3MiLCJhdXRvSGlkZU9uQmx1ciIsInRhcmdldCIsImNoZWNrZWQiLCJhdXRvSGlkZU9uTW91c2VMZWF2ZSIsImF1dG9IaWRlRGVsYXlNcyIsInRvRml4ZWQiLCJOdW1iZXIiLCJzd2FwVGl0bGUiLCJfYyIsIl9jMiJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJTa2luU2V0dGluZ3MudHN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IHVzZUVmZmVjdCwgdXNlU3RhdGUgfSBmcm9tICdyZWFjdCc7XHJcbmltcG9ydCB7IFNLSU5TIH0gZnJvbSAnLi4vc2tpbnMnO1xyXG5pbXBvcnQgeyBob3RrZXlPZiwgdXNlU2tpbiB9IGZyb20gJy4uL3N0YXRlL3NraW5Db250ZXh0JztcclxuXHJcbi8qKiDlv6vmjbfpjbXpjIToo73vvJrmjInkuIsgW+ioreWuml0g5b6M5o6l5L2P5LiL5LiA5qyh5oyJ6Y2177yM55u05o6l5a2Y5oiQICdDdHJsK1NoaWZ0K1EnIOmAmeeoruWtl+S4suOAgiAqL1xyXG5mdW5jdGlvbiBIb3RrZXlGaWVsZCh7XHJcbiAgdmFsdWUsXHJcbiAgb25DaGFuZ2UsXHJcbn06IHtcclxuICB2YWx1ZTogc3RyaW5nO1xyXG4gIG9uQ2hhbmdlOiAoY29tYm86IHN0cmluZykgPT4gdm9pZDtcclxufSkge1xyXG4gIGNvbnN0IFtyZWNvcmRpbmcsIHNldFJlY29yZGluZ10gPSB1c2VTdGF0ZShmYWxzZSk7XHJcblxyXG4gIHVzZUVmZmVjdCgoKSA9PiB7XHJcbiAgICBpZiAoIXJlY29yZGluZykgcmV0dXJuO1xyXG4gICAgY29uc3Qgb25LZXlEb3duID0gKGV2ZW50OiBLZXlib2FyZEV2ZW50KSA9PiB7XHJcbiAgICAgIGV2ZW50LnByZXZlbnREZWZhdWx0KCk7XHJcbiAgICAgIGlmIChldmVudC5rZXkgPT09ICdFc2NhcGUnKSB7XHJcbiAgICAgICAgc2V0UmVjb3JkaW5nKGZhbHNlKTtcclxuICAgICAgICByZXR1cm47XHJcbiAgICAgIH1cclxuICAgICAgY29uc3QgY29tYm8gPSBob3RrZXlPZihldmVudCk7XHJcbiAgICAgIGlmICghY29tYm8pIHJldHVybjsgLy8g6YKE5oyJ5Zyo5L+u6aO+6Y215LiK77yM562J55yf5q2j55qE6YKj5LiA6Y21XHJcbiAgICAgIG9uQ2hhbmdlKGNvbWJvKTtcclxuICAgICAgc2V0UmVjb3JkaW5nKGZhbHNlKTtcclxuICAgIH07XHJcbiAgICB3aW5kb3cuYWRkRXZlbnRMaXN0ZW5lcigna2V5ZG93bicsIG9uS2V5RG93biwgdHJ1ZSk7XHJcbiAgICByZXR1cm4gKCkgPT4gd2luZG93LnJlbW92ZUV2ZW50TGlzdGVuZXIoJ2tleWRvd24nLCBvbktleURvd24sIHRydWUpO1xyXG4gIH0sIFtyZWNvcmRpbmcsIG9uQ2hhbmdlXSk7XHJcblxyXG4gIHJldHVybiAoXHJcbiAgICA8YnV0dG9uXHJcbiAgICAgIHR5cGU9XCJidXR0b25cIlxyXG4gICAgICBjbGFzc05hbWU9e3JlY29yZGluZyA/ICdidG4gYnRuLS1wcmltYXJ5IHNraW4tc2V0dGluZ3NfX2hvdGtleScgOiAnYnRuIHNraW4tc2V0dGluZ3NfX2hvdGtleSd9XHJcbiAgICAgIG9uQ2xpY2s9eygpID0+IHNldFJlY29yZGluZygocHJldikgPT4gIXByZXYpfVxyXG4gICAgPlxyXG4gICAgICB7cmVjb3JkaW5nID8gJ+aMieS4i+aDs+eUqOeahOaMiemNteKApu+8iEVzYyDlj5bmtojvvIknIDogdmFsdWV9XHJcbiAgICA8L2J1dHRvbj5cclxuICApO1xyXG59XHJcblxyXG4vKiog5aSW6KeA6IiH6Zqx5Yy/6Kit5a6a44CC6YCZ5LiA6aCB55qE5a2X5rC46YGg5piv5Lit5paH77yM5L2G55So6Kme5Yi75oSP6Lef54mM6aGe54Sh6Zec44CCICovXHJcbmV4cG9ydCBmdW5jdGlvbiBTa2luU2V0dGluZ3MoKSB7XHJcbiAgY29uc3QgeyBwcmVmcywgc2V0UHJlZnMsIHNldFNldHRpbmdzT3BlbiB9ID0gdXNlU2tpbigpO1xyXG5cclxuICByZXR1cm4gKFxyXG4gICAgPGRpdiBjbGFzc05hbWU9XCJza2luLXNldHRpbmdzX19iYWNrZHJvcFwiIG9uQ2xpY2s9eygpID0+IHNldFNldHRpbmdzT3BlbihmYWxzZSl9PlxyXG4gICAgICA8ZGl2XHJcbiAgICAgICAgY2xhc3NOYW1lPVwic2tpbi1zZXR0aW5nc1wiXHJcbiAgICAgICAgcm9sZT1cImRpYWxvZ1wiXHJcbiAgICAgICAgYXJpYS1sYWJlbD1cIuWkluingOiIh+maseWMv+ioreWumlwiXHJcbiAgICAgICAgb25DbGljaz17KGV2ZW50KSA9PiBldmVudC5zdG9wUHJvcGFnYXRpb24oKX1cclxuICAgICAgPlxyXG4gICAgICAgIDxoZWFkZXIgY2xhc3NOYW1lPVwic2tpbi1zZXR0aW5nc19faGVhZFwiPlxyXG4gICAgICAgICAgPGgyPuWkluingOiIh+maseWMvzwvaDI+XHJcbiAgICAgICAgICA8YnV0dG9uIHR5cGU9XCJidXR0b25cIiBjbGFzc05hbWU9XCJidG5cIiBvbkNsaWNrPXsoKSA9PiBzZXRTZXR0aW5nc09wZW4oZmFsc2UpfT5cclxuICAgICAgICAgICAg6Zec6ZaJXHJcbiAgICAgICAgICA8L2J1dHRvbj5cclxuICAgICAgICA8L2hlYWRlcj5cclxuXHJcbiAgICAgICAgPHNlY3Rpb24gY2xhc3NOYW1lPVwic2tpbi1zZXR0aW5nc19fZ3JvdXBcIj5cclxuICAgICAgICAgIDxoMz7lpJbop4A8L2gzPlxyXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJza2luLXNldHRpbmdzX19za2luc1wiPlxyXG4gICAgICAgICAgICB7U0tJTlMubWFwKChza2luKSA9PiAoXHJcbiAgICAgICAgICAgICAgPGJ1dHRvblxyXG4gICAgICAgICAgICAgICAga2V5PXtza2luLmlkfVxyXG4gICAgICAgICAgICAgICAgdHlwZT1cImJ1dHRvblwiXHJcbiAgICAgICAgICAgICAgICBjbGFzc05hbWU9e3ByZWZzLnNraW4gPT09IHNraW4uaWQgPyAnYnRuIGJ0bi0tcHJpbWFyeScgOiAnYnRuJ31cclxuICAgICAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHNldFByZWZzKHsgc2tpbjogc2tpbi5pZCB9KX1cclxuICAgICAgICAgICAgICA+XHJcbiAgICAgICAgICAgICAgICB7c2tpbi5sYWJlbH1cclxuICAgICAgICAgICAgICA8L2J1dHRvbj5cclxuICAgICAgICAgICAgKSl9XHJcbiAgICAgICAgICA8L2Rpdj5cclxuICAgICAgICA8L3NlY3Rpb24+XHJcblxyXG4gICAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT1cInNraW4tc2V0dGluZ3NfX2dyb3VwXCI+XHJcbiAgICAgICAgICA8aDM+5b+r5o236Y21PC9oMz5cclxuICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJza2luLXNldHRpbmdzX19yb3dcIj5cclxuICAgICAgICAgICAgPHNwYW4+5b6q55Kw5YiH5o+b5aSW6KeAPC9zcGFuPlxyXG4gICAgICAgICAgICA8SG90a2V5RmllbGRcclxuICAgICAgICAgICAgICB2YWx1ZT17cHJlZnMuaG90a2V5Q3ljbGV9XHJcbiAgICAgICAgICAgICAgb25DaGFuZ2U9eyhjb21ibykgPT4gc2V0UHJlZnMoeyBob3RrZXlDeWNsZTogY29tYm8gfSl9XHJcbiAgICAgICAgICAgIC8+XHJcbiAgICAgICAgICA8L2xhYmVsPlxyXG4gICAgICAgICAgPGxhYmVsIGNsYXNzTmFtZT1cInNraW4tc2V0dGluZ3NfX3Jvd1wiPlxyXG4gICAgICAgICAgICA8c3Bhbj7kuIDpjbXlhajpga7vvIjlho3mjInkuIDmrKHpgoTljp/vvIk8L3NwYW4+XHJcbiAgICAgICAgICAgIDxIb3RrZXlGaWVsZFxyXG4gICAgICAgICAgICAgIHZhbHVlPXtwcmVmcy5ob3RrZXlCb3NzfVxyXG4gICAgICAgICAgICAgIG9uQ2hhbmdlPXsoY29tYm8pID0+IHNldFByZWZzKHsgaG90a2V5Qm9zczogY29tYm8gfSl9XHJcbiAgICAgICAgICAgIC8+XHJcbiAgICAgICAgICA8L2xhYmVsPlxyXG4gICAgICAgICAgPHAgY2xhc3NOYW1lPVwibXV0ZWRcIj7lnKjovLjlhaXmoYboo6HmiZPlrZfmmYLkuI3mnIPop7jnmbzlv6vmjbfpjbXjgII8L3A+XHJcbiAgICAgICAgPC9zZWN0aW9uPlxyXG5cclxuICAgICAgICA8c2VjdGlvbiBjbGFzc05hbWU9XCJza2luLXNldHRpbmdzX19ncm91cFwiPlxyXG4gICAgICAgICAgPGgzPuiHquWLlemBruiUvTwvaDM+XHJcbiAgICAgICAgICA8bGFiZWwgY2xhc3NOYW1lPVwic2tpbi1zZXR0aW5nc19fcm93XCI+XHJcbiAgICAgICAgICAgIDxzcGFuPuWIh+WIsOWIpeeahOWIhumggeaIluimlueql+WkseeEpuaZgjwvc3Bhbj5cclxuICAgICAgICAgICAgPGlucHV0XHJcbiAgICAgICAgICAgICAgdHlwZT1cImNoZWNrYm94XCJcclxuICAgICAgICAgICAgICBjaGVja2VkPXtwcmVmcy5hdXRvSGlkZU9uQmx1cn1cclxuICAgICAgICAgICAgICBvbkNoYW5nZT17KGV2ZW50KSA9PiBzZXRQcmVmcyh7IGF1dG9IaWRlT25CbHVyOiBldmVudC50YXJnZXQuY2hlY2tlZCB9KX1cclxuICAgICAgICAgICAgLz5cclxuICAgICAgICAgIDwvbGFiZWw+XHJcbiAgICAgICAgICA8bGFiZWwgY2xhc3NOYW1lPVwic2tpbi1zZXR0aW5nc19fcm93XCI+XHJcbiAgICAgICAgICAgIDxzcGFuPua7kem8oOenu+WHuuimlueql+aZgjwvc3Bhbj5cclxuICAgICAgICAgICAgPGlucHV0XHJcbiAgICAgICAgICAgICAgdHlwZT1cImNoZWNrYm94XCJcclxuICAgICAgICAgICAgICBjaGVja2VkPXtwcmVmcy5hdXRvSGlkZU9uTW91c2VMZWF2ZX1cclxuICAgICAgICAgICAgICBvbkNoYW5nZT17KGV2ZW50KSA9PiBzZXRQcmVmcyh7IGF1dG9IaWRlT25Nb3VzZUxlYXZlOiBldmVudC50YXJnZXQuY2hlY2tlZCB9KX1cclxuICAgICAgICAgICAgLz5cclxuICAgICAgICAgIDwvbGFiZWw+XHJcbiAgICAgICAgICA8bGFiZWwgY2xhc3NOYW1lPVwic2tpbi1zZXR0aW5nc19fcm93XCI+XHJcbiAgICAgICAgICAgIDxzcGFuPuW7tumBsiB7KHByZWZzLmF1dG9IaWRlRGVsYXlNcyAvIDEwMDApLnRvRml4ZWQoMSl9IOenkuW+jOmBruiUvTwvc3Bhbj5cclxuICAgICAgICAgICAgPGlucHV0XHJcbiAgICAgICAgICAgICAgdHlwZT1cInJhbmdlXCJcclxuICAgICAgICAgICAgICBtaW49ezB9XHJcbiAgICAgICAgICAgICAgbWF4PXs1MDAwfVxyXG4gICAgICAgICAgICAgIHN0ZXA9ezEwMH1cclxuICAgICAgICAgICAgICB2YWx1ZT17cHJlZnMuYXV0b0hpZGVEZWxheU1zfVxyXG4gICAgICAgICAgICAgIG9uQ2hhbmdlPXsoZXZlbnQpID0+IHNldFByZWZzKHsgYXV0b0hpZGVEZWxheU1zOiBOdW1iZXIoZXZlbnQudGFyZ2V0LnZhbHVlKSB9KX1cclxuICAgICAgICAgICAgLz5cclxuICAgICAgICAgIDwvbGFiZWw+XHJcbiAgICAgICAgPC9zZWN0aW9uPlxyXG5cclxuICAgICAgICA8c2VjdGlvbiBjbGFzc05hbWU9XCJza2luLXNldHRpbmdzX19ncm91cFwiPlxyXG4gICAgICAgICAgPGgzPuWFtuS7ljwvaDM+XHJcbiAgICAgICAgICA8bGFiZWwgY2xhc3NOYW1lPVwic2tpbi1zZXR0aW5nc19fcm93XCI+XHJcbiAgICAgICAgICAgIDxzcGFuPuWIhumggeaomemhjOiIh+Wcluekuui3n+iRl+WkluingOaPmzwvc3Bhbj5cclxuICAgICAgICAgICAgPGlucHV0XHJcbiAgICAgICAgICAgICAgdHlwZT1cImNoZWNrYm94XCJcclxuICAgICAgICAgICAgICBjaGVja2VkPXtwcmVmcy5zd2FwVGl0bGV9XHJcbiAgICAgICAgICAgICAgb25DaGFuZ2U9eyhldmVudCkgPT4gc2V0UHJlZnMoeyBzd2FwVGl0bGU6IGV2ZW50LnRhcmdldC5jaGVja2VkIH0pfVxyXG4gICAgICAgICAgICAvPlxyXG4gICAgICAgICAgPC9sYWJlbD5cclxuICAgICAgICAgIDxwIGNsYXNzTmFtZT1cIm11dGVkXCI+XHJcbiAgICAgICAgICAgIOaPkOmGku+8muaaseeoseOAgeaIv+WQjeiIh+iBiuWkqeWFp+WuueaYr+S9oOiHquW3seaJk+eahOWtl++8jOWkluingOaPm+S4jeaOie+8jOWPluWQjeaZgumBv+mWi+acg+mcsumkoeeahOipnuOAglxyXG4gICAgICAgICAgPC9wPlxyXG4gICAgICAgIDwvc2VjdGlvbj5cclxuICAgICAgPC9kaXY+XHJcbiAgICA8L2Rpdj5cclxuICApO1xyXG59XHJcbiJdLCJmaWxlIjoiQzovVXNlcnMvdXNlci9yaWZmbGUvY2xpZW50L3NyYy9wYWdlcy9Ta2luU2V0dGluZ3MudHN4In0=

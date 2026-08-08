@@ -3,3 +3,7 @@ dist/
 *.tsbuildinfo
 .env
 .DS_Store
+.serve.stdout.log
+.serve.stderr.log
+server.stdout.log
+server.stderr.log

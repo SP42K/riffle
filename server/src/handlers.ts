@@ -18,6 +18,13 @@ import {
   type PlayerId,
   type ServerToClientEvents,
   type SystemNotice,
+  activateDownstairsSkill,
+  advanceDownstairs,
+  downstairsView,
+  removeDownstairsPlayer,
+  setDownstairsDirection,
+  startDownstairs,
+  DOWNSTAIRS_CHARACTERS,
 } from 'shared';
 import {
   PLAY_ERROR_MESSAGE,
@@ -211,11 +218,14 @@ export class GameServer {
     socket.on('room:leave', (_payload, ack) => this.onLeaveRoom(socket, ack));
     socket.on('room:chat', (payload) => this.onRoomChat(socket, payload));
     socket.on('room:ready', (payload) => this.onReady(socket, payload));
+    socket.on('room:character', (payload) => this.onCharacter(socket, payload));
     socket.on('game:start', (_payload, ack) => this.onStartGame(socket, ack));
     socket.on('game:play', (payload, ack) => this.onPlay(socket, payload, ack));
     socket.on('game:pass', (_payload, ack) => this.onPass(socket, ack));
     socket.on('game:action', (payload, ack) => this.onAction(socket, payload, ack));
     socket.on('game:monopoly', (payload, ack) => this.onMonopoly(socket, payload, ack));
+    socket.on('game:downstairs', (payload) => this.onDownstairs(socket, payload));
+    socket.on('game:downstairsSkill', () => this.onDownstairsSkill(socket));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -285,7 +295,7 @@ export class GameServer {
 
     // 斷線時把回合縮短成 3 秒，回來了要把整個回合還給他，否則一重整就被自動代打
     const game = room.game;
-    if (game && !game.state.over && room.seats[game.state.turnSeat] === playerId) {
+    if (game && game.type !== 'downstairs' && !game.state.over && room.seats[game.state.turnSeat] === playerId) {
       game.state.turnDeadline = Date.now() + TURN_MS;
     }
 
@@ -374,6 +384,7 @@ export class GameServer {
       socketId: null,
       connected: true,
       graceTimer: null,
+      characterId: 'brave',
     };
   }
 
@@ -514,6 +525,7 @@ export class GameServer {
     if (isEmpty(room)) {
       if (room.turnTimer) clearTimeout(room.turnTimer);
       if (room.handTimer) clearTimeout(room.handTimer);
+      if (room.gameTimer) clearInterval(room.gameTimer);
       this.rooms.delete(room.id);
       this.loggedHand.delete(room.id);
       this.broadcastLobby();
@@ -537,6 +549,9 @@ export class GameServer {
         return;
       case 'monopoly':
         this.logMonopoly(room, removePlayerFromMonopoly(room.seats, game.state, playerId));
+        return;
+      case 'downstairs':
+        removeDownstairsPlayer(game.state, playerId);
         return;
       default:
         assertNeverGame(game);
@@ -568,6 +583,18 @@ export class GameServer {
     if (!room || !player) return;
 
     player.ready = payload?.ready === true;
+    this.broadcastRoom(room);
+  }
+
+  private onCharacter(socket: GameSocket, payload: { characterId?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    const player = room?.players.get(session.playerId);
+    if (!room || !player || room.gameType !== 'downstairs' || statusOf(room) === 'playing') return;
+    const characterId = DOWNSTAIRS_CHARACTERS.find((id) => id === payload?.characterId);
+    if (!characterId) return;
+    player.characterId = characterId;
     this.broadcastRoom(room);
   }
 
@@ -618,6 +645,18 @@ export class GameServer {
           players: seatedPlayers(room).length,
           startCash: room.monopolyOptions.startCash,
         });
+        break;
+      }
+      case 'downstairs': {
+        const players = seatedPlayers(room);
+        const state = startDownstairs(
+          players.map((player) => player.playerId),
+          Date.now(),
+          Object.fromEntries(players.map((player) => [player.playerId, player.characterId])),
+          'pve',
+        );
+        room.game = { type: 'downstairs', state };
+        this.startDownstairsLoop(room);
         break;
       }
       default:
@@ -789,6 +828,48 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
+  private onDownstairs(socket: GameSocket, payload: { direction?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room?.game || room.game.type !== 'downstairs' || room.game.state.over) return;
+    if (!room.players.has(session.playerId)) return;
+    setDownstairsDirection(room.game.state, session.playerId, Number(payload?.direction));
+  }
+
+  private onDownstairsSkill(socket: GameSocket): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room?.game || room.game.type !== 'downstairs' || room.game.state.over) return;
+    if (!room.players.has(session.playerId)) return;
+    activateDownstairsSkill(room.game.state, session.playerId);
+  }
+
+  private startDownstairsLoop(room: Room): void {
+    if (room.gameTimer) clearInterval(room.gameTimer);
+    let previous = Date.now();
+    room.gameTimer = setInterval(() => {
+      const game = room.game;
+      if (!game || game.type !== 'downstairs') {
+        if (room.gameTimer) clearInterval(room.gameTimer);
+        room.gameTimer = null;
+        return;
+      }
+      const now = Date.now();
+      advanceDownstairs(game.state, now - previous);
+      previous = now;
+      this.io.to(roomChannel(room.id)).emit('game:downstairsState', downstairsView(game.state));
+      if (game.state.over) {
+        if (room.gameTimer) clearInterval(room.gameTimer);
+        room.gameTimer = null;
+        this.checkGameOver(room);
+        this.broadcastRoom(room);
+        this.broadcastLobby();
+      }
+    }, 50);
+  }
+
   private gameContext(socket: GameSocket, ack: unknown) {
     const session = this.sessions.get(socket.id);
     if (!session?.roomId) {
@@ -842,6 +923,9 @@ export class GameServer {
         this.emitRanking(room, game.state.result?.ranking ?? []);
         return;
       }
+      case 'downstairs':
+        if (game.state.over) this.emitRanking(room, game.state.ranking);
+        return;
       default:
         assertNeverGame(game);
     }
@@ -898,6 +982,7 @@ export class GameServer {
 
     const game = room.game;
     if (!game || game.state.over) return;
+    if (game.type === 'downstairs') return;
 
     const playerId = room.seats[game.state.turnSeat];
     const player = playerId ? room.players.get(playerId) : undefined;
@@ -924,6 +1009,7 @@ export class GameServer {
   private runAutoAct(room: Room): void {
     const game = room.game;
     if (!game || game.state.over) return;
+    if (game.type === 'downstairs') return;
 
     const playerId = room.seats[game.state.turnSeat];
     const nickname = playerId ? nicknameOf(room, playerId) : '';

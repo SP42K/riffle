@@ -1,0 +1,218 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/skins/chrome/VSCodeChrome.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=8e688395"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+const ICONS = [
+  "M3 4h7l2 2h9v13H3V4Z",
+  // 檔案總管
+  "M11 4a7 7 0 1 0 4.2 12.6L20 21l1.4-1.4-4.8-4.8A7 7 0 0 0 11 4Zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z",
+  // 搜尋
+  "M6 3a3 3 0 0 0-1 5.8V15A3 3 0 1 0 7 15V8.8A3 3 0 0 0 6 3Zm12 0a3 3 0 0 0-1 5.8V11a3 3 0 0 1-3 3h-2v2h2a5 5 0 0 0 5-5V8.8A3 3 0 0 0 18 3Z",
+  // 原始檔控制
+  "M12 3 3 7v6c0 5 3.8 9.2 9 10 5.2-.8 9-5 9-10V7l-9-4Z",
+  // 偵錯
+  "M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"
+  // 擴充功能
+];
+const TABS = ["index.ts", "session.ts", "queue.ts"];
+export function VSCodeChrome({ children }) {
+  return /* @__PURE__ */ jsxDEV("div", { className: "chrome chrome--code", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "chrome__titlebar", children: [
+      /* @__PURE__ */ jsxDEV("span", { className: "chrome__dots", children: [
+        /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 42,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 43,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 44,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 41,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { className: "chrome__menu", children: [
+        /* @__PURE__ */ jsxDEV("span", { children: "File" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 47,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { children: "Edit" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 48,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { children: "Selection" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 49,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { children: "View" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 50,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { children: "Go" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 51,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { children: "Run" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 52,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { children: "Terminal" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 53,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { children: "Help" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 54,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 46,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { className: "chrome__title", children: "session.ts — workspace — Visual Studio Code" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 56,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+      lineNumber: 40,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "chrome__main", children: [
+      /* @__PURE__ */ jsxDEV("nav", { className: "chrome__activity", "aria-hidden": "true", children: ICONS.map(
+        (d, i) => /* @__PURE__ */ jsxDEV("svg", { viewBox: "0 0 24 24", className: i === 2 ? "is-active" : void 0, children: /* @__PURE__ */ jsxDEV("path", { d }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 63,
+          columnNumber: 15
+        }, this) }, i, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 62,
+          columnNumber: 11
+        }, this)
+      ) }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 60,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "chrome__editor", children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "chrome__tabs", children: TABS.map(
+          (name, i) => /* @__PURE__ */ jsxDEV("span", { className: i === 1 ? "chrome__tab is-active" : "chrome__tab", children: name }, name, false, {
+            fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+            lineNumber: 71,
+            columnNumber: 13
+          }, this)
+        ) }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 69,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "chrome__content", children }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+          lineNumber: 76,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 68,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+      lineNumber: 59,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "chrome__statusbar", children: [
+      /* @__PURE__ */ jsxDEV("span", { children: "main*" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 81,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { children: "0 ⚠ 0 ⓘ" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 82,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { className: "chrome__spacer" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 83,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { children: "Ln 42, Col 8" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 84,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { children: "Spaces: 2" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 85,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { children: "UTF-8" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 86,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { children: "TypeScript" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+        lineNumber: 87,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+      lineNumber: 80,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx",
+    lineNumber: 39,
+    columnNumber: 5
+  }, this);
+}
+_c = VSCodeChrome;
+var _c;
+$RefreshReg$(_c, "VSCodeChrome");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/user/riffle/client/src/skins/chrome/VSCodeChrome.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUFBQSxhQUFhO0FBQUEsTUFDYix1QkFBQyxVQUFLLFdBQVUsb0JBQWhCO0FBQUE7QUFBQTtBQUFBO0FBQUEsYUFBZ0M7QUFBQSxNQUNoQyx1QkFBQyxVQUFLLDRCQUFOO0FBQUE7QUFBQTtBQUFBO0FBQUEsYUFBa0I7QUFBQSxNQUNsQix1QkFBQyxVQUFLLHlCQUFOO0FBQUE7QUFBQTtBQUFBO0FBQUEsYUFBZTtBQUFBLE1BQ2YsdUJBQUMsVUFBSyxxQkFBTjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBQVc7QUFBQSxNQUNYLHVCQUFDLFVBQUssMEJBQU47QUFBQTtBQUFBO0FBQUE7QUFBQSxhQUFnQjtBQUFBLFNBUGxCO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0FRQTtBQUFBLE9BakRGO0FBQUE7QUFBQTtBQUFBO0FBQUEsU0FrREE7QUFFSjtBQUFDTSxLQXREZVA7QUFBWSxJQUFBTztBQUFBLGFBQUFBLElBQUEiLCJuYW1lcyI6WyJJQ09OUyIsIlRBQlMiLCJWU0NvZGVDaHJvbWUiLCJjaGlsZHJlbiIsIm1hcCIsImQiLCJpIiwidW5kZWZpbmVkIiwibmFtZSIsIl9jIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIlZTQ29kZUNocm9tZS50c3giXSwic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHR5cGUgeyBSZWFjdE5vZGUgfSBmcm9tICdyZWFjdCc7XHJcblxyXG4vKiog5rS75YuV5YiX55qE57ea5qKd5ZyW56S677yM55Wr5oiQIFNWRyDlhY3lvpfli5XliLDlrZflnovjgIIgKi9cclxuY29uc3QgSUNPTlMgPSBbXHJcbiAgJ00zIDRoN2wyIDJoOXYxM0gzVjRaJywgLy8g5qqU5qGI57i9566hXHJcbiAgJ00xMSA0YTcgNyAwIDEgMCA0LjIgMTIuNkwyMCAyMWwxLjQtMS40LTQuOC00LjhBNyA3IDAgMCAwIDExIDRabTAgMmE1IDUgMCAxIDEgMCAxMCA1IDUgMCAwIDEgMC0xMFonLCAvLyDmkJzlsItcclxuICAnTTYgM2EzIDMgMCAwIDAtMSA1LjhWMTVBMyAzIDAgMSAwIDcgMTVWOC44QTMgMyAwIDAgMCA2IDNabTEyIDBhMyAzIDAgMCAwLTEgNS44VjExYTMgMyAwIDAgMS0zIDNoLTJ2MmgyYTUgNSAwIDAgMCA1LTVWOC44QTMgMyAwIDAgMCAxOCAzWicsIC8vIOWOn+Wni+aqlOaOp+WItlxyXG4gICdNMTIgMyAzIDd2NmMwIDUgMy44IDkuMiA5IDEwIDUuMi0uOCA5LTUgOS0xMFY3bC05LTRaJywgLy8g5YG16YyvXHJcbiAgJ000IDRoN3Y3SDRWNFptOSAwaDd2N2gtN1Y0Wk00IDEzaDd2N0g0di03Wm05IDBoN3Y3aC03di03WicsIC8vIOaTtOWFheWKn+iDvVxyXG5dO1xyXG5cclxuY29uc3QgVEFCUyA9IFsnaW5kZXgudHMnLCAnc2Vzc2lvbi50cycsICdxdWV1ZS50cyddO1xyXG5cclxuLyoqXHJcbiAqIOWBh+eahOe3qOi8r+WZqOWkluahhuOAgue0lOijnemjvu+8jOaykuacieS7u+S9leeLgOaFiyDigJTigJRcclxuICog6YGK5oiy5YWn5a655pW05aGK5aGe5Zyo44CM57eo6Lyv5Y2A44CN6KOh77yM6YGg55yL5bCx5piv5pyJ5Lq66ZaL6JGXIFZTIENvZGXjgIJcclxuICovXHJcbmV4cG9ydCBmdW5jdGlvbiBWU0NvZGVDaHJvbWUoeyBjaGlsZHJlbiB9OiB7IGNoaWxkcmVuOiBSZWFjdE5vZGUgfSk6IFJlYWN0Tm9kZSB7XHJcbiAgcmV0dXJuIChcclxuICAgIDxkaXYgY2xhc3NOYW1lPVwiY2hyb21lIGNocm9tZS0tY29kZVwiPlxyXG4gICAgICA8ZGl2IGNsYXNzTmFtZT1cImNocm9tZV9fdGl0bGViYXJcIj5cclxuICAgICAgICA8c3BhbiBjbGFzc05hbWU9XCJjaHJvbWVfX2RvdHNcIj5cclxuICAgICAgICAgIDxpIC8+XHJcbiAgICAgICAgICA8aSAvPlxyXG4gICAgICAgICAgPGkgLz5cclxuICAgICAgICA8L3NwYW4+XHJcbiAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwiY2hyb21lX19tZW51XCI+XHJcbiAgICAgICAgICA8c3Bhbj5GaWxlPC9zcGFuPlxyXG4gICAgICAgICAgPHNwYW4+RWRpdDwvc3Bhbj5cclxuICAgICAgICAgIDxzcGFuPlNlbGVjdGlvbjwvc3Bhbj5cclxuICAgICAgICAgIDxzcGFuPlZpZXc8L3NwYW4+XHJcbiAgICAgICAgICA8c3Bhbj5Hbzwvc3Bhbj5cclxuICAgICAgICAgIDxzcGFuPlJ1bjwvc3Bhbj5cclxuICAgICAgICAgIDxzcGFuPlRlcm1pbmFsPC9zcGFuPlxyXG4gICAgICAgICAgPHNwYW4+SGVscDwvc3Bhbj5cclxuICAgICAgICA8L3NwYW4+XHJcbiAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwiY2hyb21lX190aXRsZVwiPnNlc3Npb24udHMg4oCUIHdvcmtzcGFjZSDigJQgVmlzdWFsIFN0dWRpbyBDb2RlPC9zcGFuPlxyXG4gICAgICA8L2Rpdj5cclxuXHJcbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwiY2hyb21lX19tYWluXCI+XHJcbiAgICAgICAgPG5hdiBjbGFzc05hbWU9XCJjaHJvbWVfX2FjdGl2aXR5XCIgYXJpYS1oaWRkZW49XCJ0cnVlXCI+XHJcbiAgICAgICAgICB7SUNPTlMubWFwKChkLCBpKSA9PiAoXHJcbiAgICAgICAgICAgIDxzdmcga2V5PXtpfSB2aWV3Qm94PVwiMCAwIDI0IDI0XCIgY2xhc3NOYW1lPXtpID09PSAyID8gJ2lzLWFjdGl2ZScgOiB1bmRlZmluZWR9PlxyXG4gICAgICAgICAgICAgIDxwYXRoIGQ9e2R9IC8+XHJcbiAgICAgICAgICAgIDwvc3ZnPlxyXG4gICAgICAgICAgKSl9XHJcbiAgICAgICAgPC9uYXY+XHJcblxyXG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiY2hyb21lX19lZGl0b3JcIj5cclxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiY2hyb21lX190YWJzXCI+XHJcbiAgICAgICAgICAgIHtUQUJTLm1hcCgobmFtZSwgaSkgPT4gKFxyXG4gICAgICAgICAgICAgIDxzcGFuIGtleT17bmFtZX0gY2xhc3NOYW1lPXtpID09PSAxID8gJ2Nocm9tZV9fdGFiIGlzLWFjdGl2ZScgOiAnY2hyb21lX190YWInfT5cclxuICAgICAgICAgICAgICAgIHtuYW1lfVxyXG4gICAgICAgICAgICAgIDwvc3Bhbj5cclxuICAgICAgICAgICAgKSl9XHJcbiAgICAgICAgICA8L2Rpdj5cclxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiY2hyb21lX19jb250ZW50XCI+e2NoaWxkcmVufTwvZGl2PlxyXG4gICAgICAgIDwvZGl2PlxyXG4gICAgICA8L2Rpdj5cclxuXHJcbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwiY2hyb21lX19zdGF0dXNiYXJcIj5cclxuICAgICAgICA8c3Bhbj5tYWluKjwvc3Bhbj5cclxuICAgICAgICA8c3Bhbj4wIOKaoCAwIOKTmDwvc3Bhbj5cclxuICAgICAgICA8c3BhbiBjbGFzc05hbWU9XCJjaHJvbWVfX3NwYWNlclwiIC8+XHJcbiAgICAgICAgPHNwYW4+TG4gNDIsIENvbCA4PC9zcGFuPlxyXG4gICAgICAgIDxzcGFuPlNwYWNlczogMjwvc3Bhbj5cclxuICAgICAgICA8c3Bhbj5VVEYtODwvc3Bhbj5cclxuICAgICAgICA8c3Bhbj5UeXBlU2NyaXB0PC9zcGFuPlxyXG4gICAgICA8L2Rpdj5cclxuICAgIDwvZGl2PlxyXG4gICk7XHJcbn1cclxuIl0sImZpbGUiOiJDOi9Vc2Vycy91c2VyL3JpZmZsZS9jbGllbnQvc3JjL3NraW5zL2Nocm9tZS9WU0NvZGVDaHJvbWUudHN4In0=

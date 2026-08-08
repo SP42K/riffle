@@ -9,6 +9,7 @@ import type {
   MonopolyPhase,
   MonopolyTileId,
 } from './monopoly.js';
+import type { DownstairsCharacterId, DownstairsGameView } from './downstairs.js';
 
 // ---------------------------------------------------------------------------
 // 牌
@@ -132,14 +133,15 @@ export interface Combo {
 export type PlayerId = string;
 
 /** 一個房間只玩一種玩法，建房時決定。 */
-export type GameType = 'bigTwo' | 'holdem' | 'monopoly';
+export type GameType = 'bigTwo' | 'holdem' | 'monopoly' | 'downstairs';
 
-export const GAME_TYPES: readonly GameType[] = ['bigTwo', 'holdem', 'monopoly'];
+export const GAME_TYPES: readonly GameType[] = ['bigTwo', 'holdem', 'monopoly', 'downstairs'];
 
 export const GAME_TYPE_LABEL: Record<GameType, string> = {
   bigTwo: '大老二',
   holdem: '德州撲克',
   monopoly: '大富翁',
+  downstairs: '樓梯小勇者',
 };
 
 /**
@@ -231,6 +233,7 @@ export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
   bigTwo: { min: 2, max: 4 },
   holdem: { min: 2, max: 9 },
   monopoly: { min: 2, max: 6 },
+  downstairs: { min: 1, max: 4 },
 };
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -284,6 +287,8 @@ export interface SeatView {
   isHost: boolean;
   ready: boolean;
   connected: boolean;
+  /** 只有樓梯小勇者使用；其他玩法仍保留預設值但不呈現。 */
+  characterId: DownstairsCharacterId;
 }
 
 export interface SpectatorView {
@@ -324,7 +329,7 @@ export interface BigTwoGameView {
 }
 
 /** 依 type 分派的玩法快照。前端用 game.type 收窄。 */
-export type GameView = BigTwoGameView | HoldemGameView | MonopolyGameView;
+export type GameView = BigTwoGameView | HoldemGameView | MonopolyGameView | DownstairsGameView;
 
 // ---------------------------------------------------------------------------
 // 戰報
@@ -454,6 +459,7 @@ export interface ClientToServerEvents {
   'room:leave': (p: Record<string, never>, ack: Ack<null>) => void;
   'room:chat': (p: { text: string }) => void;
   'room:ready': (p: { ready: boolean }) => void;
+  'room:character': (p: { characterId: DownstairsCharacterId }) => void;
   'game:start': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 大老二專用。 */
   'game:play': (p: { cardIds: string[] }, ack: Ack<null>) => void;
@@ -463,6 +469,9 @@ export interface ClientToServerEvents {
   'game:action': (p: { action: BetAction; amount?: number }, ack: Ack<null>) => void;
   /** 大富翁專用。17 種動作走同一個事件，靠 action.kind 收窄。 */
   'game:monopoly': (p: { action: MonopolyAction }, ack: Ack<null>) => void;
+  /** 小朋友下樓梯只傳方向意圖，位置與結果由 server authoritative simulation 決定。 */
+  'game:downstairs': (p: { direction: -1 | 0 | 1 }) => void;
+  'game:downstairsSkill': (p: Record<string, never>) => void;
 }
 
 export type BetAction = 'fold' | 'check' | 'call' | 'raise' | 'allin';
@@ -474,6 +483,8 @@ export interface ServerToClientEvents {
   'room:state': (p: RoomView | null) => void;
   'room:chat': (p: { messages: ChatMessage[] }) => void;
   'game:over': (p: { ranking: Array<{ playerId: PlayerId; nickname: string }> }) => void;
+  /** 高頻、輕量的下樓梯快照；避免重送完整 RoomView。 */
+  'game:downstairsState': (p: DownstairsGameView) => void;
   error: (p: ErrorPayload) => void;
 }
 

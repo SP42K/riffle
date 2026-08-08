@@ -497,7 +497,7 @@ export const vscodeSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace', downstairs: 'descent.ts' },
   bigTwoPreset: { taiwan: 'strict', classic: 'default', custom: 'custom' },
   bigTwoRule: {
     cuts: 'override',

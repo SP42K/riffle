@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "4c18850b540e0340e1f83c881450ecf624a840df",
+    "indexed_at": "2026-08-08T03:53:08Z",
+    "project": "C-Users-user-riffle",
+    "nodes": 15509,
+    "edges": 76176,
+    "original_size": 59768832,
+    "compressed_size": 6790821,
+    "compression_level": 3
+}

@@ -1,0 +1,799 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/features/downstairs-pve/DownstairsPvePrototype.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=8e688395"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=8e688395"; const useState = __vite__cjsImport3_react["useState"];
+import bossLineup from "/src/features/downstairs-pve/assets/pve-boss-lineup-v1.jpg?import";
+import "/src/features/downstairs-pve/downstairsPvePrototype.css?t=1786158323538";
+const BOSS_LINEUP = bossLineup;
+const SCENES = [
+  {
+    id: "garden",
+    name: "苔芽庭園",
+    depth: 86,
+    boss: "苔甲巨龜・芽盾",
+    bossHint: "踩亮 2 個花苞，讓背甲弱點開花",
+    bossHp: [14, 26],
+    minions: ["芽跳球", "露珠史萊姆"],
+    mechanic: "教學踩擊 · 藤蔓與蘑菇彈台",
+    platformLabels: ["樹根土台", "蘑菇芽", "枯木"]
+  },
+  {
+    id: "workshop",
+    name: "齒輪工坊",
+    depth: 386,
+    boss: "發條巨像・鏘鏘",
+    bossHint: "依箭頭踩左右斷電台，停止胸口發條",
+    bossHp: [34, 40],
+    minions: ["齒輪小鬼", "磁鐵蝠"],
+    mechanic: "吊軌 · 活塞 · 方向輸送帶",
+    platformLabels: ["鉚釘鋼板", "活塞", "裂齒輪"]
+  },
+  {
+    id: "rooftop",
+    name: "暴風屋頂",
+    depth: 718,
+    boss: "雷雲鯨・轟隆",
+    bossHint: "踩避雷平台導走電荷，再攻擊雷冠",
+    bossHp: [31, 46],
+    minions: ["風羽鴉", "雨雲精"],
+    mechanic: "風向 · 落雷預告 · 屋瓦平台",
+    platformLabels: ["屋瓦", "積雲墊", "避雷台"]
+  },
+  {
+    id: "ruins",
+    name: "星光遺跡",
+    depth: 1084,
+    boss: "吞星龍・夜曜",
+    bossHint: "依序收集 3 枚星符，使胸口星核實體化",
+    bossHp: [42, 56],
+    minions: ["彗星蟲", "鏡光靈"],
+    mechanic: "軌道台 · 星流 · 虛空裂板",
+    platformLabels: ["星砂石", "星核", "虛空裂板"]
+  }
+];
+const MOMENTS = [
+  { id: "explore", label: "探索", note: "場景、平台、小怪與個人 Combo" },
+  { id: "entry", label: "小怪入場", note: "方向、落點與秒數三重預告" },
+  { id: "boss", label: "Boss 戰", note: "共享 HP、攻擊與弱點反制" },
+  { id: "fever", label: "Team Fever", note: "全隊 5 秒共享獎勵與特效" }
+];
+const PLATFORM_LAYOUT = [
+  { x: 7, y: 25, width: 27, kind: "normal" },
+  { x: 47, y: 29, width: 18, kind: "spring" },
+  { x: 75, y: 23, width: 20, kind: "normal" },
+  { x: 18, y: 47, width: 22, kind: "moving" },
+  { x: 55, y: 50, width: 30, kind: "mechanism" },
+  { x: 4, y: 70, width: 21, kind: "fragile" },
+  { x: 36, y: 73, width: 24, kind: "normal" },
+  { x: 72, y: 68, width: 23, kind: "conveyor" }
+];
+const PLAYER_LAYOUT = [
+  { x: 21, y: 39, color: "brave", name: "小勇", hearts: "♥♥♥" },
+  { x: 57, y: 63, color: "bubble", name: "泡泡", hearts: "♥♥" },
+  { x: 78, y: 17, color: "star", name: "小星", hearts: "♥♥♥" }
+];
+function BossConcept({ scene, compact = false }) {
+  const index = SCENES.findIndex((item) => item.id === scene.id);
+  const position = index === 0 ? "0% 50%" : index === 1 ? "33.333% 50%" : index === 2 ? "66.667% 50%" : "100% 50%";
+  return /* @__PURE__ */ jsxDEV(
+    "div",
+    {
+      className: "pve-review__boss-concept" + (compact ? " is-compact" : ""),
+      style: { backgroundImage: "url(" + BOSS_LINEUP + ")", backgroundPosition: position },
+      role: "img",
+      "aria-label": scene.boss + " 原創造型概念",
+      children: /* @__PURE__ */ jsxDEV("span", { className: "pve-review__weakpoint", "aria-hidden": "true" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 122,
+        columnNumber: 7
+      }, this)
+    },
+    void 0,
+    false,
+    {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 116,
+      columnNumber: 5
+    },
+    this
+  );
+}
+_c = BossConcept;
+function EnemyToken({
+  scene,
+  index,
+  entry
+}) {
+  const style = {
+    left: (index === 0 ? 27 : 67) + "%",
+    top: (index === 0 ? 19 : 54) + "%"
+  };
+  return /* @__PURE__ */ jsxDEV("div", { className: "pve-review__enemy is-" + index + (entry ? " is-entering" : ""), "data-scene": scene.id, style, children: [
+    entry && /* @__PURE__ */ jsxDEV("span", { className: "pve-review__entry-path", "aria-hidden": "true", children: "↘" }, void 0, false, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 142,
+      columnNumber: 17
+    }, this),
+    entry && /* @__PURE__ */ jsxDEV("b", { className: "pve-review__entry-time", children: "0.9s" }, void 0, false, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 143,
+      columnNumber: 17
+    }, this),
+    /* @__PURE__ */ jsxDEV("i", { "aria-hidden": "true", children: /* @__PURE__ */ jsxDEV("span", {}, void 0, false, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 144,
+      columnNumber: 29
+    }, this) }, void 0, false, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 144,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("strong", { children: scene.minions[index] }, void 0, false, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 145,
+      columnNumber: 7
+    }, this),
+    index === 1 && /* @__PURE__ */ jsxDEV("em", { children: [
+      /* @__PURE__ */ jsxDEV("span", {}, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 146,
+        columnNumber: 27
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", {}, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 146,
+        columnNumber: 35
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 146,
+      columnNumber: 23
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+    lineNumber: 141,
+    columnNumber: 5
+  }, this);
+}
+_c2 = EnemyToken;
+function ReviewBoard({ scene, moment }) {
+  const fever = moment === "fever";
+  const bossVisible = moment === "boss" || fever;
+  const entry = moment === "entry";
+  const [hp, maxHp] = scene.bossHp;
+  const bossPercent = Math.round(hp / maxHp * 100);
+  return /* @__PURE__ */ jsxDEV("section", { className: "pve-review__device", "aria-label": scene.name + " " + MOMENTS.find((item) => item.id === moment)?.label + " UI 預覽", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "pve-review__scorebar", children: [
+      /* @__PURE__ */ jsxDEV("strong", { children: [
+        scene.depth,
+        "m"
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 161,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { children: scene.name }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 162,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { children: "3 人存活" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 163,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 160,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "pve-review__team-rail" + (fever ? " is-active" : ""), children: [
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        /* @__PURE__ */ jsxDEV("strong", { children: fever ? "TEAM FEVER 3.8s" : "TEAM FEVER" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 167,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { children: fever ? "小星觸發 · 傷害 +1" : "小星 27 READY" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 168,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("b", { children: fever ? "◆ ×3" : "27/30" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 169,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 166,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("i", { children: /* @__PURE__ */ jsxDEV("span", { style: { width: fever ? "76%" : "90%" } }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 171,
+        columnNumber: 12
+      }, this) }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 171,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 165,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "pve-review__self-hud", children: [
+      /* @__PURE__ */ jsxDEV("strong", { children: [
+        "我：COMBO ×",
+        fever ? 8 : 18
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 174,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("span", { children: "技能 6.2s" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 175,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("b", { children: "♥♥♥" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 176,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 173,
+      columnNumber: 7
+    }, this),
+    bossVisible && /* @__PURE__ */ jsxDEV("div", { className: "pve-review__boss-hud", children: [
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        /* @__PURE__ */ jsxDEV("strong", { children: scene.boss }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 180,
+          columnNumber: 16
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { children: [
+          "下一招：",
+          scene.id === "garden" ? "種子雨" : scene.id === "workshop" ? "雙手拍擊" : scene.id === "rooftop" ? "三點落雷" : "暗影光束"
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 180,
+          columnNumber: 45
+        }, this),
+        /* @__PURE__ */ jsxDEV("b", { children: [
+          hp,
+          "/",
+          maxHp
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 180,
+          columnNumber: 171
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 180,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("i", { children: /* @__PURE__ */ jsxDEV("span", { style: { width: bossPercent + "%" } }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 181,
+        columnNumber: 14
+      }, this) }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 181,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 179,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "pve-review__playfield is-" + scene.id + (fever ? " has-fever" : ""), children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "pve-review__sky is-far" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 185,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "pve-review__sky is-near" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 186,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "pve-review__danger is-top", children: "▲ 頂端危險" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 187,
+        columnNumber: 9
+      }, this),
+      entry && /* @__PURE__ */ jsxDEV("div", { className: "pve-review__notice", children: "小怪入場 · 看箭頭與落點" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 188,
+        columnNumber: 19
+      }, this),
+      bossVisible && /* @__PURE__ */ jsxDEV("div", { className: "pve-review__notice", children: scene.bossHint }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 189,
+        columnNumber: 25
+      }, this),
+      PLATFORM_LAYOUT.map(
+        (platform, index) => /* @__PURE__ */ jsxDEV(
+          "div",
+          {
+            className: "pve-review__platform is-" + platform.kind + (bossVisible && index === 4 ? " is-weak" : ""),
+            style: { left: platform.x + "%", top: platform.y + "%", width: platform.width + "%" },
+            children: [
+              /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+                fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                lineNumber: 196,
+                columnNumber: 13
+              }, this),
+              /* @__PURE__ */ jsxDEV("span", { children: platform.kind === "spring" ? "↟" : platform.kind === "moving" ? "↔" : platform.kind === "fragile" ? "⌁" : platform.kind === "conveyor" ? "››" : bossVisible && index === 4 ? "◆" : "" }, void 0, false, {
+                fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                lineNumber: 196,
+                columnNumber: 18
+              }, this)
+            ]
+          },
+          index,
+          true,
+          {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 191,
+            columnNumber: 9
+          },
+          this
+        )
+      ),
+      !bossVisible && /* @__PURE__ */ jsxDEV(EnemyToken, { scene, index: 0, entry }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 199,
+        columnNumber: 26
+      }, this),
+      (moment === "explore" || entry) && /* @__PURE__ */ jsxDEV(EnemyToken, { scene, index: 1 }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 200,
+        columnNumber: 45
+      }, this),
+      bossVisible && /* @__PURE__ */ jsxDEV(BossConcept, { scene, compact: true }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 201,
+        columnNumber: 25
+      }, this),
+      PLAYER_LAYOUT.map(
+        (player, index) => /* @__PURE__ */ jsxDEV(
+          "div",
+          {
+            className: "pve-review__player is-" + player.color + (fever ? " has-fever" : ""),
+            style: { left: player.x + "%", top: player.y + "%" },
+            children: [
+              /* @__PURE__ */ jsxDEV("span", { children: [
+                /* @__PURE__ */ jsxDEV("strong", { children: player.name }, void 0, false, {
+                  fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                  lineNumber: 208,
+                  columnNumber: 19
+                }, this),
+                /* @__PURE__ */ jsxDEV("b", { children: player.hearts }, void 0, false, {
+                  fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                  lineNumber: 208,
+                  columnNumber: 49
+                }, this)
+              ] }, void 0, true, {
+                fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                lineNumber: 208,
+                columnNumber: 13
+              }, this),
+              /* @__PURE__ */ jsxDEV("i", { "aria-hidden": "true", children: "•ᴗ•" }, void 0, false, {
+                fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                lineNumber: 209,
+                columnNumber: 13
+              }, this),
+              index === 0 && /* @__PURE__ */ jsxDEV("em", { children: fever ? "傷害 +1" : "PERFECT" }, void 0, false, {
+                fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                lineNumber: 210,
+                columnNumber: 29
+              }, this)
+            ]
+          },
+          player.name,
+          true,
+          {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 203,
+            columnNumber: 9
+          },
+          this
+        )
+      ),
+      fever && /* @__PURE__ */ jsxDEV("div", { className: "pve-review__fever-fx", "aria-hidden": "true", children: [
+        /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 213,
+          columnNumber: 76
+        }, this),
+        /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 213,
+          columnNumber: 81
+        }, this),
+        /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 213,
+          columnNumber: 86
+        }, this),
+        /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 213,
+          columnNumber: 91
+        }, this),
+        /* @__PURE__ */ jsxDEV("i", {}, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 213,
+          columnNumber: 96
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 213,
+        columnNumber: 19
+      }, this),
+      bossVisible && /* @__PURE__ */ jsxDEV("div", { className: "pve-review__boss-callout", children: [
+        "弱點 ",
+        scene.id === "ruins" ? "2/3" : "READY",
+        " · 每 cycle 傷害上限"
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 214,
+        columnNumber: 25
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "pve-review__danger is-bottom", children: "▼ 往更深處" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 215,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 184,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+    lineNumber: 159,
+    columnNumber: 5
+  }, this);
+}
+_c3 = ReviewBoard;
+export default function DownstairsPvePrototype() {
+  _s();
+  const query = new URLSearchParams(window.location.search);
+  const requestedScene = query.get("scene");
+  const requestedMoment = query.get("moment");
+  const [sceneId, setSceneId] = useState(
+    () => SCENES.some((item) => item.id === requestedScene) ? requestedScene : "garden"
+  );
+  const [moment, setMoment] = useState(
+    () => MOMENTS.some((item) => item.id === requestedMoment) ? requestedMoment : "explore"
+  );
+  const scene = SCENES.find((item) => item.id === sceneId);
+  return /* @__PURE__ */ jsxDEV("main", { className: "pve-review", children: [
+    /* @__PURE__ */ jsxDEV("header", { className: "pve-review__header", children: [
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        /* @__PURE__ */ jsxDEV("span", { className: "pve-review__eyebrow", children: "PHASE 6B · CLIENT-ONLY FIXTURE" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 237,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("h1", { children: "樓梯小勇者 · 深度 PvE UI/UX 設計稿" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 238,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("p", { children: "固定 mock state，不建立房間、不連 Socket、不修改正式遊戲。使用 F8 切換三套外觀，F9 驗證隱藏／恢復。" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 239,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 236,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("a", { className: "pve-review__back", href: "/", children: "返回平台" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 241,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 235,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("nav", { className: "pve-review__tabs", "aria-label": "選擇場景", children: SCENES.map(
+      (item) => /* @__PURE__ */ jsxDEV("button", { type: "button", "aria-pressed": sceneId === item.id, onClick: () => setSceneId(item.id), children: [
+        /* @__PURE__ */ jsxDEV("span", { children: [
+          item.depth,
+          "m"
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 247,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("strong", { children: item.name }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 247,
+          columnNumber: 39
+        }, this),
+        /* @__PURE__ */ jsxDEV("small", { children: item.boss }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 247,
+          columnNumber: 67
+        }, this)
+      ] }, item.id, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 246,
+        columnNumber: 9
+      }, this)
+    ) }, void 0, false, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 244,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("nav", { className: "pve-review__moments", "aria-label": "選擇遊戲狀態", children: MOMENTS.map(
+      (item) => /* @__PURE__ */ jsxDEV("button", { type: "button", "aria-pressed": moment === item.id, onClick: () => setMoment(item.id), children: [
+        /* @__PURE__ */ jsxDEV("strong", { children: item.label }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 255,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("small", { children: item.note }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 255,
+          columnNumber: 42
+        }, this)
+      ] }, item.id, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 254,
+        columnNumber: 9
+      }, this)
+    ) }, void 0, false, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 252,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "pve-review__workspace", children: [
+      /* @__PURE__ */ jsxDEV(ReviewBoard, { scene, moment }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 261,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("aside", { className: "pve-review__notes", children: [
+        /* @__PURE__ */ jsxDEV("section", { children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "pve-review__eyebrow", children: "SCENE CONTRACT" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 264,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("h2", { children: scene.name }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 265,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { children: scene.mechanic }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 266,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { className: "pve-review__chips", children: scene.platformLabels.map((label) => /* @__PURE__ */ jsxDEV("span", { children: label }, label, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 267,
+            columnNumber: 85
+          }, this)) }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 267,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 263,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("section", { children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "pve-review__eyebrow", children: "ENEMY READABILITY" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 270,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { className: "pve-review__enemy-cards", children: scene.minions.map(
+            (name, index) => /* @__PURE__ */ jsxDEV("article", { "data-scene": scene.id, children: [
+              /* @__PURE__ */ jsxDEV("i", { "aria-hidden": "true", children: /* @__PURE__ */ jsxDEV("span", {}, void 0, false, {
+                fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                lineNumber: 274,
+                columnNumber: 41
+              }, this) }, void 0, false, {
+                fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                lineNumber: 274,
+                columnNumber: 19
+              }, this),
+              /* @__PURE__ */ jsxDEV("div", { children: [
+                /* @__PURE__ */ jsxDEV("strong", { children: name }, void 0, false, {
+                  fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                  lineNumber: 275,
+                  columnNumber: 24
+                }, this),
+                /* @__PURE__ */ jsxDEV("small", { children: index === 0 ? "1–2 HP · 快速輪廓" : "2–3 HP · 顯示短 HP pips" }, void 0, false, {
+                  fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                  lineNumber: 275,
+                  columnNumber: 47
+                }, this)
+              ] }, void 0, true, {
+                fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+                lineNumber: 275,
+                columnNumber: 19
+              }, this)
+            ] }, name, true, {
+              fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+              lineNumber: 273,
+              columnNumber: 15
+            }, this)
+          ) }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 271,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { children: "入場必須同時顯示方向／落點、剪影與倒數；預告期沒有碰撞。" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 279,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 269,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("section", { children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "pve-review__eyebrow", children: "BOSS COUNTERPLAY" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 282,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(BossConcept, { scene }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 283,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("h3", { children: scene.boss }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 284,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { children: scene.bossHint }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 285,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 281,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("section", { className: "pve-review__approval", children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "pve-review__eyebrow", children: "本版確認重點" }, void 0, false, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 288,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("ul", { children: [
+            /* @__PURE__ */ jsxDEV("li", { children: "個人 Combo 與共享 Fever 是否一眼可分" }, void 0, false, {
+              fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+              lineNumber: 290,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV("li", { children: "怪物入場與 Boss 弱點是否不用猜" }, void 0, false, {
+              fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+              lineNumber: 291,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV("li", { children: "平台材質是否仍保留一致功能輪廓" }, void 0, false, {
+              fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+              lineNumber: 292,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV("li", { children: "360×640、F8、F9 與 reduced-motion 是否清楚" }, void 0, false, {
+              fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+              lineNumber: 293,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+            lineNumber: 289,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 287,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 262,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 260,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("figure", { className: "pve-review__concept-board", children: [
+      /* @__PURE__ */ jsxDEV("img", { src: BOSS_LINEUP, alt: "芽盾、鏘鏘、轟隆與夜曜四隻原創 Boss 完整造型概念板" }, void 0, false, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 299,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("figcaption", { children: [
+        /* @__PURE__ */ jsxDEV("span", { className: "pve-review__eyebrow", children: "ORIGINAL BOSS LINEUP V1" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 301,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("strong", { children: "完整身體、關節連接與發光弱點的視覺方向" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 302,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("small", { children: "此圖只供 UI/UX 核准；正式動畫需拆成一致 sprite frame 或 root → joint → limb 分層 rig。" }, void 0, false, {
+          fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+          lineNumber: 303,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+        lineNumber: 300,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+      lineNumber: 298,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx",
+    lineNumber: 234,
+    columnNumber: 5
+  }, this);
+}
+_s(DownstairsPvePrototype, "kXQ9Ah7WTphnF/JZZck9RPyCINw=");
+_c4 = DownstairsPvePrototype;
+var _c, _c2, _c3, _c4;
+$RefreshReg$(_c, "BossConcept");
+$RefreshReg$(_c2, "EnemyToken");
+$RefreshReg$(_c3, "ReviewBoard");
+$RefreshReg$(_c4, "DownstairsPvePrototype");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/user/riffle/client/src/features/downstairs-pve/DownstairsPvePrototype.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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Q0FBSjtBQUFBO0FBQUE7QUFBQTtBQUFBLG1CQUFzQjtBQUFBLFlBQ3RCLHVCQUFDLFFBQUcsK0JBQUo7QUFBQTtBQUFBO0FBQUE7QUFBQSxtQkFBbUI7QUFBQSxZQUNuQix1QkFBQyxRQUFHLG1EQUFKO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXVDO0FBQUEsZUFKekM7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFLQTtBQUFBLGFBUEY7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQVFBO0FBQUEsV0FqQ0Y7QUFBQTtBQUFBO0FBQUE7QUFBQSxhQWtDQTtBQUFBLFNBcENGO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0FxQ0E7QUFBQSxJQUNBLHVCQUFDLFlBQU8sV0FBVSw2QkFDaEI7QUFBQSw2QkFBQyxTQUFJLEtBQUtOLGFBQWEsS0FBSSxrQ0FBM0I7QUFBQTtBQUFBO0FBQUE7QUFBQSxhQUF5RDtBQUFBLE1BQ3pELHVCQUFDLGdCQUNDO0FBQUEsK0JBQUMsVUFBSyxXQUFVLHVCQUFzQix1Q0FBdEM7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUE2RDtBQUFBLFFBQzdELHVCQUFDLFlBQU8sbUNBQVI7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUEyQjtBQUFBLFFBQzNCLHVCQUFDLFdBQU0sa0ZBQVA7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUF5RTtBQUFBLFdBSDNFO0FBQUE7QUFBQTtBQUFBO0FBQUEsYUFJQTtBQUFBLFNBTkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxXQU9BO0FBQUEsT0F2RUY7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQXdFQTtBQUVKO0FBQUNxRCxHQXZGdUJELHdCQUFzQjtBQUFBLE1BQXRCQTtBQUFzQixJQUFBckIsSUFBQU0sS0FBQWMsS0FBQWU7QUFBQSxhQUFBbkMsSUFBQTtBQUFBLGFBQUFNLEtBQUE7QUFBQSxhQUFBYyxLQUFBO0FBQUEsYUFBQWUsS0FBQSIsIm5hbWVzIjpbInVzZVN0YXRlIiwiYm9zc0xpbmV1cCIsIkJPU1NfTElORVVQIiwiU0NFTkVTIiwiaWQiLCJuYW1lIiwiZGVwdGgiLCJib3NzIiwiYm9zc0hpbnQiLCJib3NzSHAiLCJtaW5pb25zIiwibWVjaGFuaWMiLCJwbGF0Zm9ybUxhYmVscyIsIk1PTUVOVFMiLCJsYWJlbCIsIm5vdGUiLCJQTEFURk9STV9MQVlPVVQiLCJ4IiwieSIsIndpZHRoIiwia2luZCIsIlBMQVlFUl9MQVlPVVQiLCJjb2xvciIsImhlYXJ0cyIsIkJvc3NDb25jZXB0Iiwic2NlbmUiLCJjb21wYWN0IiwiaW5kZXgiLCJmaW5kSW5kZXgiLCJpdGVtIiwicG9zaXRpb24iLCJiYWNrZ3JvdW5kSW1hZ2UiLCJiYWNrZ3JvdW5kUG9zaXRpb24iLCJfYyIsIkVuZW15VG9rZW4iLCJlbnRyeSIsInN0eWxlIiwibGVmdCIsInRvcCIsIl9jMiIsIlJldmlld0JvYXJkIiwibW9tZW50IiwiZmV2ZXIiLCJib3NzVmlzaWJsZSIsImhwIiwibWF4SHAiLCJib3NzUGVyY2VudCIsIk1hdGgiLCJyb3VuZCIsImZpbmQiLCJtYXAiLCJwbGF0Zm9ybSIsInBsYXllciIsIl9jMyIsIkRvd25zdGFpcnNQdmVQcm90b3R5cGUiLCJfcyIsInF1ZXJ5IiwiVVJMU2VhcmNoUGFyYW1zIiwid2luZG93IiwibG9jYXRpb24iLCJzZWFyY2giLCJyZXF1ZXN0ZWRTY2VuZSIsImdldCIsInJlcXVlc3RlZE1vbWVudCIsInNjZW5lSWQiLCJzZXRTY2VuZUlkIiwic29tZSIsInNldE1vbWVudCIsIl9jNCJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJEb3duc3RhaXJzUHZlUHJvdG90eXBlLnRzeCJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgeyB1c2VTdGF0ZSwgdHlwZSBDU1NQcm9wZXJ0aWVzIH0gZnJvbSAncmVhY3QnO1xuaW1wb3J0IGJvc3NMaW5ldXAgZnJvbSAnLi9hc3NldHMvcHZlLWJvc3MtbGluZXVwLXYxLmpwZyc7XG5pbXBvcnQgJy4vZG93bnN0YWlyc1B2ZVByb3RvdHlwZS5jc3MnO1xuXG50eXBlIFNjZW5lSWQgPSAnZ2FyZGVuJyB8ICd3b3Jrc2hvcCcgfCAncm9vZnRvcCcgfCAncnVpbnMnO1xudHlwZSBSZXZpZXdNb21lbnQgPSAnZXhwbG9yZScgfCAnZW50cnknIHwgJ2Jvc3MnIHwgJ2ZldmVyJztcblxuaW50ZXJmYWNlIFNjZW5lRGVzaWduIHtcbiAgaWQ6IFNjZW5lSWQ7XG4gIG5hbWU6IHN0cmluZztcbiAgZGVwdGg6IG51bWJlcjtcbiAgYm9zczogc3RyaW5nO1xuICBib3NzSGludDogc3RyaW5nO1xuICBib3NzSHA6IFtudW1iZXIsIG51bWJlcl07XG4gIG1pbmlvbnM6IHJlYWRvbmx5IFtzdHJpbmcsIHN0cmluZ107XG4gIG1lY2hhbmljOiBzdHJpbmc7XG4gIHBsYXRmb3JtTGFiZWxzOiByZWFkb25seSBzdHJpbmdbXTtcbn1cblxuY29uc3QgQk9TU19MSU5FVVAgPSBib3NzTGluZXVwO1xuXG5jb25zdCBTQ0VORVM6IHJlYWRvbmx5IFNjZW5lRGVzaWduW10gPSBbXG4gIHtcbiAgICBpZDogJ2dhcmRlbicsXG4gICAgbmFtZTogJ+iLlOiKveW6reWckicsXG4gICAgZGVwdGg6IDg2LFxuICAgIGJvc3M6ICfoi5TnlLLlt6jpvpzjg7voir3nm74nLFxuICAgIGJvc3NIaW50OiAn6Lip5LquIDIg5YCL6Iqx6Iue77yM6K6T6IOM55Sy5byx6bue6ZaL6IqxJyxcbiAgICBib3NzSHA6IFsxNCwgMjZdLFxuICAgIG1pbmlvbnM6IFsn6Iq96Lez55CDJywgJ+mcsuePoOWPsuiQiuWnhiddLFxuICAgIG1lY2hhbmljOiAn5pWZ5a246Lip5pOKIMK3IOiXpOiUk+iIh+iYkeiPh+W9iOWPsCcsXG4gICAgcGxhdGZvcm1MYWJlbHM6IFsn5qi55qC55Zyf5Y+wJywgJ+iYkeiPh+iKvScsICfmnq/mnKgnXSxcbiAgfSxcbiAge1xuICAgIGlkOiAnd29ya3Nob3AnLFxuICAgIG5hbWU6ICfpvZLovKrlt6XlnYonLFxuICAgIGRlcHRoOiAzODYsXG4gICAgYm9zczogJ+eZvOaineW3qOWDj+ODu+mPmOmPmCcsXG4gICAgYm9zc0hpbnQ6ICfkvp3nrq3poK3ouKnlt6blj7Pmlrfpm7vlj7DvvIzlgZzmraLog7jlj6Pnmbzmop0nLFxuICAgIGJvc3NIcDogWzM0LCA0MF0sXG4gICAgbWluaW9uczogWyfpvZLovKrlsI/prLwnLCAn56OB6ZC16J2gJ10sXG4gICAgbWVjaGFuaWM6ICflkIrou4wgwrcg5rS75aGeIMK3IOaWueWQkei8uOmAgeW4ticsXG4gICAgcGxhdGZvcm1MYWJlbHM6IFsn6Yma6YeY6Yu85p2/JywgJ+a0u+WhnicsICfoo4LpvZLovKonXSxcbiAgfSxcbiAge1xuICAgIGlkOiAncm9vZnRvcCcsXG4gICAgbmFtZTogJ+aatOmiqOWxi+mggicsXG4gICAgZGVwdGg6IDcxOCxcbiAgICBib3NzOiAn6Zu36Zuy6a+o44O76L2f6ZqGJyxcbiAgICBib3NzSGludDogJ+i4qemBv+mbt+W5s+WPsOWwjui1sOmbu+iNt++8jOWGjeaUu+aTiumbt+WGoCcsXG4gICAgYm9zc0hwOiBbMzEsIDQ2XSxcbiAgICBtaW5pb25zOiBbJ+miqOe+vem0iScsICfpm6jpm7Lnsr4nXSxcbiAgICBtZWNoYW5pYzogJ+miqOWQkSDCtyDokL3pm7fpoJDlkYogwrcg5bGL55Om5bmz5Y+wJyxcbiAgICBwbGF0Zm9ybUxhYmVsczogWyflsYvnk6YnLCAn56mN6Zuy5aKKJywgJ+mBv+mbt+WPsCddLFxuICB9LFxuICB7XG4gICAgaWQ6ICdydWlucycsXG4gICAgbmFtZTogJ+aYn+WFiemBuui3oScsXG4gICAgZGVwdGg6IDEwODQsXG4gICAgYm9zczogJ+WQnuaYn+m+jeODu+WknOabnCcsXG4gICAgYm9zc0hpbnQ6ICfkvp3luo/mlLbpm4YgMyDmnprmmJ/nrKbvvIzkvb/og7jlj6PmmJ/moLjlr6bpq5TljJYnLFxuICAgIGJvc3NIcDogWzQyLCA1Nl0sXG4gICAgbWluaW9uczogWyflvZfmmJ/on7InLCAn6Y+h5YWJ6Z2IJ10sXG4gICAgbWVjaGFuaWM6ICfou4zpgZPlj7Agwrcg5pif5rWBIMK3IOiZm+epuuijguadvycsXG4gICAgcGxhdGZvcm1MYWJlbHM6IFsn5pif56CC55+zJywgJ+aYn+aguCcsICfomZvnqbroo4Lmnb8nXSxcbiAgfSxcbl0gYXMgY29uc3Q7XG5cbmNvbnN0IE1PTUVOVFM6IHJlYWRvbmx5IHsgaWQ6IFJldmlld01vbWVudDsgbGFiZWw6IHN0cmluZzsgbm90ZTogc3RyaW5nIH1bXSA9IFtcbiAgeyBpZDogJ2V4cGxvcmUnLCBsYWJlbDogJ+aOoue0oicsIG5vdGU6ICfloLTmma/jgIHlubPlj7DjgIHlsI/mgKroiIflgIvkurogQ29tYm8nIH0sXG4gIHsgaWQ6ICdlbnRyeScsIGxhYmVsOiAn5bCP5oCq5YWl5aC0Jywgbm90ZTogJ+aWueWQkeOAgeiQvem7nuiIh+enkuaVuOS4iemHjemgkOWRiicgfSxcbiAgeyBpZDogJ2Jvc3MnLCBsYWJlbDogJ0Jvc3Mg5oiwJywgbm90ZTogJ+WFseS6qyBIUOOAgeaUu+aTiuiIh+W8sem7nuWPjeWIticgfSxcbiAgeyBpZDogJ2ZldmVyJywgbGFiZWw6ICdUZWFtIEZldmVyJywgbm90ZTogJ+WFqOmaiiA1IOenkuWFseS6q+eNjuWLteiIh+eJueaViCcgfSxcbl0gYXMgY29uc3Q7XG5cbmNvbnN0IFBMQVRGT1JNX0xBWU9VVCA9IFtcbiAgeyB4OiA3LCB5OiAyNSwgd2lkdGg6IDI3LCBraW5kOiAnbm9ybWFsJyB9LFxuICB7IHg6IDQ3LCB5OiAyOSwgd2lkdGg6IDE4LCBraW5kOiAnc3ByaW5nJyB9LFxuICB7IHg6IDc1LCB5OiAyMywgd2lkdGg6IDIwLCBraW5kOiAnbm9ybWFsJyB9LFxuICB7IHg6IDE4LCB5OiA0Nywgd2lkdGg6IDIyLCBraW5kOiAnbW92aW5nJyB9LFxuICB7IHg6IDU1LCB5OiA1MCwgd2lkdGg6IDMwLCBraW5kOiAnbWVjaGFuaXNtJyB9LFxuICB7IHg6IDQsIHk6IDcwLCB3aWR0aDogMjEsIGtpbmQ6ICdmcmFnaWxlJyB9LFxuICB7IHg6IDM2LCB5OiA3Mywgd2lkdGg6IDI0LCBraW5kOiAnbm9ybWFsJyB9LFxuICB7IHg6IDcyLCB5OiA2OCwgd2lkdGg6IDIzLCBraW5kOiAnY29udmV5b3InIH0sXG5dIGFzIGNvbnN0O1xuXG5jb25zdCBQTEFZRVJfTEFZT1VUID0gW1xuICB7IHg6IDIxLCB5OiAzOSwgY29sb3I6ICdicmF2ZScsIG5hbWU6ICflsI/li4cnLCBoZWFydHM6ICfimaXimaXimaUnIH0sXG4gIHsgeDogNTcsIHk6IDYzLCBjb2xvcjogJ2J1YmJsZScsIG5hbWU6ICfms6Hms6EnLCBoZWFydHM6ICfimaXimaUnIH0sXG4gIHsgeDogNzgsIHk6IDE3LCBjb2xvcjogJ3N0YXInLCBuYW1lOiAn5bCP5pifJywgaGVhcnRzOiAn4pml4pml4pmlJyB9LFxuXSBhcyBjb25zdDtcblxuZnVuY3Rpb24gQm9zc0NvbmNlcHQoeyBzY2VuZSwgY29tcGFjdCA9IGZhbHNlIH06IHsgc2NlbmU6IFNjZW5lRGVzaWduOyBjb21wYWN0PzogYm9vbGVhbiB9KSB7XG4gIGNvbnN0IGluZGV4ID0gU0NFTkVTLmZpbmRJbmRleCgoaXRlbSkgPT4gaXRlbS5pZCA9PT0gc2NlbmUuaWQpO1xuICBjb25zdCBwb3NpdGlvbiA9IGluZGV4ID09PSAwID8gJzAlIDUwJScgOiBpbmRleCA9PT0gMSA/ICczMy4zMzMlIDUwJScgOiBpbmRleCA9PT0gMiA/ICc2Ni42NjclIDUwJScgOiAnMTAwJSA1MCUnO1xuICByZXR1cm4gKFxuICAgIDxkaXZcbiAgICAgIGNsYXNzTmFtZT17J3B2ZS1yZXZpZXdfX2Jvc3MtY29uY2VwdCcgKyAoY29tcGFjdCA/ICcgaXMtY29tcGFjdCcgOiAnJyl9XG4gICAgICBzdHlsZT17eyBiYWNrZ3JvdW5kSW1hZ2U6ICd1cmwoJyArIEJPU1NfTElORVVQICsgJyknLCBiYWNrZ3JvdW5kUG9zaXRpb246IHBvc2l0aW9uIH19XG4gICAgICByb2xlPVwiaW1nXCJcbiAgICAgIGFyaWEtbGFiZWw9e3NjZW5lLmJvc3MgKyAnIOWOn+WJtemAoOWei+amguW/tSd9XG4gICAgPlxuICAgICAgPHNwYW4gY2xhc3NOYW1lPVwicHZlLXJldmlld19fd2Vha3BvaW50XCIgYXJpYS1oaWRkZW49XCJ0cnVlXCIgLz5cbiAgICA8L2Rpdj5cbiAgKTtcbn1cblxuZnVuY3Rpb24gRW5lbXlUb2tlbih7XG4gIHNjZW5lLFxuICBpbmRleCxcbiAgZW50cnksXG59OiB7XG4gIHNjZW5lOiBTY2VuZURlc2lnbjtcbiAgaW5kZXg6IDAgfCAxO1xuICBlbnRyeT86IGJvb2xlYW47XG59KSB7XG4gIGNvbnN0IHN0eWxlID0ge1xuICAgIGxlZnQ6IChpbmRleCA9PT0gMCA/IDI3IDogNjcpICsgJyUnLFxuICAgIHRvcDogKGluZGV4ID09PSAwID8gMTkgOiA1NCkgKyAnJScsXG4gIH0gc2F0aXNmaWVzIENTU1Byb3BlcnRpZXM7XG4gIHJldHVybiAoXG4gICAgPGRpdiBjbGFzc05hbWU9eydwdmUtcmV2aWV3X19lbmVteSBpcy0nICsgaW5kZXggKyAoZW50cnkgPyAnIGlzLWVudGVyaW5nJyA6ICcnKX0gZGF0YS1zY2VuZT17c2NlbmUuaWR9IHN0eWxlPXtzdHlsZX0+XG4gICAgICB7ZW50cnkgJiYgPHNwYW4gY2xhc3NOYW1lPVwicHZlLXJldmlld19fZW50cnktcGF0aFwiIGFyaWEtaGlkZGVuPVwidHJ1ZVwiPuKGmDwvc3Bhbj59XG4gICAgICB7ZW50cnkgJiYgPGIgY2xhc3NOYW1lPVwicHZlLXJldmlld19fZW50cnktdGltZVwiPjAuOXM8L2I+fVxuICAgICAgPGkgYXJpYS1oaWRkZW49XCJ0cnVlXCI+PHNwYW4gLz48L2k+XG4gICAgICA8c3Ryb25nPntzY2VuZS5taW5pb25zW2luZGV4XX08L3N0cm9uZz5cbiAgICAgIHtpbmRleCA9PT0gMSAmJiA8ZW0+PHNwYW4gLz48c3BhbiAvPjwvZW0+fVxuICAgIDwvZGl2PlxuICApO1xufVxuXG5mdW5jdGlvbiBSZXZpZXdCb2FyZCh7IHNjZW5lLCBtb21lbnQgfTogeyBzY2VuZTogU2NlbmVEZXNpZ247IG1vbWVudDogUmV2aWV3TW9tZW50IH0pIHtcbiAgY29uc3QgZmV2ZXIgPSBtb21lbnQgPT09ICdmZXZlcic7XG4gIGNvbnN0IGJvc3NWaXNpYmxlID0gbW9tZW50ID09PSAnYm9zcycgfHwgZmV2ZXI7XG4gIGNvbnN0IGVudHJ5ID0gbW9tZW50ID09PSAnZW50cnknO1xuICBjb25zdCBbaHAsIG1heEhwXSA9IHNjZW5lLmJvc3NIcDtcbiAgY29uc3QgYm9zc1BlcmNlbnQgPSBNYXRoLnJvdW5kKChocCAvIG1heEhwKSAqIDEwMCk7XG5cbiAgcmV0dXJuIChcbiAgICA8c2VjdGlvbiBjbGFzc05hbWU9XCJwdmUtcmV2aWV3X19kZXZpY2VcIiBhcmlhLWxhYmVsPXtzY2VuZS5uYW1lICsgJyAnICsgTU9NRU5UUy5maW5kKChpdGVtKSA9PiBpdGVtLmlkID09PSBtb21lbnQpPy5sYWJlbCArICcgVUkg6aCQ6Ka9J30+XG4gICAgICA8ZGl2IGNsYXNzTmFtZT1cInB2ZS1yZXZpZXdfX3Njb3JlYmFyXCI+XG4gICAgICAgIDxzdHJvbmc+e3NjZW5lLmRlcHRofW08L3N0cm9uZz5cbiAgICAgICAgPHNwYW4+e3NjZW5lLm5hbWV9PC9zcGFuPlxuICAgICAgICA8c3Bhbj4zIOS6uuWtmOa0uzwvc3Bhbj5cbiAgICAgIDwvZGl2PlxuICAgICAgPGRpdiBjbGFzc05hbWU9eydwdmUtcmV2aWV3X190ZWFtLXJhaWwnICsgKGZldmVyID8gJyBpcy1hY3RpdmUnIDogJycpfT5cbiAgICAgICAgPGRpdj5cbiAgICAgICAgICA8c3Ryb25nPntmZXZlciA/ICdURUFNIEZFVkVSIDMuOHMnIDogJ1RFQU0gRkVWRVInfTwvc3Ryb25nPlxuICAgICAgICAgIDxzcGFuPntmZXZlciA/ICflsI/mmJ/op7jnmbwgwrcg5YK35a6zICsxJyA6ICflsI/mmJ8gMjcgUkVBRFknfTwvc3Bhbj5cbiAgICAgICAgICA8Yj57ZmV2ZXIgPyAn4peGIMOXMycgOiAnMjcvMzAnfTwvYj5cbiAgICAgICAgPC9kaXY+XG4gICAgICAgIDxpPjxzcGFuIHN0eWxlPXt7IHdpZHRoOiBmZXZlciA/ICc3NiUnIDogJzkwJScgfX0gLz48L2k+XG4gICAgICA8L2Rpdj5cbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwicHZlLXJldmlld19fc2VsZi1odWRcIj5cbiAgICAgICAgPHN0cm9uZz7miJHvvJpDT01CTyDDl3tmZXZlciA/IDggOiAxOH08L3N0cm9uZz5cbiAgICAgICAgPHNwYW4+5oqA6IO9IDYuMnM8L3NwYW4+XG4gICAgICAgIDxiPuKZpeKZpeKZpTwvYj5cbiAgICAgIDwvZGl2PlxuICAgICAge2Jvc3NWaXNpYmxlICYmIChcbiAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJwdmUtcmV2aWV3X19ib3NzLWh1ZFwiPlxuICAgICAgICAgIDxkaXY+PHN0cm9uZz57c2NlbmUuYm9zc308L3N0cm9uZz48c3Bhbj7kuIvkuIDmi5vvvJp7c2NlbmUuaWQgPT09ICdnYXJkZW4nID8gJ+eoruWtkOmbqCcgOiBzY2VuZS5pZCA9PT0gJ3dvcmtzaG9wJyA/ICfpm5nmiYvmi43mk4onIDogc2NlbmUuaWQgPT09ICdyb29mdG9wJyA/ICfkuInpu57okL3pm7cnIDogJ+aal+W9seWFieadnyd9PC9zcGFuPjxiPntocH0ve21heEhwfTwvYj48L2Rpdj5cbiAgICAgICAgICA8aT48c3BhbiBzdHlsZT17eyB3aWR0aDogYm9zc1BlcmNlbnQgKyAnJScgfX0gLz48L2k+XG4gICAgICAgIDwvZGl2PlxuICAgICAgKX1cbiAgICAgIDxkaXYgY2xhc3NOYW1lPXsncHZlLXJldmlld19fcGxheWZpZWxkIGlzLScgKyBzY2VuZS5pZCArIChmZXZlciA/ICcgaGFzLWZldmVyJyA6ICcnKX0+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPVwicHZlLXJldmlld19fc2t5IGlzLWZhclwiIC8+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPVwicHZlLXJldmlld19fc2t5IGlzLW5lYXJcIiAvPlxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInB2ZS1yZXZpZXdfX2RhbmdlciBpcy10b3BcIj7ilrIg6aCC56uv5Y2x6ZqqPC9kaXY+XG4gICAgICAgIHtlbnRyeSAmJiA8ZGl2IGNsYXNzTmFtZT1cInB2ZS1yZXZpZXdfX25vdGljZVwiPuWwj+aAquWFpeWgtCDCtyDnnIvnrq3poK3oiIfokL3pu548L2Rpdj59XG4gICAgICAgIHtib3NzVmlzaWJsZSAmJiA8ZGl2IGNsYXNzTmFtZT1cInB2ZS1yZXZpZXdfX25vdGljZVwiPntzY2VuZS5ib3NzSGludH08L2Rpdj59XG4gICAgICAgIHtQTEFURk9STV9MQVlPVVQubWFwKChwbGF0Zm9ybSwgaW5kZXgpID0+IChcbiAgICAgICAgICA8ZGl2XG4gICAgICAgICAgICBrZXk9e2luZGV4fVxuICAgICAgICAgICAgY2xhc3NOYW1lPXsncHZlLXJldmlld19fcGxhdGZvcm0gaXMtJyArIHBsYXRmb3JtLmtpbmQgKyAoYm9zc1Zpc2libGUgJiYgaW5kZXggPT09IDQgPyAnIGlzLXdlYWsnIDogJycpfVxuICAgICAgICAgICAgc3R5bGU9e3sgbGVmdDogcGxhdGZvcm0ueCArICclJywgdG9wOiBwbGF0Zm9ybS55ICsgJyUnLCB3aWR0aDogcGxhdGZvcm0ud2lkdGggKyAnJScgfX1cbiAgICAgICAgICA+XG4gICAgICAgICAgICA8aSAvPjxzcGFuPntwbGF0Zm9ybS5raW5kID09PSAnc3ByaW5nJyA/ICfihp8nIDogcGxhdGZvcm0ua2luZCA9PT0gJ21vdmluZycgPyAn4oaUJyA6IHBsYXRmb3JtLmtpbmQgPT09ICdmcmFnaWxlJyA/ICfijIEnIDogcGxhdGZvcm0ua2luZCA9PT0gJ2NvbnZleW9yJyA/ICfigLrigLonIDogYm9zc1Zpc2libGUgJiYgaW5kZXggPT09IDQgPyAn4peGJyA6ICcnfTwvc3Bhbj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgKSl9XG4gICAgICAgIHshYm9zc1Zpc2libGUgJiYgPEVuZW15VG9rZW4gc2NlbmU9e3NjZW5lfSBpbmRleD17MH0gZW50cnk9e2VudHJ5fSAvPn1cbiAgICAgICAgeyhtb21lbnQgPT09ICdleHBsb3JlJyB8fCBlbnRyeSkgJiYgPEVuZW15VG9rZW4gc2NlbmU9e3NjZW5lfSBpbmRleD17MX0gLz59XG4gICAgICAgIHtib3NzVmlzaWJsZSAmJiA8Qm9zc0NvbmNlcHQgc2NlbmU9e3NjZW5lfSBjb21wYWN0IC8+fVxuICAgICAgICB7UExBWUVSX0xBWU9VVC5tYXAoKHBsYXllciwgaW5kZXgpID0+IChcbiAgICAgICAgICA8ZGl2XG4gICAgICAgICAgICBrZXk9e3BsYXllci5uYW1lfVxuICAgICAgICAgICAgY2xhc3NOYW1lPXsncHZlLXJldmlld19fcGxheWVyIGlzLScgKyBwbGF5ZXIuY29sb3IgKyAoZmV2ZXIgPyAnIGhhcy1mZXZlcicgOiAnJyl9XG4gICAgICAgICAgICBzdHlsZT17eyBsZWZ0OiBwbGF5ZXIueCArICclJywgdG9wOiBwbGF5ZXIueSArICclJyB9fVxuICAgICAgICAgID5cbiAgICAgICAgICAgIDxzcGFuPjxzdHJvbmc+e3BsYXllci5uYW1lfTwvc3Ryb25nPjxiPntwbGF5ZXIuaGVhcnRzfTwvYj48L3NwYW4+XG4gICAgICAgICAgICA8aSBhcmlhLWhpZGRlbj1cInRydWVcIj7igKLhtJfigKI8L2k+XG4gICAgICAgICAgICB7aW5kZXggPT09IDAgJiYgPGVtPntmZXZlciA/ICflgrflrrMgKzEnIDogJ1BFUkZFQ1QnfTwvZW0+fVxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICApKX1cbiAgICAgICAge2ZldmVyICYmIDxkaXYgY2xhc3NOYW1lPVwicHZlLXJldmlld19fZmV2ZXItZnhcIiBhcmlhLWhpZGRlbj1cInRydWVcIj48aSAvPjxpIC8+PGkgLz48aSAvPjxpIC8+PC9kaXY+fVxuICAgICAgICB7Ym9zc1Zpc2libGUgJiYgPGRpdiBjbGFzc05hbWU9XCJwdmUtcmV2aWV3X19ib3NzLWNhbGxvdXRcIj7lvLHpu54ge3NjZW5lLmlkID09PSAncnVpbnMnID8gJzIvMycgOiAnUkVBRFknfSDCtyDmr48gY3ljbGUg5YK35a6z5LiK6ZmQPC9kaXY+fVxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInB2ZS1yZXZpZXdfX2RhbmdlciBpcy1ib3R0b21cIj7ilrwg5b6A5pu05rex6JmVPC9kaXY+XG4gICAgICA8L2Rpdj5cbiAgICA8L3NlY3Rpb24+XG4gICk7XG59XG5cbmV4cG9ydCBkZWZhdWx0IGZ1bmN0aW9uIERvd25zdGFpcnNQdmVQcm90b3R5cGUoKSB7XG4gIGNvbnN0IHF1ZXJ5ID0gbmV3IFVSTFNlYXJjaFBhcmFtcyh3aW5kb3cubG9jYXRpb24uc2VhcmNoKTtcbiAgY29uc3QgcmVxdWVzdGVkU2NlbmUgPSBxdWVyeS5nZXQoJ3NjZW5lJyk7XG4gIGNvbnN0IHJlcXVlc3RlZE1vbWVudCA9IHF1ZXJ5LmdldCgnbW9tZW50Jyk7XG4gIGNvbnN0IFtzY2VuZUlkLCBzZXRTY2VuZUlkXSA9IHVzZVN0YXRlPFNjZW5lSWQ+KCgpID0+XG4gICAgU0NFTkVTLnNvbWUoKGl0ZW0pID0+IGl0ZW0uaWQgPT09IHJlcXVlc3RlZFNjZW5lKSA/IHJlcXVlc3RlZFNjZW5lIGFzIFNjZW5lSWQgOiAnZ2FyZGVuJ1xuICApO1xuICBjb25zdCBbbW9tZW50LCBzZXRNb21lbnRdID0gdXNlU3RhdGU8UmV2aWV3TW9tZW50PigoKSA9PlxuICAgIE1PTUVOVFMuc29tZSgoaXRlbSkgPT4gaXRlbS5pZCA9PT0gcmVxdWVzdGVkTW9tZW50KSA/IHJlcXVlc3RlZE1vbWVudCBhcyBSZXZpZXdNb21lbnQgOiAnZXhwbG9yZSdcbiAgKTtcbiAgY29uc3Qgc2NlbmUgPSBTQ0VORVMuZmluZCgoaXRlbSkgPT4gaXRlbS5pZCA9PT0gc2NlbmVJZCkhO1xuXG4gIHJldHVybiAoXG4gICAgPG1haW4gY2xhc3NOYW1lPVwicHZlLXJldmlld1wiPlxuICAgICAgPGhlYWRlciBjbGFzc05hbWU9XCJwdmUtcmV2aWV3X19oZWFkZXJcIj5cbiAgICAgICAgPGRpdj5cbiAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9XCJwdmUtcmV2aWV3X19leWVicm93XCI+UEhBU0UgNkIgwrcgQ0xJRU5ULU9OTFkgRklYVFVSRTwvc3Bhbj5cbiAgICAgICAgICA8aDE+5qiT5qKv5bCP5YuH6ICFIMK3IOa3seW6piBQdkUgVUkvVVgg6Kit6KiI56i/PC9oMT5cbiAgICAgICAgICA8cD7lm7rlrpogbW9jayBzdGF0Ze+8jOS4jeW7uueri+aIv+mWk+OAgeS4jemAoyBTb2NrZXTjgIHkuI3kv67mlLnmraPlvI/pgYrmiLLjgILkvb/nlKggRjgg5YiH5o+b5LiJ5aWX5aSW6KeA77yMRjkg6amX6K2J6Zqx6JeP77yP5oGi5b6p44CCPC9wPlxuICAgICAgICA8L2Rpdj5cbiAgICAgICAgPGEgY2xhc3NOYW1lPVwicHZlLXJldmlld19fYmFja1wiIGhyZWY9XCIvXCI+6L+U5Zue5bmz5Y+wPC9hPlxuICAgICAgPC9oZWFkZXI+XG5cbiAgICAgIDxuYXYgY2xhc3NOYW1lPVwicHZlLXJldmlld19fdGFic1wiIGFyaWEtbGFiZWw9XCLpgbjmk4floLTmma9cIj5cbiAgICAgICAge1NDRU5FUy5tYXAoKGl0ZW0pID0+IChcbiAgICAgICAgICA8YnV0dG9uIGtleT17aXRlbS5pZH0gdHlwZT1cImJ1dHRvblwiIGFyaWEtcHJlc3NlZD17c2NlbmVJZCA9PT0gaXRlbS5pZH0gb25DbGljaz17KCkgPT4gc2V0U2NlbmVJZChpdGVtLmlkKX0+XG4gICAgICAgICAgICA8c3Bhbj57aXRlbS5kZXB0aH1tPC9zcGFuPjxzdHJvbmc+e2l0ZW0ubmFtZX08L3N0cm9uZz48c21hbGw+e2l0ZW0uYm9zc308L3NtYWxsPlxuICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICApKX1cbiAgICAgIDwvbmF2PlxuXG4gICAgICA8bmF2IGNsYXNzTmFtZT1cInB2ZS1yZXZpZXdfX21vbWVudHNcIiBhcmlhLWxhYmVsPVwi6YG45pOH6YGK5oiy54uA5oWLXCI+XG4gICAgICAgIHtNT01FTlRTLm1hcCgoaXRlbSkgPT4gKFxuICAgICAgICAgIDxidXR0b24ga2V5PXtpdGVtLmlkfSB0eXBlPVwiYnV0dG9uXCIgYXJpYS1wcmVzc2VkPXttb21lbnQgPT09IGl0ZW0uaWR9IG9uQ2xpY2s9eygpID0+IHNldE1vbWVudChpdGVtLmlkKX0+XG4gICAgICAgICAgICA8c3Ryb25nPntpdGVtLmxhYmVsfTwvc3Ryb25nPjxzbWFsbD57aXRlbS5ub3RlfTwvc21hbGw+XG4gICAgICAgICAgPC9idXR0b24+XG4gICAgICAgICkpfVxuICAgICAgPC9uYXY+XG5cbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwicHZlLXJldmlld19fd29ya3NwYWNlXCI+XG4gICAgICAgIDxSZXZpZXdCb2FyZCBzY2VuZT17c2NlbmV9IG1vbWVudD17bW9tZW50fSAvPlxuICAgICAgICA8YXNpZGUgY2xhc3NOYW1lPVwicHZlLXJldmlld19fbm90ZXNcIj5cbiAgICAgICAgICA8c2VjdGlvbj5cbiAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cInB2ZS1yZXZpZXdfX2V5ZWJyb3dcIj5TQ0VORSBDT05UUkFDVDwvc3Bhbj5cbiAgICAgICAgICAgIDxoMj57c2NlbmUubmFtZX08L2gyPlxuICAgICAgICAgICAgPHA+e3NjZW5lLm1lY2hhbmljfTwvcD5cbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwicHZlLXJldmlld19fY2hpcHNcIj57c2NlbmUucGxhdGZvcm1MYWJlbHMubWFwKChsYWJlbCkgPT4gPHNwYW4ga2V5PXtsYWJlbH0+e2xhYmVsfTwvc3Bhbj4pfTwvZGl2PlxuICAgICAgICAgIDwvc2VjdGlvbj5cbiAgICAgICAgICA8c2VjdGlvbj5cbiAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cInB2ZS1yZXZpZXdfX2V5ZWJyb3dcIj5FTkVNWSBSRUFEQUJJTElUWTwvc3Bhbj5cbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwicHZlLXJldmlld19fZW5lbXktY2FyZHNcIj5cbiAgICAgICAgICAgICAge3NjZW5lLm1pbmlvbnMubWFwKChuYW1lLCBpbmRleCkgPT4gKFxuICAgICAgICAgICAgICAgIDxhcnRpY2xlIGtleT17bmFtZX0gZGF0YS1zY2VuZT17c2NlbmUuaWR9PlxuICAgICAgICAgICAgICAgICAgPGkgYXJpYS1oaWRkZW49XCJ0cnVlXCI+PHNwYW4gLz48L2k+XG4gICAgICAgICAgICAgICAgICA8ZGl2PjxzdHJvbmc+e25hbWV9PC9zdHJvbmc+PHNtYWxsPntpbmRleCA9PT0gMCA/ICcx4oCTMiBIUCDCtyDlv6vpgJ/ovKrlu5MnIDogJzLigJMzIEhQIMK3IOmhr+ekuuefrSBIUCBwaXBzJ308L3NtYWxsPjwvZGl2PlxuICAgICAgICAgICAgICAgIDwvYXJ0aWNsZT5cbiAgICAgICAgICAgICAgKSl9XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgIDxwPuWFpeWgtOW/hemgiOWQjOaZgumhr+ekuuaWueWQke+8j+iQvem7nuOAgeWJquW9seiIh+WAkuaVuO+8m+mgkOWRiuacn+aykuacieeisOaSnuOAgjwvcD5cbiAgICAgICAgICA8L3NlY3Rpb24+XG4gICAgICAgICAgPHNlY3Rpb24+XG4gICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9XCJwdmUtcmV2aWV3X19leWVicm93XCI+Qk9TUyBDT1VOVEVSUExBWTwvc3Bhbj5cbiAgICAgICAgICAgIDxCb3NzQ29uY2VwdCBzY2VuZT17c2NlbmV9IC8+XG4gICAgICAgICAgICA8aDM+e3NjZW5lLmJvc3N9PC9oMz5cbiAgICAgICAgICAgIDxwPntzY2VuZS5ib3NzSGludH08L3A+XG4gICAgICAgICAgPC9zZWN0aW9uPlxuICAgICAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT1cInB2ZS1yZXZpZXdfX2FwcHJvdmFsXCI+XG4gICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9XCJwdmUtcmV2aWV3X19leWVicm93XCI+5pys54mI56K66KqN6YeN6buePC9zcGFuPlxuICAgICAgICAgICAgPHVsPlxuICAgICAgICAgICAgICA8bGk+5YCL5Lq6IENvbWJvIOiIh+WFseS6qyBGZXZlciDmmK/lkKbkuIDnnLzlj6/liIY8L2xpPlxuICAgICAgICAgICAgICA8bGk+5oCq54mp5YWl5aC06IiHIEJvc3Mg5byx6bue5piv5ZCm5LiN55So54ycPC9saT5cbiAgICAgICAgICAgICAgPGxpPuW5s+WPsOadkOizquaYr+WQpuS7jeS/neeVmeS4gOiHtOWKn+iDvei8quW7kzwvbGk+XG4gICAgICAgICAgICAgIDxsaT4zNjDDlzY0MOOAgUY444CBRjkg6IiHIHJlZHVjZWQtbW90aW9uIOaYr+WQpua4healmjwvbGk+XG4gICAgICAgICAgICA8L3VsPlxuICAgICAgICAgIDwvc2VjdGlvbj5cbiAgICAgICAgPC9hc2lkZT5cbiAgICAgIDwvZGl2PlxuICAgICAgPGZpZ3VyZSBjbGFzc05hbWU9XCJwdmUtcmV2aWV3X19jb25jZXB0LWJvYXJkXCI+XG4gICAgICAgIDxpbWcgc3JjPXtCT1NTX0xJTkVVUH0gYWx0PVwi6Iq955u+44CB6Y+Y6Y+Y44CB6L2f6ZqG6IiH5aSc5puc5Zub6Zq75Y6f5Ym1IEJvc3Mg5a6M5pW06YCg5Z6L5qaC5b+15p2/XCIgLz5cbiAgICAgICAgPGZpZ2NhcHRpb24+XG4gICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwicHZlLXJldmlld19fZXllYnJvd1wiPk9SSUdJTkFMIEJPU1MgTElORVVQIFYxPC9zcGFuPlxuICAgICAgICAgIDxzdHJvbmc+5a6M5pW06Lqr6auU44CB6Zec56+A6YCj5o6l6IiH55m85YWJ5byx6bue55qE6KaW6Ka65pa55ZCRPC9zdHJvbmc+XG4gICAgICAgICAgPHNtYWxsPuatpOWcluWPquS+myBVSS9VWCDmoLjlh4bvvJvmraPlvI/li5XnlavpnIDmi4bmiJDkuIDoh7Qgc3ByaXRlIGZyYW1lIOaIliByb290IOKGkiBqb2ludCDihpIgbGltYiDliIblsaQgcmln44CCPC9zbWFsbD5cbiAgICAgICAgPC9maWdjYXB0aW9uPlxuICAgICAgPC9maWd1cmU+XG4gICAgPC9tYWluPlxuICApO1xufVxuIl0sImZpbGUiOiJDOi9Vc2Vycy91c2VyL3JpZmZsZS9jbGllbnQvc3JjL2ZlYXR1cmVzL2Rvd25zdGFpcnMtcHZlL0Rvd25zdGFpcnNQdmVQcm90b3R5cGUudHN4In0=
