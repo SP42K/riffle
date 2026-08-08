@@ -9,6 +9,7 @@ const START_LABEL_KEY: Record<GameType, TextKey> = {
   bigTwo: 'start.startBigTwo',
   holdem: 'start.startHoldem',
   monopoly: 'start.startMonopoly',
+  downstairs: 'start.startDownstairs',
   snake: 'start.startSnake',
 };
 

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "path": "pve-boss-lineup-v1.jpg",
+      "assetId": "019fd63c-c7a2-7042-b984-f7e2e0e38244",
+      "tool": "OpenAI built-in image_gen",
+      "generatedAt": "2026-08-08",
+      "purpose": "Phase 6B client-only Boss visual review",
+      "runtimeReady": false,
+      "postProcessing": "Resized from 1806x871 PNG to 1200px-wide JPEG at quality 88.",
+      "prompt": "Create one polished horizontal concept board containing exactly four original child-friendly 2D game bosses in equal panels: a moss-armored giant turtle with a glowing sprout weak point; a complete brass clockwork giant with connected shoulders, arms, hands, legs and chest weak point; a complete thundercloud whale with fins, tail, cloud belly and lightning crown; and a complete night dragon with head, neck, body, wings, claws, tail and chest star core. Use cohesive soft geometric storybook shapes, thick dark outlines, complete connected anatomy, strong silhouettes, bright readable lighting, no text, no logos, no watermark and no existing franchise resemblance."
+    }
+  ]
+}

@@ -89,6 +89,7 @@ export const CASINO_TEXT = {
   'start.startHoldem': '開始牌局',
   'start.startMonopoly': '開始遊戲',
   'start.startSnake': '開始遊戲',
+  'start.startDownstairs': '開始挑戰',
   'start.needPlayers': '需要至少 {min} 人，且所有人都已準備',
 
   // 大老二
@@ -231,6 +232,9 @@ export const CASINO_TEXT = {
   'snake.resultTitle': '本局結束',
   'snake.playAgain': '再來一局',
   'snake.waitHost': '等房主開下一局',
+  'downstairs.health': '❤ {n}',
+  'downstairs.depth': '深度 {n}m',
+  'downstairs.eliminated': '已出局',
 
   // 沒有偽裝的玩法：大廳提示。文案本身也要能見人，別直接寫「這個沒有偽裝」
   'lobby.noDisguise': '畫面明顯',

@@ -3,3 +3,11 @@ dist/
 *.tsbuildinfo
 .env
 .DS_Store
+.serve.stdout.log
+.serve.stderr.log
+server.stdout.log
+server.stderr.log
+# 自動化測試用的瀏覽器 profile 與 pid/log，體積很大且完全是本機產物
+.runtime/
+# codebase-memory-mcp 的索引產物
+.codebase-memory/

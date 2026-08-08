@@ -314,6 +314,7 @@ const TEXT: TextTable = {
   'start.startHoldem': 'run',
   'start.startMonopoly': 'mount',
   'start.startSnake': 'watch',
+  'start.startDownstairs': 'descend',
   'start.needPlayers': 'needs {min}+ workers, all ready',
 
   'bigTwo.idleTitle': 'waiting for owner to run',
@@ -452,6 +453,9 @@ const TEXT: TextTable = {
   'snake.resultTitle': 'watch exited',
   'snake.playAgain': 'watch again',
   'snake.waitHost': 'waiting for owner',
+  'downstairs.health': 'retries {n}',
+  'downstairs.depth': 'depth {n}',
+  'downstairs.eliminated': 'exit 1',
 
   'lobby.noDisguise': 'tty',
   'lobby.noDisguiseHint': 'renders a framebuffer — will not look like a shell',
@@ -522,7 +526,7 @@ export const terminalSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume', snake: 'watch' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume', snake: 'watch', downstairs: 'descent'  },
   bigTwoPreset: { taiwan: 'strict', classic: 'legacy', custom: 'custom' },
   bigTwoRule: {
     cuts: '--cut',
