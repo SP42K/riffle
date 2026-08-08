@@ -17,7 +17,7 @@
 | 想要的 | 選這個 | 代價 |
 |---|---|---|
 | 零維運、現在就能開來玩 | **Render Free** | 15 分鐘完全沒人連線就睡，睡了房間全消失 |
-| 不要睡、即時模式滿血 | **Oracle Cloud Always Free（ARM）** | 自己顧機器：Node、TLS、反向代理、開機自啟 |
+| 不要睡、即時模式滿血 | **Oracle Cloud Always Free（ARM）** | 要先搶得到機器（申請方式見第三節），之後 Node、TLS、反向代理都自己顧 |
 | 免費裡 CPU 最闊的實驗場 | **Hugging Face Spaces（Docker）** | 平台定位是 ML demo，適用性與條款要自己確認 |
 
 共同的底線只有一條：**這個服務不能水平擴展，只能開一台。**
@@ -169,14 +169,44 @@ Docker SDK 可以跑任意 Node 服務，WebSocket 是平台本來就在用的�
 
 三個必須先知道的坑：
 
-- **2026 年 6 月，Oracle 把 Always Free 的 ARM 額度從 4 OCPU/24 GB 砍半為 2 OCPU/12 GB**，
-  且未公開宣布；超額的既有實例會被關機，直到使用者手動縮容。2 OCPU/12 GB 對這個專案仍然過剩。
-- **Oracle 會回收長期閒置的 Always Free 實例**（依 CPU、記憶體、網路使用率判定）。
+- **2026-06-15 起，Always Free 的 ARM 額度從 4 OCPU/24 GB 砍半為 2 OCPU/12 GB**，Oracle 沒有發公告，
+  只默默改了文件；月配額同步從 3,000 OCPU 小時／18,000 GB 小時降為 **1,500 OCPU 小時／9,000 GB 小時**。
+  Oracle 另有寄信通知：**2026-08-18 起超出新額度的 Always Free 實例會被終止**。
+  2 OCPU/12 GB 對這個專案仍然過剩 —— 但**配額只夠這一台**：2 OCPU 全天候跑 31 天是 1,488 OCPU 小時，
+  剛好卡在 1,500 的天花板下，再開第二台就會超額。
+- **Oracle 會回收長期閒置的 Always Free 實例**（依 CPU、記憶體、網路使用率綜合判定）。
   這個服務沒人玩的時候正好非常閒 —— 要留意，必要時安排一點常態負載。
-- 熱門區域長期 out of capacity，開機器本身可能要試很多次。
+- 熱門區域長期 out of host capacity，開機器本身可能要試很多次（處理方式見下）。
 
 以及維運成本：Node 安裝、TLS 憑證、反向代理、開機自啟、安全性更新，全都是自己的事。
 **這是「不睡」的真正價碼**，不是「免費 vs 付費」的差別，是「有人管 vs 自己管」的差別。
+
+##### 申請方式
+
+1. **註冊**：要一個 email 加一張國際信用卡（VISA／Master／AMEX）。卡只是驗證身分，
+   會扣 US$1 再退回（有時顯示扣款失敗但驗證其實過了）。Always Free 資源本身不會扣款。
+2. **選 home region —— 這一步不可逆。** 註冊時選的歸屬區域之後**不能改**，
+   而 Always Free 的 ARM 容量是綁在 home region 上的。這是整個流程唯一無法重來的決定：
+   - 從台灣連線，延遲最好的是東京／大阪／首爾／春川／新加坡。
+   - 但**熱門區域正是最常 out of host capacity 的**。延遲與開得到機器之間要自己取捨；
+     對這個專案來說延遲很重要（20 Hz 廣播），所以還是優先選鄰近區域，用下面的方式硬撐。
+3. **建立實例**：Compute → Instances → Create instance，
+   shape 選 **VM.Standard.A1.Flex**，手動把 OCPU 調到 **2**、記憶體 **12 GB**（別直接吃預設值，
+   預設可能還是舊的 4/24，開下去就是 8/18 之後被終止的那一批）。
+   映像用 Ubuntu 或 Oracle Linux 皆可，開機磁碟留在 Always Free 的 200 GB 總額內。
+4. **遇到 Out of host capacity**：這是 Oracle 免費 ARM 的常態，不是帳號有問題。可行的做法依序是：
+   - 換 availability domain／fault domain 再送一次；
+   - 換時段重試（供給是浮動的，深夜與清晨常有）；
+   - 社群普遍的做法是寫一支重試腳本定時打 API，直到搶到為止；
+   - 最後手段是**升級成 Pay As You Go**。有報導指出 PAYG 帳號仍可維持 4 OCPU/24 GB 免額度，
+     但 Oracle 沒有明文，**不要當成保證** —— 升級後超出 Always Free 額度的部分是**真的會計費**的。
+5. **開通網路**：這是最常見的「明明開了 port 卻連不上」。要開**兩層**：
+   - OCI 這一層：VCN 的 security list（或 NSG）加 ingress rule；
+   - **作業系統這一層**：Oracle 的 Ubuntu／Oracle Linux 映像自帶 iptables／firewalld 規則，
+     要另外放行。只開 security list 是不夠的。
+6. **另外還有 2 台 AMD E2.1.Micro**（各 1/8 OCPU、1 GB RAM）也在 Always Free 內。
+   對這個專案：回合制三款跑得動，**樓梯小勇者不用試**（1/8 OCPU 比 Render 的 0.1 CPU 還少）。
+   它們適合拿來當備援或反向代理，主力還是 A1。
 
 #### 6. GCE e2-micro Always Free
 
@@ -206,6 +236,31 @@ CPU 與記憶體都不是問題，殺死它的是頻寬。
   預設 scale-to-zero、單一請求最長 60 分鐘、以及會開多個 instance。
   `--min-instances=1` 不在免費額度內，設了就要付錢。
 - **Glitch** —— 2025 年已停止專案託管。
+
+### 非永久免費的額度一覽
+
+上面幾家不是「不能用」，是**額度會到期**。既然遲早要看，數字放在這裡（查證日期 2026-08）：
+
+| 平台 | 免費的部分 | 期限 | 之後最低要付 |
+|---|---|---|---|
+| **Fly.io** | 2 VM 小時的試用 | 7 天內用完 | shared-cpu-1x／256 MB 常駐約 **$1.94–2.02/月**，出站另計 **$0.02/GB**（北美、歐洲） |
+| **Railway** | $5 credit，免信用卡 | 30 天 | 一個 0.5 vCPU／0.5 GB 常駐服務約 **$1/月** |
+| **Render 付費** | —（免費層見第三節） | — | Starter **$7/月**，不睡、不受 750 小時限制 |
+| **Heroku** | 無免費層（2022 起） | — | Eco **$5/月** 換 1,000 dyno 小時（所有 Eco dyno 共用），30 分鐘無流量仍會睡 |
+| **AWS** | 2025-07-15 改制：$100 credits，做完五項上手任務可再拿 $100 | **6 個月**或 credit 用完，先到先算 | 之後按量計價（2025-07-15 前開的舊帳號仍是 12 個月舊制） |
+| **Google Cloud** | $300 credits | 90 天 | 按量計價（e2-micro 的 always free 不受影響，見第三節） |
+| **Azure** | $200 credits | 30 天 | 按量計價 |
+| **DigitalOcean** | $200 credits | 60 天 | 最小 Droplet 約 $4/月 |
+
+**看數字的方式：這個專案在用量計價的平台上，成本形狀是「頻寬 ≥ 機器」。**
+依第二節的估算，樓梯小勇者一間房 1.4 GB/小時；在 Fly.io 的 $0.02/GB 之下就是 **$0.03/小時**，
+玩到 100 GB（約 70 小時）要 $2 —— 已經和整台機器的月租（$1.94）同級。
+機器選最小的那一檔省不了多少，真正決定帳單的是有沒有人在玩即時模式。
+這也是為什麼試用 credit 常常比預期燒得快。
+
+反過來說，這正是**永久免費方案要挑「頻寬額度」而不是「規格」**的原因 ——
+Render／Koyeb 的 100 GB/月，換算過來就是每月約 70 小時的樓梯小勇者，
+而且**超過了是停用或計費，不會偷偷扣你錢**。
 
 ---
 
@@ -248,10 +303,13 @@ CPU 與記憶體都不是問題，殺死它的是頻寬。
 - Render — [Deploy for Free](https://render.com/docs/free)、[Outbound Bandwidth](https://render.com/docs/outbound-bandwidth)、[WebSockets on Render](https://render.com/docs/websocket)、[Free web services now remain active while receiving WebSocket messages](https://render.com/changelog/free-web-services-now-remain-active-while-receiving-websocket-messages)
 - Koyeb — [Instances](https://www.koyeb.com/docs/reference/instances)、[Pricing FAQ](https://www.koyeb.com/docs/faqs/pricing)
 - Hugging Face — [Spaces Overview](https://huggingface.co/docs/hub/en/spaces-overview)、[Manage your Space](https://huggingface.co/docs/huggingface_hub/main/en/guides/manage-spaces)
-- Oracle — [Always Free Resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm)、[Oracle Quietly Halves Free Tier Ampere A1 Compute Limits（InfoQ, 2026-07）](https://www.infoq.com/news/2026/07/oracle-cloud-free-tier-limits/)
+- Oracle — [Always Free Resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm)、[Free Tier FAQ](https://www.oracle.com/cloud/free/faq/)、[Oracle Quietly Halves Free Tier Ampere A1 Compute Limits（InfoQ, 2026-07）](https://www.infoq.com/news/2026/07/oracle-cloud-free-tier-limits/)、[Oracle halves free cloud resources（heise）](https://www.heise.de/en/news/Oracle-halves-free-cloud-resources-11334516.html)、[Oracle Cloud free tier 2026: 4 OCPU/24GB cut to 2 OCPU/12GB](https://terminalbytes.com/oracle-cloud-free-tier-changes-2026/)、[Breaking down the free tier of OCI](https://fullmetalbrackets.com/blog/oci-free-tier-breakdown)
 - Google Cloud — [Free Tier](https://cloud.google.com/free)、[Using WebSockets with Cloud Run](https://docs.cloud.google.com/run/docs/triggering/websockets)、[Cloud Run pricing](https://cloud.google.com/run/pricing)
 - Cloudflare — [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing)、[Use WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
-- Fly.io — [Fly.io Free Tier 2026: What's Left After the Cuts?](https://www.saaspricepulse.com/tools/flyio)
+- Fly.io — [Resource Pricing](https://fly.io/docs/about/pricing/)、[Cost Management](https://fly.io/docs/about/cost-management/)、[Fly.io Free Tier 2026: What's Left After the Cuts?](https://www.saaspricepulse.com/tools/flyio)
 - Railway — [Railway Free Tier 2026](https://kuberns.com/blogs/railway-free-tier/)
+- Heroku — [Removal of Heroku Free Product Plans FAQ](https://help.heroku.com/RSBRUH58/removal-of-heroku-free-product-plans-faq)、[New Low-Cost Plans（Eco／Mini）](https://www.heroku.com/blog/new-low-cost-plans/)
+- AWS — [AWS Free Tier now offers $200 in credits and 6-month free plan（2025-07）](https://aws.amazon.com/about-aws/whats-new/2025/07/aws-free-tier-credits-month-free-plan/)、[Free Tier FAQs](https://aws.amazon.com/free/free-tier-faqs/)
+- Azure／DigitalOcean 額度 — [Cloud Free Tier Comparison 2026](https://agentdeals.dev/cloud-free-tier-comparison-2026)、[DigitalOcean Free Tier 2026](https://agentdeals.dev/digitalocean-free-tier-2026)
 - Back4App — [Heroku Alternatives](https://www.back4app.com/heroku-alternatives)
 - Socket.IO — [The Engine.IO protocol](https://socket.io/docs/v4/engine-io-protocol/)、[Engine.IO 4 Release](https://socket.io/blog/engine-io-4-release/)（心跳方向與 25 秒預設）
