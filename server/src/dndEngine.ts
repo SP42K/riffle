@@ -372,8 +372,14 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
       if (!row) continue;
       for (let c = 0; c < BOARD_SIZE; c++) {
         const piece = row[c]?.piece;
-        if (piece && piece.type === 'player' && piece.playerId) {
-          const seat = seats.indexOf(piece.playerId);
+        if (piece && piece.type === 'player') {
+          let seat = -1;
+          if (piece.playerId) {
+            seat = seats.indexOf(piece.playerId);
+          } else if (piece.id.startsWith('npc-')) {
+            seat = parseInt(piece.id.split('-')[1]!, 10);
+          }
+
           if (seat !== -1 && state.seats[seat]?.alive) {
             const dist = Math.abs(mon.r - r) + Math.abs(mon.c - c);
             if (dist < minDist) {
