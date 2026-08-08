@@ -43,6 +43,8 @@ own vocabulary (高牌/一對/兩對/三條/順子/同花/葫蘆/鐵支/同花�
 shared words but **different rankings** between the two games. Monopoly's vocabulary is in
 `shared/src/monopoly.ts` (地產/色組/抵押/贖回/蓋房/拆房/拍賣/交易/償債/破產, plus
 `MONOPOLY_TILE_LABEL` for the 40 tiles and `MONOPOLY_CARD_LABEL` for the 32 機會／命運 cards).
+Snake's is small and lives in `shared/src/snake.ts` (果實/地雷果實/重生/出局), which holds only the
+board constants and view types — no rules.
 
 ## Architecture
 
@@ -97,11 +99,23 @@ value key-by-key (only booleans pass, anything missing falls back to the default
 engine via `dealGame` and the client via `RoomView.bigTwoRules` / `RoomSummary.bigTwoRules` (both
 `null` for hold'em).
 
-**Three games, one room layer.** A room picks its `gameType` (`'bigTwo' | 'holdem' | 'monopoly'`)
-at creation and never changes it. `SEAT_LIMITS` gives per-game seat counts (Big Two 2–4,
-hold'em 2–9, Monopoly 2–6). The pieces that differ are exactly three: the engine, the `GameView`
-union member, and the client table component. Everything else — sessions, reconnect grace, chat,
-lobby, per-viewer snapshots, turn timers — is shared and must stay game-agnostic.
+**Four games, one room layer.** A room picks its `gameType`
+(`'bigTwo' | 'holdem' | 'monopoly' | 'snake'`) at creation and never changes it. `SEAT_LIMITS`
+gives per-game seat counts (Big Two 2–4, hold'em 2–9, Monopoly 2–6, Snake 2–4). The pieces that
+differ are exactly three: the engine, the `GameView` union member, and the client table component.
+Everything else — sessions, reconnect grace, chat, lobby, per-viewer snapshots, turn timers — is
+shared and must stay game-agnostic.
+
+**Snake is the one real-time mode, and it pays for that by faking `TurnBased`.** `SnakeState`
+pins `turnSeat: -1` and `turnDeadline: 0` (literal types, not just values) so the room layer keeps
+compiling without a branch; `scheduleTurn` early-returns on `'snake'` and the board is advanced by
+`room.tickTimer` instead — `scheduleSnakeStart` fires once at `startAt` (`SNAKE_START_DELAY_MS`),
+then `scheduleSnakeTick`/`runSnakeTick` loop every `SNAKE_TICK_MS`. `runSnakeTick` deliberately
+does **not** call `afterGameAction`: at ~7 ticks a second, `broadcastLobby` would rebuild every
+lobby summary for a payload where only `status` can change. `game:snake` only writes a direction
+into `pendingDir` and acks — no broadcast — because the tick loop is what publishes state. Snake
+has no per-viewer secrets, so `buildSnakeGameView` ignores the viewer and `handOf` returns `null`
+like Monopoly.
 
 **Monopoly's per-room settings are `MonopolyOptions`** — like `BigTwoRules` it is picked at room
 creation and fixed for the room's life, but unlike it the values are not all booleans, so
@@ -138,26 +152,30 @@ which several call sites rely on (e.g. `hands.get(p)[0]` is the player's smalles
 
 ### Server layering
 
-- `server/src/gameEngine.ts` (Big Two), `server/src/holdemEngine.ts` (hold'em) and
-  `server/src/monopolyEngine.ts` — pure, no I/O, no sockets. All three operate on a `Seats` array
+- `server/src/gameEngine.ts` (Big Two), `server/src/holdemEngine.ts` (hold'em),
+  `server/src/monopolyEngine.ts` and `server/src/snakeEngine.ts` — pure, no I/O, no sockets.
+  The first three operate on a `Seats` array
   (`Array<PlayerId | null>`, index = turn order, `null` = vacated) plus their own state, mutate in
   place, and return a discriminated `{ ok }` result with an error code that has a Chinese message
-  table (`PLAY_ERROR_MESSAGE` / `BET_ERROR_MESSAGE` / `MONOPOLY_ERROR_MESSAGE`). All three states
-  satisfy `TurnBased` (`server/src/turnBased.ts`) — `turnSeat`/`turnDeadline`/`over` — which is why
-  the timer and status code needs no branching. This is the layer under unit test.
+  table (`PLAY_ERROR_MESSAGE` / `BET_ERROR_MESSAGE` / `MONOPOLY_ERROR_MESSAGE`). `snakeEngine.ts`
+  is the odd one: input can't be illegal, so `setSnakeDirection` returns `void` and `tickSnake`
+  returns `SnakeEvent[]` — there is no error table. All four states satisfy `TurnBased`
+  (`server/src/turnBased.ts`) — `turnSeat`/`turnDeadline`/`over` — which is why the timer and status
+  code needs no branching. This is the layer under unit test.
   `turnBased.ts` also exports `assertNeverGame`, the exhaustiveness tail every game-type `switch`
   in `rooms.ts` and `handlers.ts` ends with; use it instead of a ternary or an `if/else`, or a
-  fourth game will be silently treated as Big Two.
+  fifth game will be silently treated as Big Two.
 - `server/src/rooms.ts` — room/member bookkeeping and **snapshot building**. `buildRoomView`
   is per-viewer: a player gets only `hand` (Big Two hand or hold'em hole cards), a spectator gets
-  `allHands` (god view) and no `hand`. Monopoly has no hidden cards, so `handOf` returns `null` for
-  it and `allHands` stays `null` rather than becoming an empty object — the spectator god-view
+  `allHands` (god view) and no `hand`. Monopoly and Snake have no hidden cards, so `handOf` returns
+  `null` for them and `allHands` stays `null` rather than becoming an empty object — the god-view
   panel keys off that. `Room.game` is a `{ type, state }` union; `Room.chips` is the hold'em stack
   table and lives at room level because it survives across hands (Monopoly cash lives in
   `MonopolyState`, **not** in `chips`).
   `monopolyLogOf(room, event)` translates the engine's `MonopolyEvent`s into `LogEvent`s with
   nicknames attached; it exists because one Monopoly action can produce several log lines
-  (roll → move → pass GO → pay rent → bankrupt), unlike the other two games.
+  (roll → move → pass GO → pay rent → bankrupt). `snakeLogOf` is the same shape for the same
+  reason — one tick can kill two snakes at once.
 - `server/src/handlers.ts` — the `GameServer` class: all socket wiring, timers, broadcasts,
   and input sanitizing (`cleanText`). Everything lives in memory; there is no persistence.
 
@@ -210,8 +228,9 @@ Chinese message when the skin has no entry.
 `pages/Room.tsx` is a `switch` on `room.gameType` — keep it a `switch`, not a ternary, so a fourth
 game fails to compile instead of silently rendering the Big Two table. `pages/RoomShell.tsx` owns
 everything game-agnostic (header, seat row, log, spectator/chat aside, footer slot);
-`BigTwoTable.tsx`, `HoldemTable.tsx` and `MonopolyTable.tsx` supply the table centre and the
-controls. Put shared chrome in `RoomShell`, not in a table. `components/Seat.tsx` takes an explicit
+`BigTwoTable.tsx`, `HoldemTable.tsx`, `MonopolyTable.tsx` and `SnakeTable.tsx` supply the table
+centre and the controls — `SnakeTable` is the only one with a `keydown` listener (arrows + WASD via
+`event.code`, suppressed while the chat box has focus). Put shared chrome in `RoomShell`, not in a table. `components/Seat.tsx` takes an explicit
 `gameType` prop and switches on it — it used to sniff `chips !== undefined`, which breaks the
 moment a second game has money. The dev server proxies `/socket.io` (including ws) to `:3001`.
 
