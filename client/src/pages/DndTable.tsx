@@ -46,14 +46,19 @@ export function DndRoom({ room }: { room: RoomView }) {
     }
   }, [room.log.length]);
 
-  // Execute queue items sequentially
+  // Consume queue items one by one
   useEffect(() => {
     if (!activeRoll && rollQueue.length > 0) {
       const nextRoll = rollQueue[0];
       setRollQueue((prev) => prev.slice(1));
       setActiveRoll(nextRoll);
-      setIsRolling(true);
+    }
+  }, [activeRoll, rollQueue]);
 
+  // Handle rolling animation and timer lifecycles for activeRoll
+  useEffect(() => {
+    if (activeRoll) {
+      setIsRolling(true);
       const timer1 = setTimeout(() => {
         setIsRolling(false);
       }, 700);
@@ -67,7 +72,7 @@ export function DndRoom({ room }: { room: RoomView }) {
         clearTimeout(timer2);
       };
     }
-  }, [activeRoll, rollQueue]);
+  }, [activeRoll]);
 
   // Find current player position
   const myPosition = useMemo(() => {
