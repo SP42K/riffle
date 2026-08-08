@@ -231,7 +231,9 @@ function formatLog(event: LogEvent): string {
     case 'dndMove':
       return `${event.player} 往 ${event.dir === 'up' ? '上' : event.dir === 'down' ? '下' : event.dir === 'left' ? '左' : '右'} 移動了一格`;
     case 'dndAttack':
-      return `${event.player} 攻擊了 ${event.target}（擲骰 D20: ${event.roll}）— ${event.hit ? `命中！造成 ${event.damage} 點傷害` : '未命中'}`;
+      return event.damage < 0
+        ? `✨【治療】${event.player} 施放神聖治療，恢復了 ${event.target} ${-event.damage} 點生命值！`
+        : `${event.player} 攻擊了 ${event.target}（ D20: ${event.roll}）— ${event.hit ? `命中！造成 ${event.damage} 點傷害` : '未命中'}`;
     case 'dndMonsterTurn':
       return `【怪物回合】哥布林開始行動！`;
     case 'dndOver':

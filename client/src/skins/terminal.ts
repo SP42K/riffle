@@ -233,7 +233,9 @@ function formatLog(event: LogEvent): string {
     case 'dndMove':
       return `${event.player} move ${event.dir}`;
     case 'dndAttack':
-      return `${event.player} attack ${event.target} (roll ${event.roll}) — ${event.hit ? `HIT (${event.damage} dmg)` : 'MISS'}`;
+      return event.damage < 0
+        ? `heal ${event.player} -> ${event.target} (+${-event.damage} hp)`
+        : `${event.player} attack ${event.target} (roll ${event.roll}) — ${event.hit ? `HIT (${event.damage} dmg)` : 'MISS'}`;
     case 'dndMonsterTurn':
       return `monsters executing AI routines...`;
     case 'dndOver':

@@ -636,7 +636,7 @@ export class GameServer {
     if (!session?.roomId) return;
     const room = this.rooms.get(session.roomId);
     const player = room?.players.get(session.playerId);
-    if (!room || !player || room.gameType !== 'downstairs' || statusOf(room) === 'playing') return;
+    if (!room || !player || (room.gameType !== 'downstairs' && room.gameType !== 'dnd') || statusOf(room) === 'playing') return;
     const characterId = DOWNSTAIRS_CHARACTERS.find((id) => id === payload?.characterId);
     if (!characterId) return;
     player.characterId = characterId;
@@ -719,7 +719,11 @@ export class GameServer {
         break;
       }
       case 'dnd': {
-        const state = dealDnd(room.seats);
+        const players = seatedPlayers(room);
+        const characterIds = Object.fromEntries(
+          players.map((player) => [player.playerId, player.characterId])
+        );
+        const state = dealDnd(room.seats, characterIds);
         room.game = { type: 'dnd', state };
         pushLog(room, { t: 'dndStart', players: seatedPlayers(room).length });
         break;

@@ -1,4 +1,4 @@
-import { TURN_MS, type PlayerId, type DndAction, type DndCellView, type DndSeatInfo, type DndPiece, type LogEvent } from 'shared';
+import { TURN_MS, type PlayerId, type DndAction, type DndCellView, type DndSeatInfo, type DndPiece, type LogEvent, type DownstairsCharacterId } from 'shared';
 
 export type Seats = Array<PlayerId | null>;
 
@@ -32,7 +32,20 @@ export const DND_ERROR_MESSAGE: Record<DndError, string> = {
 
 export const BOARD_SIZE = 8;
 
-export function dealDnd(seats: Seats, rng: () => number = Math.random): DndState {
+export const CLASS_STATS: Record<DownstairsCharacterId, { name: string; hp: number; ac: number; attackBonus: number; dmgDice: number; dmgFlat: number; description: string }> = {
+  brave: { name: 'Warrior (戰士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線坦攻，高防高血 D8+2' },
+  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，高命中 D6+4' },
+  tangerine: { name: 'Mage (法師)', hp: 16, ac: 10, attackBonus: 3, dmgDice: 10, dmgFlat: 2, description: '遠程爆發，高傷害 D10+2' },
+  star: { name: 'Cleric (牧師)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '神聖判官，D6+2，命中時治癒自己 2 HP' },
+};
+
+const DEFAULT_SEAT_CLASSES: DownstairsCharacterId[] = ['brave', 'bubble', 'tangerine', 'star'];
+
+export function dealDnd(
+  seats: Seats,
+  characterIds?: Record<PlayerId, DownstairsCharacterId>,
+  rng: () => number = Math.random
+): DndState {
   const board: DndCellView[][] = [];
   for (let r = 0; r < BOARD_SIZE; r++) {
     const row: DndCellView[] = [];
@@ -44,8 +57,6 @@ export function dealDnd(seats: Seats, rng: () => number = Math.random): DndState
 
   const stateSeats: Record<number, DndSeatInfo> = {};
 
-  // Place players at corner starting points
-  // Seat 0: (0,0), Seat 1: (0,7), Seat 2: (7,0), Seat 3: (7,7)
   const starts = [
     { r: 0, c: 0 },
     { r: 0, c: 7 },
@@ -53,53 +64,55 @@ export function dealDnd(seats: Seats, rng: () => number = Math.random): DndState
     { r: 7, c: 7 },
   ];
 
-  const npcClasses = ['Warrior (戰士)', 'Rogue (盜賊)', 'Mage (法師)', 'Cleric (牧師)'];
-
   for (let seatIndex = 0; seatIndex < 4; seatIndex++) {
     const playerId = seats[seatIndex];
     const pos = starts[seatIndex] || { r: 0, c: 0 };
+    const classId = (playerId && characterIds?.[playerId]) || DEFAULT_SEAT_CLASSES[seatIndex]!;
+    const stats = CLASS_STATS[classId];
+
     if (playerId) {
       const piece: DndPiece = {
         id: `p-${playerId}`,
         type: 'player',
         playerId,
-        name: `Player ${seatIndex + 1}`,
-        hp: 20,
-        maxHp: 20,
-        ac: 12,
+        name: `${stats.name}`,
+        hp: stats.hp,
+        maxHp: stats.hp,
+        ac: stats.ac,
+        classId,
       };
       const targetCell = board[pos.r]?.[pos.c];
       if (targetCell) {
         targetCell.piece = piece;
       }
-      stateSeats[seatIndex] = { hp: 20, maxHp: 20, alive: true, isNpc: false, name: `Player ${seatIndex + 1}` };
+      stateSeats[seatIndex] = { hp: stats.hp, maxHp: stats.hp, alive: true, isNpc: false, name: `${stats.name}` };
     } else {
-      // Spawn NPC player
-      const npcName = `NPC ${npcClasses[seatIndex] || 'Adventurer'}`;
+      const npcName = `NPC ${stats.name}`;
       const piece: DndPiece = {
         id: `npc-${seatIndex}`,
         type: 'player',
         name: npcName,
-        hp: 20,
-        maxHp: 20,
-        ac: 12,
+        hp: stats.hp,
+        maxHp: stats.hp,
+        ac: stats.ac,
+        classId,
       };
       const targetCell = board[pos.r]?.[pos.c];
       if (targetCell) {
         targetCell.piece = piece;
       }
-      stateSeats[seatIndex] = { hp: 20, maxHp: 20, alive: true, isNpc: true, name: npcName };
+      stateSeats[seatIndex] = { hp: stats.hp, maxHp: stats.hp, alive: true, isNpc: true, name: npcName };
     }
   }
 
   // Place 6 Goblins of different varieties near the center
   const monsterSpawns = [
-    { r: 3, c: 3, name: 'Goblin A', hp: 8, ac: 10 },
-    { r: 3, c: 4, name: 'Goblin B', hp: 8, ac: 10 },
-    { r: 4, c: 3, name: 'Goblin C', hp: 8, ac: 10 },
-    { r: 4, c: 4, name: 'Goblin D', hp: 8, ac: 10 },
-    { r: 2, c: 5, name: 'Goblin Shaman (薩滿)', hp: 12, ac: 10 },
-    { r: 5, c: 2, name: 'Goblin Chief (酋長)', hp: 18, ac: 12 },
+    { r: 3, c: 3, name: 'Goblin A', hp: 10, ac: 10 },
+    { r: 3, c: 4, name: 'Goblin B', hp: 10, ac: 10 },
+    { r: 4, c: 3, name: 'Goblin C', hp: 10, ac: 10 },
+    { r: 4, c: 4, name: 'Goblin D', hp: 10, ac: 10 },
+    { r: 2, c: 5, name: 'Goblin Shaman (薩滿)', hp: 16, ac: 10 },
+    { r: 5, c: 2, name: 'Goblin Chief (酋長)', hp: 24, ac: 12 },
   ];
 
   monsterSpawns.forEach((spawn, idx) => {
@@ -152,7 +165,6 @@ export function applyDndAction(
   const activeSeat = state.turnSeat;
   if (seats[activeSeat] !== playerId) return { ok: false, error: 'NOT_YOUR_TURN' };
 
-  // Find player piece
   let pr = -1, pc = -1;
   let playerPiece: DndPiece | null = null;
   for (let r = 0; r < BOARD_SIZE; r++) {
@@ -194,7 +206,6 @@ export function applyDndAction(
       return { ok: false, error: 'CELL_OCCUPIED' };
     }
 
-    // Move piece
     targetCell.piece = playerPiece;
     sourceCell.piece = null;
 
@@ -202,7 +213,6 @@ export function applyDndAction(
   } else if (kind === 'attack') {
     if (!targetId) return { ok: false, error: 'BAD_ACTION' };
 
-    // Find target
     let tr = -1, tc = -1;
     let targetPiece: DndPiece | null = null;
     for (let r = 0; r < BOARD_SIZE; r++) {
@@ -221,17 +231,26 @@ export function applyDndAction(
 
     if (!targetPiece) return { ok: false, error: 'TARGET_NOT_FOUND' };
 
-    // Check adjacent (Manhattan distance === 1)
     const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
     if (dist !== 1) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
 
+    const classId = playerPiece.classId || 'brave';
+    const stats = CLASS_STATS[classId];
     const roll = Math.floor(rng() * 20) + 1;
-    const isHit = roll + 3 >= targetPiece.ac; // +3 Attack Bonus vs AC
+    const isHit = roll + stats.attackBonus >= targetPiece.ac;
 
     if (isHit) {
-      const dmgRoll = Math.floor(rng() * 6) + 1;
-      const damage = dmgRoll + 2; // D6 + 2 Damage
+      const dmgRoll = Math.floor(rng() * stats.dmgDice) + 1;
+      const damage = dmgRoll + stats.dmgFlat;
       targetPiece.hp = Math.max(0, targetPiece.hp - damage);
+
+      if (classId === 'star') {
+        playerPiece.hp = Math.min(playerPiece.maxHp, playerPiece.hp + 2);
+        const seat = seats.indexOf(playerId);
+        if (state.seats[seat]) {
+          state.seats[seat].hp = playerPiece.hp;
+        }
+      }
 
       events.push({
         t: 'dndAttack',
@@ -245,7 +264,7 @@ export function applyDndAction(
       if (targetPiece.hp <= 0) {
         const targetCell = state.board[tr]?.[tc];
         if (targetCell) {
-          targetCell.piece = null; // Defeated monster
+          targetCell.piece = null;
         }
       }
     } else {
@@ -262,8 +281,6 @@ export function applyDndAction(
     return { ok: false, error: 'BAD_ACTION' };
   }
 
-  // End of player turn.
-  // Check Game Over Condition
   let checkResult = checkDndGameOver(seats, state);
   if (checkResult.over) {
     state.over = true;
@@ -272,7 +289,6 @@ export function applyDndAction(
     return { ok: true, events };
   }
 
-  // Check if round is finished (is this the last alive player in the sequence?)
   const aliveSeats: number[] = [];
   for (let idx = 0; idx < 4; idx++) {
     if (state.seats[idx]?.alive) {
@@ -282,7 +298,6 @@ export function applyDndAction(
 
   const isLastPlayerOfRound = activeSeat === Math.max(...aliveSeats);
   if (isLastPlayerOfRound) {
-    // Run Goblins Turn!
     const monsterEvents = runMonstersTurn(seats, state, rng);
     events.push({ t: 'dndMonsterTurn' });
     events.push(...monsterEvents);
@@ -296,15 +311,12 @@ export function applyDndAction(
     }
   }
 
-  // Shift turn to next player (may be an NPC)
   let nextSeat = nextActiveDndSeat(seats, activeSeat, state.seats);
 
-  // Automatically execute NPC turns
   while (state.seats[nextSeat]?.isNpc && !state.over) {
     const npcEvents = runNpcTurn(seats, state, nextSeat, rng);
     events.push(...npcEvents);
 
-    // Check if game is over after NPC turn
     checkResult = checkDndGameOver(seats, state);
     if (checkResult.over) {
       state.over = true;
@@ -313,7 +325,6 @@ export function applyDndAction(
       break;
     }
 
-    // Check if the NPC was the last player in the round
     const currentAliveSeats: number[] = [];
     for (let idx = 0; idx < 4; idx++) {
       if (state.seats[idx]?.alive) {
@@ -349,7 +360,6 @@ export function applyDndAction(
 function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogEvent[] {
   const events: LogEvent[] = [];
 
-  // Find all monsters
   const monsters: { piece: DndPiece; r: number; c: number }[] = [];
   for (let r = 0; r < BOARD_SIZE; r++) {
     const row = state.board[r];
@@ -363,7 +373,36 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
   }
 
   monsters.forEach((mon) => {
-    // Find nearest alive player
+    // Shaman Special Healing Logic
+    if (mon.piece.name.includes('薩滿') || mon.piece.name.includes('Shaman')) {
+      let targetGoblinToHeal: { piece: DndPiece; r: number; c: number } | null = null;
+      let minHealDist = 9999;
+      
+      for (const otherMon of monsters) {
+        if (otherMon.piece.id !== mon.piece.id && otherMon.piece.hp < otherMon.piece.maxHp) {
+          const dist = Math.abs(mon.r - otherMon.r) + Math.abs(mon.c - otherMon.c);
+          if (dist <= 3 && dist < minHealDist) {
+            minHealDist = dist;
+            targetGoblinToHeal = otherMon;
+          }
+        }
+      }
+
+      if (targetGoblinToHeal) {
+        const healAmt = 3;
+        targetGoblinToHeal.piece.hp = Math.min(targetGoblinToHeal.piece.maxHp, targetGoblinToHeal.piece.hp + healAmt);
+        events.push({
+          t: 'dndAttack',
+          player: mon.piece.name,
+          target: targetGoblinToHeal.piece.name,
+          roll: 0,
+          hit: true,
+          damage: -healAmt,
+        });
+        return;
+      }
+    }
+
     let targetPlayer: { piece: DndPiece; r: number; c: number; seat: number } | null = null;
     let minDist = 9999;
 
@@ -393,13 +432,22 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
 
     if (!targetPlayer) return;
 
-    // If player is adjacent (Manhattan distance === 1), Attack!
     if (minDist === 1) {
+      let attackBonus = 1;
+      let dmgDice = 6;
+      if (mon.piece.name.includes('酋長') || mon.piece.name.includes('Chief')) {
+        attackBonus = 4;
+        dmgDice = 10;
+      } else if (mon.piece.name.includes('薩滿') || mon.piece.name.includes('Shaman')) {
+        attackBonus = 2;
+        dmgDice = 6;
+      }
+
       const roll = Math.floor(rng() * 20) + 1;
-      const isHit = roll + 1 >= targetPlayer.piece.ac; // +1 Attack Bonus vs AC 12
+      const isHit = roll + attackBonus >= targetPlayer.piece.ac;
 
       if (isHit) {
-        const dmg = Math.floor(rng() * 4) + 1; // D4 Damage
+        const dmg = Math.floor(rng() * dmgDice) + 1;
         targetPlayer.piece.hp = Math.max(0, targetPlayer.piece.hp - dmg);
         const playerSeat = state.seats[targetPlayer.seat];
         if (playerSeat) {
@@ -421,7 +469,7 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
           }
           const playerCell = state.board[targetPlayer.r]?.[targetPlayer.c];
           if (playerCell) {
-            playerCell.piece = null; // Remove dead player token
+            playerCell.piece = null;
           }
         }
       } else {
@@ -435,7 +483,6 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
         });
       }
     } else {
-      // Move closer to player
       const moves = [
         { r: mon.r - 1, c: mon.c, dir: 'up' },
         { r: mon.r + 1, c: mon.c, dir: 'down' },
@@ -465,8 +512,6 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
         if (targetCell && sourceCell) {
           targetCell.piece = mon.piece;
           sourceCell.piece = null;
-          mon.r = bestMove.r;
-          mon.c = bestMove.c;
           events.push({ t: 'dndMove', player: mon.piece.name, dir: bestMove.dir });
         }
       }
@@ -476,30 +521,27 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
   return events;
 }
 
-interface GameOverCheck {
-  over: boolean;
-  won: boolean;
-  ranking: PlayerId[];
-}
+export function checkDndGameOver(seats: Seats, state: DndState): { over: boolean; won: boolean; ranking: PlayerId[] } {
+  let aliveCount = 0;
+  for (let idx = 0; idx < 4; idx++) {
+    if (state.seats[idx]?.alive) {
+      aliveCount++;
+    }
+  }
 
-function checkDndGameOver(seats: Seats, state: DndState): GameOverCheck {
-  // Check Goblins
   let goblinCount = 0;
   for (let r = 0; r < BOARD_SIZE; r++) {
     const row = state.board[r];
     if (!row) continue;
     for (let c = 0; c < BOARD_SIZE; c++) {
       const piece = row[c]?.piece;
-      if (piece && piece.type === 'goblin') goblinCount++;
+      if (piece && piece.type === 'goblin') {
+        goblinCount++;
+      }
     }
   }
 
-  // Check Players
-  const alivePlayers = seats.filter((id, idx) => id && state.seats[idx]?.alive);
-
   if (goblinCount === 0) {
-    // Players win!
-    // Rank by HP left
     const ranked = seats
       .filter((id): id is PlayerId => id !== null)
       .sort((a, b) => {
@@ -512,8 +554,7 @@ function checkDndGameOver(seats: Seats, state: DndState): GameOverCheck {
     return { over: true, won: true, ranking: ranked };
   }
 
-  if (alivePlayers.length === 0) {
-    // Players lose!
+  if (aliveCount === 0) {
     const ranked = seats
       .filter((id): id is PlayerId => id !== null)
       .sort((a, b) => {
@@ -534,7 +575,6 @@ export function autoActDnd(seats: Seats, state: DndState): DndApplyResult | null
   const playerId = seats[activeSeat];
   if (!playerId) return null;
 
-  // Simple auto-act: try to attack any adjacent goblin. If none, move in a random direction.
   let pr = -1, pc = -1;
   let playerPiece: DndPiece | null = null;
   for (let r = 0; r < BOARD_SIZE; r++) {
@@ -553,7 +593,6 @@ export function autoActDnd(seats: Seats, state: DndState): DndApplyResult | null
 
   if (!playerPiece) return null;
 
-  // Search for adjacent goblin
   const dirs = [
     { dr: -1, dc: 0, dir: 'up' },
     { dr: 1, dc: 0, dir: 'down' },
@@ -573,7 +612,6 @@ export function autoActDnd(seats: Seats, state: DndState): DndApplyResult | null
     }
   }
 
-  // No adjacent goblin, move to any empty random neighbor
   const shuffledDirs = dirs.sort(() => Math.random() - 0.5);
   for (const d of shuffledDirs) {
     const nr = pr + d.dr;
@@ -591,12 +629,10 @@ export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: Pla
   const seatIndex = seats.indexOf(playerId);
   if (seatIndex === -1) return;
 
-  // Mark player dead/inactive
   if (state.seats[seatIndex]) {
     state.seats[seatIndex].alive = false;
   }
 
-  // Remove player piece from board
   for (let r = 0; r < BOARD_SIZE; r++) {
     const row = state.board[r];
     if (!row) continue;
@@ -631,7 +667,6 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
   const npcId = `npc-${npcSeat}`;
   const npcName = npcInfo.name || `NPC ${npcSeat + 1}`;
 
-  // Find NPC piece position
   let pr = -1, pc = -1;
   let npcPiece: DndPiece | null = null;
   for (let r = 0; r < BOARD_SIZE; r++) {
@@ -673,14 +708,22 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
   }
 
   if (targetGoblin) {
-    // Attack!
+    const classId = npcPiece.classId || 'brave';
+    const stats = CLASS_STATS[classId];
     const roll = Math.floor(rng() * 20) + 1;
-    const isHit = roll + 3 >= targetGoblin.ac; // +3 Attack Bonus vs AC 10
+    const isHit = roll + stats.attackBonus >= targetGoblin.ac;
 
     if (isHit) {
-      const dmgRoll = Math.floor(rng() * 6) + 1;
-      const damage = dmgRoll + 2; // D6 + 2 Damage
+      const dmgRoll = Math.floor(rng() * stats.dmgDice) + 1;
+      const damage = dmgRoll + stats.dmgFlat;
       targetGoblin.hp = Math.max(0, targetGoblin.hp - damage);
+
+      if (classId === 'star') {
+        npcPiece.hp = Math.min(npcPiece.maxHp, npcPiece.hp + 2);
+        if (state.seats[npcSeat]) {
+          state.seats[npcSeat].hp = npcPiece.hp;
+        }
+      }
 
       events.push({
         t: 'dndAttack',
@@ -694,7 +737,7 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
       if (targetGoblin.hp <= 0) {
         const targetCell = state.board[targetR]?.[targetC];
         if (targetCell) {
-          targetCell.piece = null; // Defeated monster
+          targetCell.piece = null;
         }
       }
     } else {
@@ -708,7 +751,6 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
       });
     }
   } else {
-    // Find nearest goblin to move towards
     let targetMon: { piece: DndPiece; r: number; c: number } | null = null;
     let minDist = 9999;
 
@@ -728,7 +770,6 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
     }
 
     if (targetMon) {
-      // Find best move that gets closer to the goblin
       let bestMove: { r: number; c: number; dir: string } | null = null;
       let bestDist = minDist;
 

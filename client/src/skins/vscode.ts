@@ -237,7 +237,9 @@ function formatLog(event: LogEvent): string {
     case 'dndMove':
       return `${event.player} shifted position ${event.dir}`;
     case 'dndAttack':
-      return `${event.player} executed attack on ${event.target} (Roll: ${event.roll}) — ${event.hit ? `HIT! (${event.damage} dmg)` : 'MISS'}`;
+      return event.damage < 0
+        ? `[HEAL] ${event.player} executed recovery on ${event.target} (+${-event.damage} hp)`
+        : `${event.player} executed attack on ${event.target} (Roll: ${event.roll}) — ${event.hit ? `HIT! (${event.damage} dmg)` : 'MISS'}`;
     case 'dndMonsterTurn':
       return `goblins turn executing...`;
     case 'dndOver':

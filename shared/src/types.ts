@@ -595,6 +595,7 @@ export interface DndPiece {
   hp: number;
   maxHp: number;
   ac: number;
+  classId?: DownstairsCharacterId;
 }
 
 export interface DndCellView {
