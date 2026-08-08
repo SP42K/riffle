@@ -1,0 +1,77 @@
+# 推一個 v* tag 就出一版：跑完 CI 的四道關卡，再把「解壓後就能跑」的 zip 掛到 release 上。
+# 發行包刻意保留 repo 的目錄結構 —— server/src/index.ts 是用 '../../client/dist' 找前端的。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # 同一個 tag 想重跑（例如 release 步驟掛掉）時用這個，手動填 tag 名
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要重跑的 tag，例如 v0.1.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # tag 與 package.json 的版號必須對得起來，免得包裡寫的版本跟 release 名稱不一樣。
+      # 允許 v0.1.0-rc.1 這種預發行後綴。
+      - name: 檢查版號
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          case "${TAG#v}" in
+            "$version"|"$version"-*) ;;
+            *) echo "tag $TAG 與 package.json 的 $version 不一致" >&2; exit 1 ;;
+          esac
+
+      - run: npm ci
+
+      # 沒過的東西不該變成一版，所以 CI 那三關這裡照跑一次
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test
+        run: npm test
+
+      - name: build client
+        run: npm run build
+
+      # git archive 只吐已追蹤的檔案（node_modules、dist 都在 .gitignore 裡），
+      # 再把剛打包好的 client/dist 補進去，結構與 repo 一模一樣。
+      - name: 組發行包
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p pkg
+          git archive --format=tar --prefix=riffle/ HEAD | tar -x -C pkg
+          mkdir -p pkg/riffle/client
+          cp -r client/dist pkg/riffle/client/dist
+          (cd pkg && zip -qr "../riffle-$TAG.zip" riffle)
+
+      # 帶後綴的 tag 當預發行；release note 由 GitHub 從已合併的 PR 產生。
+      # 重跑時 create 會失敗，退回去覆寫既有 release 的附件。
+      - name: 建立 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          flags=()
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" "riffle-$TAG.zip" --generate-notes "${flags[@]}" \
+            || gh release upload "$TAG" "riffle-$TAG.zip" --clobber

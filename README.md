@@ -26,6 +26,18 @@ npm run dev
 | `npm run build` | 打包前端到 `client/dist` |
 | `npm run serve` | 打包後用單一服務跑在 `0.0.0.0:80` |
 
+## 下載發行版
+
+不想自己 build 的話，[Releases](https://github.com/SP42K/riffle/releases) 有打包好的 zip，
+前端已經是打包產物，解壓後只要裝執行期相依就能跑：
+
+```bash
+npm ci --omit=dev
+npm start -w server -- --port 8080
+```
+
+需要 Node 22 以上。解壓出來的目錄結構不要動 —— 後端是照相對路徑找 `client/dist` 的。
+
 ## 開在區網 / 換連接埠
 
 `npm run serve` 會先打包前端，再讓後端綁 `0.0.0.0:80`，同一個網址就同時提供 API 與前端。
