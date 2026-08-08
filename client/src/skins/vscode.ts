@@ -318,6 +318,7 @@ const TEXT: TextTable = {
   'start.startBigTwo': 'Run task',
   'start.startHoldem': 'Start run',
   'start.startSnake': 'Start watch',
+  'start.startDownstairs': 'Start descent',
   'start.needPlayers': 'Needs {min}+ members, all ready',
 
   'bigTwo.idleTitle': 'Waiting for the owner to run the task',
@@ -456,6 +457,9 @@ const TEXT: TextTable = {
   'snake.resultTitle': 'Watch stopped',
   'snake.playAgain': 'Restart watch',
   'snake.waitHost': 'Waiting for the owner',
+  'downstairs.health': 'retries {n}',
+  'downstairs.depth': 'line {n}',
+  'downstairs.eliminated': 'exited',
 
   'lobby.noDisguise': 'GUI',
   'lobby.noDisguiseHint': 'This task renders a graphical preview — it will not look like an editor.',
@@ -525,7 +529,8 @@ export const vscodeSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace', snake: 'watch' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace', snake: 'watch', downstairs: 'descent.ts' },
+
   bigTwoPreset: { taiwan: 'strict', classic: 'default', custom: 'custom' },
   bigTwoRule: {
     cuts: 'override',
