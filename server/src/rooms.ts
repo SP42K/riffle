@@ -3,6 +3,7 @@ import {
   CHAT_HISTORY,
   DEFAULT_BIG_TWO_RULES,
   DEFAULT_MONOPOLY_OPTIONS,
+  DEFAULT_SNAKE_OPTIONS,
   GAME_TYPES,
   HOLDEM_START_CHIPS,
   LOG_HISTORY,
@@ -10,6 +11,9 @@ import {
   MONOPOLY_OPTION_KEYS,
   MONOPOLY_OPTION_SPEC,
   SEAT_LIMITS,
+  SNAKE_OPTION_KEYS,
+  SNAKE_TIME_LIMIT_MAX_SEC,
+  SNAKE_TIME_LIMIT_MIN_SEC,
   liquidValueOf,
   netWorthOf,
   type BigTwoGameView,
@@ -35,6 +39,7 @@ import {
   type RoomView,
   type SeatView,
   type SnakeGameView,
+  type SnakeOptions,
   type SnakeSeatInfo,
   type SystemNotice,
 } from 'shared';
@@ -78,6 +83,8 @@ export interface Room {
   bigTwoRules: BigTwoRules;
   /** 大富翁的房間選項。建房時決定，其他玩法用不到但一律有值。 */
   monopolyOptions: MonopolyOptions;
+  /** 貪吃蛇的規則開關。建房時決定，其他玩法用不到但一律有值。 */
+  snakeOptions: SnakeOptions;
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -165,6 +172,30 @@ export function normalizeMonopolyOptions(value: unknown): MonopolyOptions {
   return options;
 }
 
+/**
+ * 逐鍵消毒：布林開關照布林收，headOnCollision 只認 'bounce' / 'clash'，
+ * unlimitedLivesTimeLimitSec 收數字並夾在合理範圍內，其餘吃預設。
+ */
+export function normalizeSnakeOptions(value: unknown): SnakeOptions {
+  const input = (value ?? {}) as Partial<Record<keyof SnakeOptions, unknown>>;
+  const options = { ...DEFAULT_SNAKE_OPTIONS };
+  for (const key of SNAKE_OPTION_KEYS) {
+    if (key === 'headOnCollision') {
+      const raw = input[key];
+      options.headOnCollision = raw === 'bounce' || raw === 'clash' ? raw : DEFAULT_SNAKE_OPTIONS.headOnCollision;
+    } else if (key === 'unlimitedLivesTimeLimitSec') {
+      const n = Math.floor(Number(input[key]));
+      options.unlimitedLivesTimeLimitSec = Number.isFinite(n)
+        ? Math.min(SNAKE_TIME_LIMIT_MAX_SEC, Math.max(SNAKE_TIME_LIMIT_MIN_SEC, n))
+        : DEFAULT_SNAKE_OPTIONS.unlimitedLivesTimeLimitSec;
+    } else {
+      const raw = input[key];
+      options[key] = typeof raw === 'boolean' ? raw : DEFAULT_SNAKE_OPTIONS[key];
+    }
+  }
+  return options;
+}
+
 export function clampMaxPlayers(value: unknown, gameType: GameType): number {
   const limits = SEAT_LIMITS[gameType];
   const n = Math.floor(Number(value));
@@ -179,17 +210,19 @@ export interface CreateRoomInput {
   maxPlayers: number;
   bigTwoRules: BigTwoRules;
   monopolyOptions: MonopolyOptions;
+  snakeOptions: SnakeOptions;
   host: Member;
 }
 
 export function createRoom(input: CreateRoomInput): Room {
-  const { id, name, gameType, maxPlayers, bigTwoRules, monopolyOptions, host } = input;
+  const { id, name, gameType, maxPlayers, bigTwoRules, monopolyOptions, snakeOptions, host } = input;
   const room: Room = {
     id,
     name,
     gameType,
     bigTwoRules,
     monopolyOptions,
+    snakeOptions,
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -421,6 +454,14 @@ export function snakeLogOf(room: Room, event: SnakeEvent): LogEvent {
       return { t: 'snakeDeath', player: who(event.player) };
     case 'mine':
       return { t: 'snakeMineEaten', player: who(event.player) };
+    case 'food':
+      return { t: 'snakeFoodEaten', player: who(event.player) };
+    case 'cut':
+      return { t: 'snakeCut', attacker: who(event.attacker), victim: who(event.victim) };
+    case 'item':
+      return { t: 'snakeItemUsed', player: who(event.player), item: event.item };
+    case 'dash':
+      return { t: 'snakeDashCharging', player: who(event.player) };
     case 'over':
       return { t: 'snakeOver', ranking: event.ranking.map(who) };
   }
@@ -442,6 +483,7 @@ export function buildSummary(room: Room): RoomSummary {
     gameType: room.gameType,
     bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
     monopolyOptions: room.gameType === 'monopoly' ? room.monopolyOptions : null,
+    snakeOptions: room.gameType === 'snake' ? room.snakeOptions : null,
     hostNickname: nicknameOf(room, room.hostId),
     playerCount: room.players.size,
     maxPlayers: room.maxPlayers,
@@ -624,6 +666,7 @@ function buildMonopolyGameView(
 }
 
 function buildSnakeGameView(game: SnakeState): SnakeGameView {
+  const now = Date.now();
   const seats: Record<number, SnakeSeatInfo> = {};
   for (const snake of game.snakes.values()) {
     seats[snake.seat] = {
@@ -633,6 +676,14 @@ function buildSnakeGameView(game: SnakeState): SnakeGameView {
       lives: snake.lives,
       score: snake.score,
       dir: snake.dir,
+      inventory: snake.inventory.map((slot) => ({ ...slot })),
+      speedUntil: snake.speedUntil,
+      shieldUntil: snake.shieldUntil,
+      reversedUntil: snake.reversedUntil,
+      magnetUntil: snake.magnetUntil,
+      dashChargeUntil: snake.dashChargeUntil,
+      dashActive: snake.dashStepsRemaining > 0,
+      dashCooldownUntil: snake.dashCooldownUntil,
     };
   }
 
@@ -641,14 +692,18 @@ function buildSnakeGameView(game: SnakeState): SnakeGameView {
     // 貪吃蛇沒有「輪到誰」，turnPlayerId 恆為惰性值；turnDeadline 借來扛開局倒數，
     // 倒數結束後歸零 —— 前端沿用既有的 useCountdown，不必為它另開一條欄位
     turnPlayerId: null,
-    turnDeadline: !game.over && Date.now() < game.startAt ? game.startAt : 0,
+    turnDeadline: !game.over && now < game.startAt ? game.startAt : 0,
     over: game.over,
     width: game.width,
     height: game.height,
     food: game.food.map((cell) => ({ ...cell })),
+    corpseFood: game.corpseFood.map((cell) => ({ ...cell })),
     mine: game.mine
-      ? { seat: game.mine.seat, cell: { ...game.mine.cell }, warning: Date.now() < game.mine.telegraphUntil }
+      ? { seat: game.mine.seat, cell: { ...game.mine.cell }, warning: now < game.mine.telegraphUntil }
       : null,
+    items: game.items.map((item) => ({ cell: { ...item.cell }, kind: item.kind })),
+    bullets: game.bullets.map((b) => ({ cell: { ...b.cell }, dir: b.dir })),
+    pendingEffects: game.pendingEffects.map((p) => ({ ...p })),
     seats,
     ranking: game.ranking.slice(),
   };
@@ -728,6 +783,7 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     gameType: room.gameType,
     bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
     monopolyOptions: room.gameType === 'monopoly' ? room.monopolyOptions : null,
+    snakeOptions: room.gameType === 'snake' ? room.snakeOptions : null,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),

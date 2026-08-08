@@ -1,10 +1,12 @@
 import {
   HOLDEM_RANK_LABEL,
   RANK_LABEL,
+  SNAKE_ITEM_CONFIG,
   type Card,
   type LogEvent,
   type MonopolyEstateId,
   type SeatAction,
+  type SnakeItemKind,
   type SystemNotice,
 } from 'shared';
 import { CodeBoss } from './chrome/BossScreens';
@@ -66,6 +68,14 @@ const CATEGORY: Skin['holdemCategory'] = {
   fullHouse: 'compound',
   fourOfAKind: 'quad',
   straightFlush: 'rangeUnion',
+};
+
+const ITEM_LABEL: Record<SnakeItemKind, string> = {
+  speed: 'fast-forward',
+  reverse: 'key remap',
+  shield: 'readonly lock',
+  bullet: 'force-push',
+  magnet: 'auto-import',
 };
 
 const STREET: Skin['street'] = {
@@ -218,8 +228,16 @@ function formatLog(event: LogEvent): string {
       return `${event.player} crashed once — restarting`;
     case 'snakeDeath':
       return `${event.player} crashed`;
+    case 'snakeFoodEaten':
+      return `${event.player} picked up a token`;
     case 'snakeMineEaten':
       return `${event.player} claimed their own trap — big bonus`;
+    case 'snakeItemUsed':
+      return `${event.player} ran a script: ${ITEM_LABEL[event.item]}`;
+    case 'snakeDashCharging':
+      return `${event.player} started a force-push wind-up`;
+    case 'snakeCut':
+      return `${event.attacker} force-pushed over ${event.victim}'s branch`;
     case 'snakeOver':
       return `watch stopped: ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(', ')}`;
   }
@@ -237,6 +255,14 @@ function notice(n: SystemNotice): string {
       return `${n.player} left the session`;
     case 'disconnected':
       return `${n.player} disconnected`;
+    case 'snakeItem': {
+      const config = SNAKE_ITEM_CONFIG[n.item];
+      return config.activationDelayMs > 0
+        ? `⚠ ${n.player} ran "${ITEM_LABEL[n.item]}" — deploying in ${Math.ceil(config.activationDelayMs / 1000)}s!`
+        : `⚠ ${n.player} ran "${ITEM_LABEL[n.item]}"!`;
+    }
+    case 'snakeDash':
+      return `⚠ ${n.player} started a force-push wind-up — branch about to get truncated!`;
   }
 }
 
@@ -450,7 +476,29 @@ const TEXT: TextTable = {
   'snake.yourColor': 'your color',
   'snake.lives': 'retries {n}',
   'snake.respawning': 'restarting',
+  'snake.livesUnlimited': 'retries ∞',
+  'snake.optWraparound': 'wrap edges',
+  'snake.optUnlimitedLives': 'infinite retries',
+  'snake.optTimeLimit': 'infinite-retries timeout (s)',
+  'snake.optHeadOnCollision': 'head-on collision',
+  'snake.optHeadBounce': 'bounce back',
+  'snake.optHeadClash': 'both crash',
+  'snake.optCutting': 'branch cutting (dash key)',
+  'snake.optLargeMap': 'large workspace (4x)',
+  'snake.optItems': 'enable plugins',
+  'snake.itemSpeed': 'fast-forward',
+  'snake.itemReverse': 'key remap',
+  'snake.itemShield': 'readonly lock',
+  'snake.itemBullet': 'force-push',
+  'snake.itemMagnet': 'auto-import',
+  'snake.useItemHint': 'Space runs the first plugin slot',
+  'snake.dashHint': 'X key: dash-cut (0.5s wind-up, 15s cooldown)',
+  'snake.dashCharging': 'winding up',
+  'snake.dashActive': 'dashing',
+  'snake.dashCooldown': 'cooling down',
+  'snake.dashReady': 'ready',
   'snake.score': '{n} lines',
+  'snake.bodyLen': 'len {n}',
   'snake.alive': 'running',
   'snake.dead': 'crashed',
   'snake.resultTitle': 'Watch stopped',

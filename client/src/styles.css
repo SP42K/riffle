@@ -1300,6 +1300,11 @@ select:focus {
 .snake-cell--food {
   color: var(--gold);
 }
+/* 屍體果實：淡紫色空心菱形，跟一般橘色果實明顯區分，提示只加 1 分 */
+.snake-cell--corpse-food {
+  color: #c084fc;
+  opacity: 0.8;
+}
 .snake-cell--body {
   color: var(--text);
 }
@@ -1359,10 +1364,394 @@ select:focus {
   background: var(--snake-seat-3);
 }
 
+/* 道具點：跟果實/地雷的顏色明顯不同，用金屬感的青色標出來 */
+.snake-cell--pickup {
+  color: #7fe8e0;
+  font-weight: 700;
+  animation: snake-pickup-pulse 1s ease-in-out infinite;
+}
+@keyframes snake-pickup-pulse {
+  50% {
+    filter: brightness(1.5);
+  }
+}
+
+/* 衝刺充能中：原地凍結蓄力，整條蛇身變灰暗、快速閃爍，一眼看出「正在充能、還沒動」 */
+.snake-cell--dash-charging {
+  animation: snake-dash-charge-pulse 0.25s ease-in-out infinite;
+  filter: grayscale(0.7) brightness(0.7);
+}
+@keyframes snake-dash-charge-pulse {
+  50% {
+    filter: grayscale(0.7) brightness(1.15);
+  }
+}
+/* 衝刺位移中：整條蛇身發亮＋加粗，跟平常的蛇身明顯不同，看得出正在暴衝 */
+.snake-cell--dash-dashing {
+  font-weight: 700;
+  filter: brightness(1.7) drop-shadow(0 0 4px currentColor);
+}
+
+/* 飛行中的子彈：橘紅色高亮，跟棋盤上其他元素都不撞色，一眼認出是子彈 */
+.snake-cell--bullet {
+  color: #ff6b4a;
+  font-weight: 700;
+  filter: drop-shadow(0 0 3px #ff6b4a);
+}
+
+/*
+ * X 技能狀態：疊在棋盤正上方「你的顏色」那一行，有底色的膠囊，保證玩家在玩的時候一定看得到
+ * ——原本放在最下面的操作提示裡，畫面高一點或棋盤大一點（largeMap）就可能要往下捲才看得到。
+ */
+.snake-dash-status {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.snake-dash-status--charging {
+  background: rgba(234, 179, 8, 0.22);
+  color: #facc15;
+}
+.snake-dash-status--dashing {
+  background: rgba(59, 130, 246, 0.22);
+  color: #60a5fa;
+}
+.snake-dash-status--cooldown {
+  background: rgba(239, 68, 68, 0.22);
+  color: #f87171;
+}
+.snake-dash-status--ready {
+  background: rgba(34, 197, 94, 0.22);
+  color: #4ade80;
+}
+
+/* ---- 衝刺 HUD：棋盤正上方的大型進度條 ---- */
+.dash-hud {
+  width: 100%;
+  max-width: 440px;
+  padding: 6px 10px 4px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: 700;
+  font-size: 0.88rem;
+  letter-spacing: 0.04em;
+  transition: background 0.2s, border-color 0.2s;
+  border: 1.5px solid transparent;
+}
+.dash-hud__bar-wrap {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.dash-hud__bar {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.08s linear, background 0.3s;
+}
+.dash-hud__label {
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* 可用：綠色脈衝，提示可以按 */
+.dash-hud--ready {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(74, 222, 128, 0.45);
+  color: #4ade80;
+  animation: dash-ready-pulse 1.6s ease-in-out infinite;
+}
+.dash-hud--ready .dash-hud__bar {
+  background: #4ade80;
+  box-shadow: 0 0 8px #4ade80;
+}
+@keyframes dash-ready-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.3); }
+  50%       { box-shadow: 0 0 12px 3px rgba(74, 222, 128, 0.35); }
+}
+
+/* 充能中：橘黃色、快速閃爍震動 */
+.dash-hud--charging {
+  background: rgba(234, 179, 8, 0.18);
+  border-color: rgba(250, 204, 21, 0.6);
+  color: #facc15;
+  animation: dash-charge-shake 0.18s ease-in-out infinite;
+}
+.dash-hud--charging .dash-hud__bar {
+  background: linear-gradient(90deg, #f59e0b, #facc15);
+  box-shadow: 0 0 10px #facc15;
+  animation: dash-bar-glow 0.3s ease-in-out infinite;
+}
+@keyframes dash-charge-shake {
+  0%, 100% { transform: translateX(0); }
+  25%       { transform: translateX(-2px); }
+  75%       { transform: translateX(2px); }
+}
+@keyframes dash-bar-glow {
+  50% { box-shadow: 0 0 18px #facc15, 0 0 6px #fff; }
+}
+
+/* 衝刺中：藍色爆閃，最浮誇 */
+.dash-hud--dashing {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(96, 165, 250, 0.8);
+  color: #93c5fd;
+  animation: dash-active-blast 0.25s ease-in-out infinite;
+}
+.dash-hud--dashing .dash-hud__bar {
+  background: linear-gradient(90deg, #3b82f6, #a5f3fc);
+  box-shadow: 0 0 16px #60a5fa, 0 0 4px #fff;
+  animation: dash-bar-blast 0.25s ease-in-out infinite;
+}
+@keyframes dash-active-blast {
+  0%, 100% { box-shadow: 0 0 6px 1px rgba(96, 165, 250, 0.4); filter: brightness(1); }
+  50%       { box-shadow: 0 0 20px 4px rgba(96, 165, 250, 0.7); filter: brightness(1.3); }
+}
+@keyframes dash-bar-blast {
+  50% { box-shadow: 0 0 28px #60a5fa, 0 0 8px #fff; }
+}
+
+/* 冷卻中：進度條從紅漸變回綠，用 CSS 自訂屬性讓 JS 不必控制顏色 */
+.dash-hud--cooldown {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #fca5a5;
+}
+.dash-hud--cooldown .dash-hud__bar {
+  background: linear-gradient(90deg, #ef4444, #f97316, #facc15);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-hud--ready,
+  .dash-hud--charging,
+  .dash-hud--dashing,
+  .dash-hud--charging .dash-hud__bar,
+  .dash-hud--dashing .dash-hud__bar {
+    animation: none;
+  }
+}
+
+/* ---- 道具 HUD：棋盤正上方，放大道具欄 + 生效中效果進度條 ---- */
+.item-hud {
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+/* 道具欄放大版：兩格並排 */
+.item-hud__slots {
+  display: flex;
+  gap: 6px;
+}
+.item-hud__slot {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  position: relative;
+  min-height: 2.2rem;
+}
+/* 第一格（active）：可以用空白鍵的那格，邊框亮一點 */
+.item-hud__slot--active {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.1);
+}
+.item-hud__slot--empty {
+  opacity: 0.35;
+}
+.item-hud__glyph {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+.item-hud__name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  flex: 1;
+}
+.item-hud__ammo {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--gold);
+}
+.item-hud__hint {
+  position: absolute;
+  bottom: -1px;
+  right: 4px;
+  font-size: 0.55rem;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+/* 每種道具的顏色 */
+.item-hud__slot--speed   { border-color: rgba(250, 204, 21, 0.5); }
+.item-hud__slot--shield  { border-color: rgba(96, 165, 250, 0.5); }
+.item-hud__slot--reverse { border-color: rgba(244, 114, 182, 0.5); }
+.item-hud__slot--bullet  { border-color: rgba(249, 115, 22, 0.5); }
+.item-hud__slot--magnet  { border-color: rgba(52, 211, 153, 0.5); }
+
+/* 生效中效果進度條列 */
+.item-hud__effects {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.item-hud__effect {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.item-hud__effect-icon {
+  font-size: 0.85rem;
+  width: 1.2rem;
+  text-align: center;
+  flex: none;
+}
+.item-hud__effect-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.item-hud__effect-bar {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.08s linear;
+}
+.item-hud__effect-secs {
+  font-size: 0.72rem;
+  font-weight: 700;
+  min-width: 2rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 其他人用道具/衝刺時的浮出通知 ---- */
+.item-toast {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1.5px solid;
+  background: rgba(0, 0, 0, 0.75);
+  font-size: 0.82rem;
+  font-weight: 700;
+  pointer-events: none;
+  z-index: 10;
+  /* 預設隱藏：往上偏移 + 透明 */
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.item-toast--visible {
+  opacity: 1;
+  transform: translateY(0);
+  animation: item-toast-out 0.35s ease 2.45s forwards;
+}
+@keyframes item-toast-out {
+  to { opacity: 0; transform: translateY(-8px); }
+}
+.item-toast__icon {
+  font-size: 1.1rem;
+}
+.item-toast__text {
+  max-width: 180px;
+  line-height: 1.3;
+}
+.snake-board-wrap {
+  position: relative;
+}
+.snake-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+/* 名牌＋頭上技能標籤共用的定位錨點：疊在頭上方，兩者垂直排列 */
+.snake-head-tag {
+  position: absolute;
+  transform: translate(-50%, -180%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  pointer-events: none;
+}
+.snake-name-tag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+}
+.snake-skill-badges {
+  display: flex;
+  gap: 0.15rem;
+}
+.snake-skill-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--gold);
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid var(--gold);
+  border-radius: 3px;
+  padding: 0 0.25rem;
+}
+.snake-inventory {
+  position: absolute;
+  transform: translate(-50%, 60%);
+  display: flex;
+  gap: 0.15rem;
+  pointer-events: none;
+}
+.snake-inventory__slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--gold);
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--gold);
+  border-radius: 3px;
+  padding: 0 0.15rem;
+}
+.snake-inventory__slot--empty {
+  color: var(--muted);
+  border-color: var(--line);
+}
+
 @media (max-width: 720px) {
   .snake-cell {
     width: 0.85rem;
     height: 0.85rem;
     font-size: 0.75rem;
+  }
+  .snake-name-tag {
+    font-size: 0.55rem;
   }
 }

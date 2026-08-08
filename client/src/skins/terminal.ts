@@ -1,10 +1,12 @@
 import {
   HOLDEM_RANK_LABEL,
   RANK_LABEL,
+  SNAKE_ITEM_CONFIG,
   type Card,
   type LogEvent,
   type MonopolyEstateId,
   type SeatAction,
+  type SnakeItemKind,
   type SystemNotice,
 } from 'shared';
 import { SUIT_TONE, labelCards } from './casino';
@@ -62,6 +64,14 @@ const CATEGORY: Skin['holdemCategory'] = {
   fullHouse: '3+2',
   fourOfAKind: '4x',
   straightFlush: 'seq+grp',
+};
+
+const ITEM_LABEL: Record<SnakeItemKind, string> = {
+  speed: 'nice -20',
+  reverse: 'sed s/left/right/',
+  shield: 'chmod 444',
+  bullet: 'kill -9',
+  magnet: 'rsync --pull',
 };
 
 const STREET: Skin['street'] = {
@@ -214,8 +224,16 @@ function formatLog(event: LogEvent): string {
       return `${event.player} segfault — auto-restart`;
     case 'snakeDeath':
       return `${event.player} segfault (no retries left)`;
+    case 'snakeFoodEaten':
+      return `${event.player} consumed a token`;
     case 'snakeMineEaten':
       return `${event.player} caught their own trap — bonus`;
+    case 'snakeItemUsed':
+      return `${event.player} ran \`${ITEM_LABEL[event.item]}\``;
+    case 'snakeDashCharging':
+      return `${event.player} winding up \`dash\``;
+    case 'snakeCut':
+      return `${event.attacker} truncated ${event.victim}'s buffer`;
     case 'snakeOver':
       return `watch exited — ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(' ')}`;
   }
@@ -233,6 +251,14 @@ function notice(n: SystemNotice): string {
       return `${n.player} detached`;
     case 'disconnected':
       return `${n.player} lost connection`;
+    case 'snakeItem': {
+      const config = SNAKE_ITEM_CONFIG[n.item];
+      return config.activationDelayMs > 0
+        ? `! ${n.player} ran \`${ITEM_LABEL[n.item]}\` — landing in ${Math.ceil(config.activationDelayMs / 1000)}s`
+        : `! ${n.player} ran \`${ITEM_LABEL[n.item]}\``;
+    }
+    case 'snakeDash':
+      return `! ${n.player} winding up \`dash\` — watch your buffer`;
   }
 }
 
@@ -446,7 +472,29 @@ const TEXT: TextTable = {
   'snake.yourColor': 'your color',
   'snake.lives': 'retries {n}',
   'snake.respawning': 'restarting',
+  'snake.livesUnlimited': 'retries ∞',
+  'snake.optWraparound': 'wrap edges',
+  'snake.optUnlimitedLives': 'infinite retries',
+  'snake.optTimeLimit': 'infinite-retries timeout (s)',
+  'snake.optHeadOnCollision': 'head-on collision',
+  'snake.optHeadBounce': 'bounce back',
+  'snake.optHeadClash': 'both crash',
+  'snake.optCutting': 'branch truncate (dash key)',
+  'snake.optLargeMap': 'large volume (4x)',
+  'snake.optItems': 'enable modules',
+  'snake.itemSpeed': 'nice -20',
+  'snake.itemReverse': 'sed s/left/right/',
+  'snake.itemShield': 'chmod 444',
+  'snake.itemBullet': 'kill -9',
+  'snake.itemMagnet': 'rsync --pull',
+  'snake.useItemHint': 'space runs module slot 0',
+  'snake.dashHint': 'x key: dash-truncate (0.5s windup, 15s cooldown)',
+  'snake.dashCharging': 'winding up',
+  'snake.dashActive': 'dashing',
+  'snake.dashCooldown': 'cooling down',
+  'snake.dashReady': 'ready',
   'snake.score': '{n} lines',
+  'snake.bodyLen': 'len {n}',
   'snake.alive': 'running',
   'snake.dead': 'segfault',
   'snake.resultTitle': 'watch exited',

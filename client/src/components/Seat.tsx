@@ -24,9 +24,20 @@ interface Props {
   game: GameView | null;
   /** 德州撲克的房內籌碼，開局前也看得到。 */
   chips?: number;
+  /** 貪吃蛇房間開了「命無限」，命數要顯示 ∞ 而不是一個會一直不變的數字。 */
+  snakeUnlimitedLives?: boolean;
 }
 
-export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Props) {
+export function Seat({
+  seat,
+  isTurn,
+  isMe,
+  playing,
+  gameType,
+  game,
+  chips,
+  snakeUnlimitedLives,
+}: Props) {
   const { skin, t } = useSkin();
   const holdem = game?.type === 'holdem' ? game.seats[seat.seat] : undefined;
   const monopoly = game?.type === 'monopoly' ? game.seats[seat.seat] : undefined;
@@ -61,6 +72,7 @@ export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Pro
           monopoly={monopoly}
           snake={snake}
           chips={chips}
+          snakeUnlimitedLives={snakeUnlimitedLives}
         />
       </div>
 
@@ -83,6 +95,7 @@ function SeatStatus({
   monopoly,
   snake,
   chips,
+  snakeUnlimitedLives,
 }: {
   gameType: GameType;
   game: GameView | null;
@@ -92,6 +105,7 @@ function SeatStatus({
   monopoly: MonopolySeatInfo | undefined;
   snake: SnakeSeatInfo | undefined;
   chips: number | undefined;
+  snakeUnlimitedLives: boolean | undefined;
 }) {
   switch (gameType) {
     case 'bigTwo':
@@ -103,7 +117,14 @@ function SeatStatus({
     case 'monopoly':
       return <MonopolyStatus info={monopoly} playing={playing} ready={seat.ready} />;
     case 'snake':
-      return <SnakeStatus info={snake} playing={playing} ready={seat.ready} />;
+      return (
+        <SnakeStatus
+          info={snake}
+          playing={playing}
+          ready={seat.ready}
+          unlimitedLives={snakeUnlimitedLives ?? false}
+        />
+      );
   }
 }
 
@@ -193,10 +214,12 @@ function SnakeStatus({
   info,
   playing,
   ready,
+  unlimitedLives,
 }: {
   info: SnakeSeatInfo | undefined;
   playing: boolean;
   ready: boolean;
+  unlimitedLives: boolean;
 }) {
   const { t } = useSkin();
   if (!playing || !info) {
@@ -208,10 +231,19 @@ function SnakeStatus({
   }
   return (
     <>
-      <span className="seat__chips">{t('snake.score', { n: info.score })}</span>
-      <span className="seat__chips">{t('snake.lives', { n: info.lives })}</span>
+      <span className="seat__chips">
+        {t('snake.score', { n: info.score })} · {t('snake.bodyLen', { n: info.body.length })}
+      </span>
+      <span className="seat__chips">
+        {unlimitedLives ? t('snake.livesUnlimited') : t('snake.lives', { n: info.lives })}
+      </span>
       {info.respawning && <span className="tag tag--waiting">{t('snake.respawning')}</span>}
       {!info.alive && <span className="tag tag--offline">{t('snake.dead')}</span>}
+      {info.speedUntil !== null && info.speedUntil > Date.now() && <span className="tag tag--ready">⚡</span>}
+      {info.shieldUntil !== null && info.shieldUntil > Date.now() && <span className="tag tag--ready">🛡</span>}
+      {info.reversedUntil !== null && info.reversedUntil > Date.now() && (
+        <span className="tag tag--offline">⇄</span>
+      )}
     </>
   );
 }

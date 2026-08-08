@@ -9,7 +9,7 @@ import type {
   MonopolyPhase,
   MonopolyTileId,
 } from './monopoly.js';
-import type { SnakeDirection, SnakeGameView } from './snake.js';
+import type { SnakeDirection, SnakeGameView, SnakeItemKind, SnakeOptions } from './snake.js';
 
 // ---------------------------------------------------------------------------
 // 牌
@@ -233,7 +233,7 @@ export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
   bigTwo: { min: 2, max: 4 },
   holdem: { min: 2, max: 9 },
   monopoly: { min: 2, max: 6 },
-  snake: { min: 2, max: 4 },
+  snake: { min: 2, max: 6 },
 };
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -258,7 +258,11 @@ export type SystemNotice =
   | { t: 'joined'; player: string }
   | { t: 'spectating'; player: string }
   | { t: 'left'; player: string }
-  | { t: 'disconnected'; player: string };
+  | { t: 'disconnected'; player: string }
+  /** 貪吃蛇的「影響到別人」道具生效時發的公告，比戰報那六行更顯眼——聊天室看得到。 */
+  | { t: 'snakeItem'; player: string; item: SnakeItemKind }
+  /** 貪吃蛇按下衝刺（X 鍵）充能的瞬間發的公告，給其他人一點反應時間閃避。 */
+  | { t: 'snakeDash'; player: string };
 
 /** 大廳房間列表的一列。 */
 export interface RoomSummary {
@@ -269,6 +273,8 @@ export interface RoomSummary {
   bigTwoRules: BigTwoRules | null;
   /** 只有大富翁房有值，其他玩法為 null。 */
   monopolyOptions: MonopolyOptions | null;
+  /** 只有貪吃蛇房有值，其他玩法為 null。 */
+  snakeOptions: SnakeOptions | null;
   hostNickname: string;
   playerCount: number;
   maxPlayers: number;
@@ -389,8 +395,16 @@ export type LogEvent =
   | { t: 'snakeRespawn'; player: string }
   /** 兩條命用完，徹底出局。 */
   | { t: 'snakeDeath'; player: string }
+  /** 吃到果實（一般或屍體果實）。 */
+  | { t: 'snakeFoodEaten'; player: string }
   /** 吃到自己顏色的地雷果實拿到加分。 */
   | { t: 'snakeMineEaten'; player: string }
+  /** 用掉一個道具（子彈是每發都送一次）。 */
+  | { t: 'snakeItemUsed'; player: string; item: SnakeItemKind }
+  /** 按下衝刺（X 鍵）開始充能。 */
+  | { t: 'snakeDashCharging'; player: string }
+  /** 衝刺途中撞進別人身體、把對方截斷（只有衝刺會截斷，一般碰撞一律算自己死）。 */
+  | { t: 'snakeCut'; attacker: string; victim: string }
   | { t: 'snakeOver'; ranking: string[] }
   // 逾時代打
   | { t: 'timeout'; player: string; auto: 'pass' | 'check' | 'fold' }
@@ -417,6 +431,8 @@ export interface RoomView {
   bigTwoRules: BigTwoRules | null;
   /** 只有大富翁房有值。 */
   monopolyOptions: MonopolyOptions | null;
+  /** 只有貪吃蛇房有值。 */
+  snakeOptions: SnakeOptions | null;
   hostId: PlayerId;
   maxPlayers: number;
   status: RoomStatus;
@@ -459,6 +475,7 @@ export interface ClientToServerEvents {
       gameType: GameType;
       bigTwoRules?: Partial<BigTwoRules>;
       monopolyOptions?: Partial<MonopolyOptions>;
+      snakeOptions?: Partial<SnakeOptions>;
     },
     ack: Ack<{ roomId: string }>,
   ) => void;
@@ -480,6 +497,10 @@ export interface ClientToServerEvents {
    * 跟其他玩法的「這一手就是這一手」不同，這裡送出不代表這一拍已經轉向。
    */
   'game:snake': (p: { dir: SnakeDirection }, ack: Ack<null>) => void;
+  /** 貪吃蛇專用：用掉道具欄第一格（空白鍵觸發）。子彈欄位用完才會真的清空。 */
+  'game:snakeItem': (p: Record<string, never>, ack: Ack<null>) => void;
+  /** 貪吃蛇專用：觸發衝刺截斷技能（X 鍵）。房間沒開 cutting 選項或還在冷卻時無效。 */
+  'game:snakeDash': (p: Record<string, never>, ack: Ack<null>) => void;
 }
 
 export type BetAction = 'fold' | 'check' | 'call' | 'raise' | 'allin';

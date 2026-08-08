@@ -7,6 +7,8 @@ import {
   MONOPOLY_ESTATE_IDS,
   SEAT_LIMITS,
   SNAKE_DIRECTIONS,
+  SNAKE_GRID_SIZE,
+  SNAKE_LARGE_MAP_SCALE,
   SNAKE_TICK_MS,
   TURN_MS,
   type Ack,
@@ -65,6 +67,7 @@ import {
   normalizeBigTwoRules,
   normalizeGameType,
   normalizeMonopolyOptions,
+  normalizeSnakeOptions,
   pushChat,
   pushLog,
   refillChips,
@@ -81,6 +84,8 @@ import {
   removePlayerFromSnake,
   setSnakeDirection,
   tickSnake,
+  useSnakeDash,
+  useSnakeItem,
   type SnakeEvent,
 } from './snakeEngine.js';
 import { assertNeverGame } from './turnBased.js';
@@ -227,6 +232,8 @@ export class GameServer {
     socket.on('game:action', (payload, ack) => this.onAction(socket, payload, ack));
     socket.on('game:monopoly', (payload, ack) => this.onMonopoly(socket, payload, ack));
     socket.on('game:snake', (payload, ack) => this.onSnake(socket, payload, ack));
+    socket.on('game:snakeItem', (_payload, ack) => this.onSnakeItem(socket, ack));
+    socket.on('game:snakeDash', (_payload, ack) => this.onSnakeDash(socket, ack));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -396,6 +403,7 @@ export class GameServer {
       gameType?: unknown;
       bigTwoRules?: unknown;
       monopolyOptions?: unknown;
+      snakeOptions?: unknown;
     },
     ack: unknown,
   ): void {
@@ -410,6 +418,7 @@ export class GameServer {
     const maxPlayers = clampMaxPlayers(payload?.maxPlayers, gameType);
     const bigTwoRules = normalizeBigTwoRules(payload?.bigTwoRules);
     const monopolyOptions = normalizeMonopolyOptions(payload?.monopolyOptions);
+    const snakeOptions = normalizeSnakeOptions(payload?.snakeOptions);
     const id = generateRoomId((candidate) => this.rooms.has(candidate));
 
     const host = this.memberFromSession(session);
@@ -421,6 +430,7 @@ export class GameServer {
       maxPlayers,
       bigTwoRules,
       monopolyOptions,
+      snakeOptions,
       host,
     });
     this.rooms.set(id, room);
@@ -641,7 +651,9 @@ export class GameServer {
         break;
       }
       case 'snake': {
-        const state = initSnake(room.seats);
+        const scale = room.snakeOptions.largeMap ? SNAKE_LARGE_MAP_SCALE : 1;
+        const size = SNAKE_GRID_SIZE * scale;
+        const state = initSnake(room.seats, Math.random, size, size, room.snakeOptions);
         room.game = { type: 'snake', state };
         pushLog(room, { t: 'snakeStart', players: seatedPlayers(room).length });
         this.scheduleSnakeStart(room);
@@ -834,6 +846,54 @@ export class GameServer {
     }
 
     setSnakeDirection(game.state, playerId, dir);
+    reply(ack, { ok: true, data: null });
+  }
+
+  /**
+   * 空白鍵：用掉道具欄第一格。跟按方向鍵不同——這個有立即可見的效果（子彈開槍、狀態生效），
+   * 要走 afterGameAction 整包廣播出去；「會提醒大家」的道具（SNAKE_ITEM_CONFIG.announce）
+   * 額外發一則聊天室系統通知，比戰報那六行更顯眼。
+   */
+  private onSnakeItem(socket: GameSocket, ack: unknown): void {
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { room, game, playerId } = context;
+    if (game.type !== 'snake') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間不是貪吃蛇' } });
+    }
+
+    const events = useSnakeItem(game.state, playerId, Math.random);
+    this.logSnake(room, events);
+    for (const event of events) {
+      if (event.t === 'item') {
+        this.systemNotice(room, { t: 'snakeItem', player: nicknameOf(room, event.player), item: event.item });
+      }
+    }
+    this.afterGameAction(room);
+    reply(ack, { ok: true, data: null });
+  }
+
+  /**
+   * X 鍵：觸發衝刺截斷技能。沒開 cutting 選項、還在冷卻、或已經在充能/衝刺中，引擎會回空陣列，
+   * 這裡就當作無事發生（不報錯，跟按空白鍵但道具欄是空的一樣靜默忽略）。
+   * 充能開始一定要公告，讓其他人有機會閃避——跟道具系統的 announce 邏輯一致。
+   */
+  private onSnakeDash(socket: GameSocket, ack: unknown): void {
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { room, game, playerId } = context;
+    if (game.type !== 'snake') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間不是貪吃蛇' } });
+    }
+
+    const events = useSnakeDash(game.state, playerId);
+    this.logSnake(room, events);
+    for (const event of events) {
+      if (event.t === 'dash') {
+        this.systemNotice(room, { t: 'snakeDash', player: nicknameOf(room, event.player) });
+      }
+    }
+    this.afterGameAction(room);
     reply(ack, { ok: true, data: null });
   }
 

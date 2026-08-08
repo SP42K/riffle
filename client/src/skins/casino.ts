@@ -12,6 +12,8 @@ import {
   MONOPOLY_PHASE_LABEL,
   MONOPOLY_TILE_LABEL,
   RANK_LABEL,
+  SNAKE_ITEM_CONFIG,
+  SNAKE_ITEM_LABEL,
   SUIT_SYMBOL,
   describeHoldemCategory,
   describeHoldemHand,
@@ -212,8 +214,16 @@ function formatLog(event: LogEvent): string {
       return `${event.player} 死了一次，重生倒數中`;
     case 'snakeDeath':
       return `${event.player} 出局了`;
+    case 'snakeFoodEaten':
+      return `${event.player} 吃到果實`;
     case 'snakeMineEaten':
       return `${event.player} 吃到自己的地雷果實，大加分`;
+    case 'snakeItemUsed':
+      return `${event.player} 使用了道具：${SNAKE_ITEM_LABEL[event.item]}`;
+    case 'snakeDashCharging':
+      return `${event.player} 開始衝刺充能`;
+    case 'snakeCut':
+      return `${event.attacker} 截斷了 ${event.victim} 的身體`;
     case 'snakeOver':
       return `本局結束：${event.ranking.map((n, i) => `第 ${i + 1} 名 ${n}`).join('、')}`;
   }
@@ -231,6 +241,14 @@ function notice(n: SystemNotice): string {
       return `${n.player} 離開了房間`;
     case 'disconnected':
       return `${n.player} 斷線離開`;
+    case 'snakeItem': {
+      const config = SNAKE_ITEM_CONFIG[n.item];
+      return config.activationDelayMs > 0
+        ? `⚠️ ${n.player} 使用了「${SNAKE_ITEM_LABEL[n.item]}」，${Math.ceil(config.activationDelayMs / 1000)} 秒後生效！`
+        : `⚠️ ${n.player} 使用了「${SNAKE_ITEM_LABEL[n.item]}」！`;
+    }
+    case 'snakeDash':
+      return `⚔️ ${n.player} 正在充能衝刺，小心被截斷！`;
   }
 }
 

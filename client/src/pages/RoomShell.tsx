@@ -122,6 +122,7 @@ export function RoomShell({ room, center, footer, isMyTurn }: Props) {
                 gameType={room.gameType}
                 game={game}
                 chips={room.chips?.[seat.playerId]}
+                snakeUnlimitedLives={room.snakeOptions?.unlimitedLives ?? false}
               />
             ))}
             {Array.from({ length: room.maxPlayers - room.seats.length }, (_, i) => (

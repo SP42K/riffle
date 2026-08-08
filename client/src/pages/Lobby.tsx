@@ -5,16 +5,20 @@ import {
   BIG_TWO_RULE_KEYS,
   DEFAULT_BIG_TWO_RULES,
   DEFAULT_MONOPOLY_OPTIONS,
+  DEFAULT_SNAKE_OPTIONS,
   GAME_TYPES,
   MONOPOLY_OPTION_KEYS,
   MONOPOLY_OPTION_SPEC,
   SEAT_LIMITS,
+  SNAKE_TIME_LIMIT_MAX_SEC,
+  SNAKE_TIME_LIMIT_MIN_SEC,
   bigTwoPresetOf,
   type BigTwoRules,
   type GameType,
   type JoinMode,
   type MonopolyOptions,
   type RoomStatus,
+  type SnakeOptions,
 } from 'shared';
 import { ChatPanel } from '../components/ChatPanel';
 import { emitWithAck, getPlayerId, socket } from '../net/socket';
@@ -38,6 +42,7 @@ export function Lobby() {
   const [bigTwoRules, setBigTwoRules] = useState<BigTwoRules>(DEFAULT_BIG_TWO_RULES);
   const [monopolyOptions, setMonopolyOptions] =
     useState<MonopolyOptions>(DEFAULT_MONOPOLY_OPTIONS);
+  const [snakeOptions, setSnakeOptions] = useState<SnakeOptions>(DEFAULT_SNAKE_OPTIONS);
   const [joinCode, setJoinCode] = useState('');
   const [nicknameDraft, setNicknameDraft] = useState(nickname);
 
@@ -66,6 +71,7 @@ export function Lobby() {
         gameType,
         bigTwoRules,
         monopolyOptions,
+        snakeOptions,
       }),
     );
     setRoomName('');
@@ -181,6 +187,91 @@ export function Lobby() {
                     {skin.bigTwoRule[key]}
                   </label>
                 ))}
+              </fieldset>
+            )}
+            {gameType === 'snake' && (
+              <fieldset className="lobby__rules">
+                <legend>{t('lobby.rulesOptionsLabel')}</legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.wraparound}
+                    onChange={(event) =>
+                      setSnakeOptions({ ...snakeOptions, wraparound: event.target.checked })
+                    }
+                  />
+                  {t('snake.optWraparound')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.unlimitedLives}
+                    onChange={(event) =>
+                      setSnakeOptions({ ...snakeOptions, unlimitedLives: event.target.checked })
+                    }
+                  />
+                  {t('snake.optUnlimitedLives')}
+                </label>
+                <label>
+                  {t('snake.optTimeLimit')}
+                  <input
+                    type="number"
+                    min={SNAKE_TIME_LIMIT_MIN_SEC}
+                    max={SNAKE_TIME_LIMIT_MAX_SEC}
+                    step={30}
+                    disabled={!snakeOptions.unlimitedLives}
+                    value={snakeOptions.unlimitedLivesTimeLimitSec}
+                    onChange={(event) =>
+                      setSnakeOptions({
+                        ...snakeOptions,
+                        unlimitedLivesTimeLimitSec: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.cutting}
+                    onChange={(event) =>
+                      setSnakeOptions({ ...snakeOptions, cutting: event.target.checked })
+                    }
+                  />
+                  {t('snake.optCutting')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.largeMap}
+                    onChange={(event) =>
+                      setSnakeOptions({ ...snakeOptions, largeMap: event.target.checked })
+                    }
+                  />
+                  {t('snake.optLargeMap')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.items}
+                    onChange={(event) => setSnakeOptions({ ...snakeOptions, items: event.target.checked })}
+                  />
+                  {t('snake.optItems')}
+                </label>
+                <label>
+                  {t('snake.optHeadOnCollision')}
+                  <select
+                    value={snakeOptions.headOnCollision}
+                    onChange={(event) =>
+                      setSnakeOptions({
+                        ...snakeOptions,
+                        headOnCollision: event.target.value as 'bounce' | 'clash',
+                      })
+                    }
+                  >
+                    <option value="bounce">{t('snake.optHeadBounce')}</option>
+                    <option value="clash">{t('snake.optHeadClash')}</option>
+                  </select>
+                </label>
               </fieldset>
             )}
             {gameType === 'monopoly' && (
