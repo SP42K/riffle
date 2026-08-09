@@ -35,3 +35,8 @@ jobs:
       # 型別過了不等於打得包出來 —— vite 的解析（shared 的 alias）只有這一步會驗到
       - name: build client
         run: npm run build
+
+      # workspace 結構一動 Dockerfile 就會悄悄壞掉，建一次擋住。
+      # fullstack 是 FROM server 疊上前端，所以這一道連 server target 一起驗到了。
+      - name: docker build
+        run: docker build --target fullstack -t riffle:fullstack .

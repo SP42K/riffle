@@ -1,0 +1,19 @@
+# 狀態全在記憶體裡（rooms / sessions / playerRoom），所以**只能一個 instance**。
+# 不要加 replicas、不要開 autoscaling —— 多開一台就是兩個互相看不見的平行世界。
+services:
+  riffle:
+    build:
+      context: .
+      target: fullstack # 只要 API（前端上 Vercel）就改成 server
+      args:
+        # 前端要打的後端網域。vite 在 build 當下就寫死進 bundle，所以只能放這裡；
+        # 擺到下面的 environment 是沒有作用的。沒設就走同源。
+        VITE_SERVER_URL: ''
+    ports:
+      - '8080:3001'
+    environment:
+      PORT: '3001'
+      HOST: '0.0.0.0'
+      # 前後端分家時才需要，逗號分隔。有設就一定要解析得出來，否則伺服器不會啟動。
+      # CORS_ORIGIN: 'https://xxx.vercel.app'
+    restart: unless-stopped

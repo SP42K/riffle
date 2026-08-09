@@ -62,7 +62,13 @@ export function storeNickname(nickname: string): void {
   localStorage.setItem(NICKNAME_KEY, nickname);
 }
 
-export const socket: GameSocket = io({ autoConnect: false });
+/**
+ * 沒設 VITE_SERVER_URL 就走同源 —— 單一容器、npm run serve、dev server 的 proxy 都是這條。
+ * 只有前後端分家（前端上 Vercel、後端在容器）才需要指到後端網域。
+ */
+const SERVER_URL = import.meta.env.VITE_SERVER_URL?.trim() || undefined;
+
+export const socket: GameSocket = io(SERVER_URL, { autoConnect: false });
 
 /** 伺服器回錯時丟出來的錯誤。帶 code 是為了讓前端能依外觀換掉文案。 */
 export class AckError extends Error {

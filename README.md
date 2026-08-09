@@ -57,6 +57,39 @@ npm run dev -w client -- --port 80        # dev server 也可以換埠（Vite �
 > Windows 的 80 埠常被 IIS 或 http.sys 占著。若出現 `EADDRINUSE` 就換一個埠，
 > `EACCES` 則需要用系統管理員身分執行。
 
+## 用 Docker 跑
+
+| 跑法 | 指令 | 用途 |
+|---|---|---|
+| 直接執行（現況，不變） | `npm run serve` | 區網開一局、release zip |
+| 容器全套 | `docker build -t riffle .` | 單一容器同源，等同 `npm run serve` |
+| 容器只跑 API | `docker build --target server .` | 前端另外部署（例如 Vercel），後端在常駐容器 |
+
+```bash
+docker build -t riffle .            # 全套（前端 + API）
+docker run -p 8080:3001 riffle
+
+docker build --target server -t riffle-api .   # 只跑 API
+docker run -p 3001:3001 -e CORS_ORIGIN=https://xxx.vercel.app riffle-api
+```
+
+狀態全在記憶體裡（rooms / sessions / playerRoom），所以只能跑單一 instance，不要加
+replicas 或開 autoscaling。前後端分家部署時才需要下面兩個設定，**兩個的時機不一樣**：
+
+- `CORS_ORIGIN`（執行期環境變數）：後端允許的前端來源，逗號分隔；沒設就沿用同源部署的
+  寬鬆預設。有設卻解析不出任何來源（例如只打了逗號）伺服器會直接不啟動，免得靜靜退回全開。
+- `VITE_SERVER_URL`（**build 參數**）：前端要打的後端網域；沒設就走同源。vite 是在打包當下
+  把它寫死進 bundle 的，執行期再設沒有作用，所以要在 build 時帶：
+
+  ```bash
+  docker build --build-arg VITE_SERVER_URL=https://api.example.com -t riffle .
+  ```
+
+  前端上 Vercel 時同理 —— 在 Vercel 的環境變數頁設好，它是在那邊 build 的。
+
+> `CORS_ORIGIN` 擋的是瀏覽器發起的跨站連線（polling 與 WebSocket 升級都會驗）。
+> 這個服務本來就沒有帳號密碼，白名單不等於存取控制，別拿它當權限用。
+
 ## 大老二
 
 **牌組**　52 張。點數 `3 < 4 < … < K < A < 2`，花色 `♦ < ♣ < ♥ < ♠`。
