@@ -33,8 +33,14 @@ if (serveClient) {
 }
 
 const httpServer = createServer(app);
+
+/** 前後端分家部署時，逗號分隔列出允許的來源；沒設就沿用同源部署的寬鬆預設。 */
+const corsOrigin = process.env.CORS_ORIGIN?.split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
-  cors: { origin: true, credentials: true },
+  cors: { origin: corsOrigin?.length ? corsOrigin : true, credentials: true },
 });
 
 new GameServer(io);

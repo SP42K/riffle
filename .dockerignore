@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.github
+.runtime
+.codebase-memory
+.env
+*.tsbuildinfo
+*.log
+docs

@@ -57,6 +57,28 @@ npm run dev -w client -- --port 80        # dev server 也可以換埠（Vite �
 > Windows 的 80 埠常被 IIS 或 http.sys 占著。若出現 `EADDRINUSE` 就換一個埠，
 > `EACCES` 則需要用系統管理員身分執行。
 
+## 用 Docker 跑
+
+| 跑法 | 指令 | 用途 |
+|---|---|---|
+| 直接執行（現況，不變） | `npm run serve` | 區網開一局、release zip |
+| 容器全套 | `docker build -t riffle .` | 單一容器同源，等同 `npm run serve` |
+| 容器只跑 API | `docker build --target server .` | 前端另外部署（例如 Vercel），後端在常駐容器 |
+
+```bash
+docker build -t riffle .            # 全套（前端 + API）
+docker run -p 8080:3001 riffle
+
+docker build --target server -t riffle-api .   # 只跑 API
+docker run -p 3001:3001 -e CORS_ORIGIN=https://xxx.vercel.app riffle-api
+```
+
+狀態全在記憶體裡（rooms / sessions / playerRoom），所以只能跑單一 instance，不要加
+replicas 或開 autoscaling。前後端分家部署時才需要下面兩個環境變數：
+
+- `CORS_ORIGIN`：後端允許的前端來源，逗號分隔；沒設就沿用同源部署的寬鬆預設。
+- `VITE_SERVER_URL`：前端要打的後端網域；沒設就走同源。
+
 ## 大老二
 
 **牌組**　52 張。點數 `3 < 4 < … < K < A < 2`，花色 `♦ < ♣ < ♥ < ♠`。
