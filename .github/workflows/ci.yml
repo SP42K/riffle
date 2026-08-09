@@ -36,8 +36,7 @@ jobs:
       - name: build client
         run: npm run build
 
-      # workspace 結構一動 Dockerfile 就會悄悄壞掉，兩個 target 都建一次擋住
+      # workspace 結構一動 Dockerfile 就會悄悄壞掉，建一次擋住。
+      # fullstack 是 FROM server 疊上前端，所以這一道連 server target 一起驗到了。
       - name: docker build
-        run: |
-          docker build --target server -t riffle:server .
-          docker build --target fullstack -t riffle:fullstack .
+        run: docker build --target fullstack -t riffle:fullstack .
