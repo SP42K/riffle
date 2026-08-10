@@ -1,6 +1,8 @@
 import { useMemo, useState, useEffect } from 'react';
 import {
   DND_DIFFICULTIES,
+  DND_NPC_CONTROLS,
+  DND_NPC_CONTROL_LABEL,
   DND_DIFFICULTY_LABEL,
   DND_DIFFICULTY_MULTIPLIER,
   type RoomView,
@@ -29,7 +31,11 @@ export function DndRoom({ room }: { room: RoomView }) {
   const game = room.game?.type === 'dnd' ? room.game : null;
   const me = room.me;
   const playing = room.status === 'playing';
-  const isMyTurn = playing && game?.turnPlayerId === me.playerId;
+  // 輪到我：自己的座位，或是這個 NPC 座位由我代打
+  const iControlNpcs = !!game && game.npcControllerId === me.playerId;
+  const npcSeatIsMine =
+    !!game && !game.turnPlayerId && iControlNpcs && game.phase === 'party' && !game.over;
+  const isMyTurn = playing && (game?.turnPlayerId === me.playerId || npcSeatIsMine);
   const isHost = room.hostId === me.playerId;
 
   const remainingMs = useCountdown(playing ? (game?.turnDeadline ?? 0) : 0);
@@ -85,23 +91,26 @@ export function DndRoom({ room }: { room: RoomView }) {
     return attacks.length > 0 ? (attacks[attacks.length - 1] as any) : null;
   }, [room.log]);
 
+  /** 現在由我操作的棋子：平常是自己的角色，代打 NPC 時是那個 NPC。 */
   const myPosition = useMemo(() => {
     if (!game) return null;
+    const npcId = `npc-${game.turnSeat}`;
     for (let r = 0; r < game.board.length; r++) {
       const row = game.board[r];
-      if (row) {
-        for (let c = 0; c < row.length; c++) {
-          const piece = row[c]?.piece;
-          if (piece && piece.type === 'player' && piece.playerId === me.playerId) {
-            return { r, c, piece };
-          }
-        }
+      if (!row) continue;
+      for (let c = 0; c < row.length; c++) {
+        const piece = row[c]?.piece;
+        if (!piece || piece.type !== 'player') continue;
+        if (piece.playerId === me.playerId) return { r, c, piece };
+        if (npcSeatIsMine && piece.id === npcId) return { r, c, piece };
       }
     }
     return null;
-  }, [game, me.playerId]);
+  }, [game, me.playerId, npcSeatIsMine]);
 
-  const mySeat = room.seats.find((seat) => seat.playerId === me.playerId)?.seat ?? -1;
+  const mySeat = npcSeatIsMine
+    ? (game?.turnSeat ?? -1)
+    : (room.seats.find((seat) => seat.playerId === me.playerId)?.seat ?? -1);
   // 自己倒了但隊友還站著 —— 這種結束要講清楚，不然畫面看起來像莫名其妙跳出來
   const iDiedWithTeammatesLeft =
     !!game && mySeat !== -1 && game.seats[mySeat]?.alive === false &&
@@ -541,9 +550,18 @@ export function DndRoom({ room }: { room: RoomView }) {
               <div style={{ width: '220px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <TurnBanner
                   isMyTurn={isMyTurn}
-                  nickname={room.seats.find((s) => s?.playerId === game.turnPlayerId)?.nickname || '—'}
+                  nickname={
+                    room.seats.find((s) => s?.playerId === game.turnPlayerId)?.nickname
+                    || game.seats[game.turnSeat]?.name
+                    || '—'
+                  }
                   remainingMs={remainingMs}
                 />
+                {npcSeatIsMine && myPosition && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--gold)', textAlign: 'center', marginTop: '-0.5rem' }}>
+                    🤖 你正在代打 {game.seats[game.turnSeat]?.name ?? myPosition.piece.name}
+                  </div>
+                )}
 
                 <div className="dnd-party-status">
                   <h3>🛡️ 冒險者隊伍狀態</h3>
@@ -836,9 +854,11 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
   const myRole = mySeat?.dndRole ?? 'hero';
   const isHost = room.hostId === room.me.playerId;
   const difficulty = room.dndDifficulty ?? 'normal';
+  const npcControl = room.dndNpcControl ?? 'auto';
   const bossSeat = room.seats.find((seat) => seat.dndRole === 'boss');
   const bossTakenByOther = !!bossSeat && bossSeat.playerId !== room.me.playerId;
   const humanAdventurers = room.seats.filter((seat) => seat.dndRole !== 'boss').length;
+  const heroCount = humanAdventurers;
 
   return (
     <div className="dnd-lobby-container" style={{ width: '100%', maxWidth: '640px', margin: '0 auto', padding: '1rem' }}>
@@ -890,6 +910,43 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
             🕹️ 單人魔王模式：四位冒險者全部由 NPC 操作，你負責指揮怪物把他們攔下來。
           </p>
         )}
+      </div>
+
+      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>
+        <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.3rem 0', color: 'var(--text)' }}>🤖 空位角色怎麼動</h3>
+        <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 0.8rem 0' }}>
+          沒人坐的位置會補上 NPC 隊友。可以讓他們自己行動，或是全部交給真人冒險者操作
+          {heroCount <= 1 ? '（一個人就等於同時操作 4 個角色）' : ''}。
+          {bossSeat ? '魔王不會拿到隊伍的操作權。' : ''}
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {DND_NPC_CONTROLS.map((option) => {
+            const selected = npcControl === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                disabled={!isHost}
+                onClick={() => socket.emit('room:dndNpcControl', { control: option })}
+                style={{
+                  flex: '1 1 0',
+                  background: selected ? 'rgba(227, 179, 65, 0.12)' : 'var(--panel)',
+                  border: selected ? '2px solid var(--gold)' : '1px solid var(--line)',
+                  borderRadius: '6px',
+                  padding: '0.6rem',
+                  color: selected ? 'var(--gold)' : 'var(--text)',
+                  cursor: isHost ? 'pointer' : 'default',
+                  opacity: isHost || selected ? 1 : 0.5,
+                }}
+              >
+                <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{DND_NPC_CONTROL_LABEL[option]}</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
+                  {option === 'auto' ? 'NPC 自己判斷行動' : '輪到 NPC 時由冒險者下指令'}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>

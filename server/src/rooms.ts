@@ -42,7 +42,9 @@ import {
   type DownstairsCharacterId,
   DND_BOSS_SEAT,
   DND_DIFFICULTIES,
+  DND_NPC_CONTROLS,
   type DndDifficulty,
+  type DndNpcControl,
   type DndRole,
   downstairsView,
   type MinesweeperGameView,
@@ -103,6 +105,8 @@ export interface Room {
   monopolyOptions: MonopolyOptions;
   /** 龍與地下城的難度。房主在開局前決定，開打之後整局固定。 */
   dndDifficulty: DndDifficulty;
+  /** 龍與地下城：NPC 隊友由 AI 自動行動，還是交給房主手動操作。 */
+  dndNpcControl: DndNpcControl;
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -193,6 +197,11 @@ export function normalizeMonopolyOptions(value: unknown): MonopolyOptions {
   return options;
 }
 
+/** 只收認得的 NPC 操作方式，其他一律吃 AI 自動。 */
+export function normalizeDndNpcControl(value: unknown): DndNpcControl {
+  return DND_NPC_CONTROLS.find((control) => control === value) ?? 'auto';
+}
+
 /** 只收認得的難度，其他一律吃一般模式。 */
 export function normalizeDndDifficulty(value: unknown): DndDifficulty {
   return DND_DIFFICULTIES.find((difficulty) => difficulty === value) ?? 'normal';
@@ -224,6 +233,7 @@ export function createRoom(input: CreateRoomInput): Room {
     bigTwoRules,
     monopolyOptions,
     dndDifficulty: 'normal',
+    dndNpcControl: 'auto',
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -340,6 +350,24 @@ export function swapSeats(room: Room, a: number, b: number): void {
   const holder = room.seats[a] ?? null;
   room.seats[a] = room.seats[b] ?? null;
   room.seats[b] = holder;
+}
+
+/**
+ * NPC 隊友交給誰操作。設成 AI 自動就回 null。
+ * 手動時優先給房主，但**房主自己是魔王的話不能操作冒險者隊伍** ——
+ * 那種情況改交給第一位真人冒險者；連一位都沒有就退回 AI。
+ */
+export function npcControllerOf(room: Room): PlayerId | null {
+  if (room.gameType !== 'dnd' || room.dndNpcControl !== 'host') return null;
+
+  const isHero = (playerId: PlayerId) => room.players.get(playerId)?.dndRole !== 'boss';
+  if (room.players.has(room.hostId) && isHero(room.hostId)) return room.hostId;
+
+  for (let seat = 0; seat < DND_BOSS_SEAT; seat++) {
+    const playerId = room.seats[seat];
+    if (playerId && room.players.has(playerId) && isHero(playerId)) return playerId;
+  }
+  return null;
 }
 
 /** 這間房的魔王坐在哪個座位；沒有人當魔王就回 null。 */
@@ -826,6 +854,8 @@ function buildDndGameView(room: Room, game: DndState): DndGameView {
     difficulty: game.difficulty ?? 'normal',
     bossPlayerId: game.bossSeat === null ? null : (room.seats[game.bossSeat] ?? null),
     won: game.over ? game.won : null,
+    turnSeat: game.turnSeat,
+    npcControllerId: game.npcController,
     phase: game.phase,
     actedMonsterIds: [...game.monsterActed],
     movedMonsterIds: [...game.monsterMoved],
@@ -894,6 +924,7 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
     monopolyOptions: room.gameType === 'monopoly' ? room.monopolyOptions : null,
     dndDifficulty: room.gameType === 'dnd' ? room.dndDifficulty : null,
+    dndNpcControl: room.gameType === 'dnd' ? room.dndNpcControl : null,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),
