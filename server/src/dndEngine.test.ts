@@ -494,6 +494,45 @@ describe('D&D Game Engine', () => {
     expect(findPiece(state, (p) => p.id === 'm-net').c).toBeLessThan(10);
   });
 
+  it('should still let the netted Void Chief teleport, only bleeding it', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+    state.level = 3;
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    state.seats[0].hp = 999;
+    rogue.piece.hp = 999;
+    rogue.piece.maxHp = 999;
+
+    // 把 NPC 隊友清掉，酋長的瞬移目標才只有一個，落點才可預期
+    for (const seat of [1, 2, 3]) state.seats[seat].alive = false;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const piece = state.board[r][c].piece;
+        if (piece && piece.type === 'player' && !piece.playerId) state.board[r][c].piece = null;
+      }
+    }
+
+    // 酋長擺在射程內但離得夠遠，正常情況牠會瞬移到玩家旁邊
+    state.board[8][10].piece = {
+      id: 'boss-3', type: 'goblin', name: 'Void Chief (虛空酋長)', hp: 80, maxHp: 80, ac: 15,
+    };
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'boss-3' }, () => 0.5);
+    expect(cast.ok).toBe(true);
+
+    const chief = findPiece(state, (p) => p.id === 'boss-3');
+    // 網子照樣扣血、照樣倒數
+    expect(chief.piece.hp).toBe(79);
+    expect(chief.piece.trappedTurns).toBe(2);
+    // 但牠是瞬移，位置綁不住 —— 已經跳到盜賊旁邊
+    expect(Math.abs(chief.r - 8) + Math.abs(chief.c - 6)).toBe(1);
+  });
+
   it('should reject netting anything that is not a monster', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats, { p1: 'bubble', p2: 'brave' });

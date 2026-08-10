@@ -77,7 +77,7 @@ const MAX_ROUND_LAPS = 12;
 
 export const CLASS_STATS: Record<DownstairsCharacterId, { name: string; hp: number; ac: number; attackBonus: number; dmgDice: number; dmgFlat: number; description: string }> = {
   brave: { name: 'Warrior (戰士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【反射】：受擊時把 1/3 傷害彈回攻擊者！ (移動2格)' },
-  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合（牠仍能攻擊）(移動5格)' },
+  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合（牠仍能攻擊；虛空酋長靠瞬移不受影響）(移動5格)' },
   tangerine: { name: 'Mage (法師)', hp: 16, ac: 10, attackBonus: 3, dmgDice: 10, dmgFlat: 2, description: '遠程爆發，高傷害 (移動1格)' },
   star: { name: 'Cleric (牧師)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '神聖判官，攻擊時治癒隊友 (移動1格)' },
 };
@@ -251,6 +251,15 @@ const DEBUFF_RATIO = 0.6;
 /** 盜賊【撒網】的射程與拘束回合數。 */
 const ROGUE_NET_RANGE = 5;
 const ROGUE_NET_TURNS = 3;
+
+/**
+ * 這隻怪的位置是不是被網子綁住了。
+ * 虛空酋長靠的是瞬間移動而不是雙腳，網子對牠只有持續傷害，擋不住牠的位移。
+ */
+function isRestrained(piece: DndPiece): boolean {
+  if (piece.id === 'boss-3') return false;
+  return !!(piece.trappedTurns && piece.trappedTurns > 0);
+}
 
 /** 戰士被動【反射】彈回去的比例：實際吃到的傷害的 1/3。 */
 const WARRIOR_REFLECT_RATIO = 1 / 3;
@@ -1587,7 +1596,7 @@ function applyBossAction(
   }
 
   if (action.kind === 'bossMove') {
-    if (mon.piece.trappedTurns && mon.piece.trappedTurns > 0) {
+    if (isRestrained(mon.piece)) {
       return { ok: false, error: 'MONSTER_RESTRAINED' };
     }
     if (state.monsterMoved.has(mon.piece.id)) {
@@ -1949,14 +1958,14 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
   monsters.forEach((mon) => {
     // 被網住的怪只是被釘在原地：照樣會攻擊、薩滿照樣會治療與召喚，只是不能移動。
     // 持續傷害與倒數已經在 beginRound 結算過了。
-    const netted = !!(mon.piece.trappedTurns && mon.piece.trappedTurns > 0);
+    const netted = isRestrained(mon.piece);
 
     if (mon.piece.stunnedTurns && mon.piece.stunnedTurns > 0) {
       mon.piece.stunnedTurns--;
       return;
     }
 
-    if (mon.piece.id === 'boss-3' && !netted) {
+    if (mon.piece.id === 'boss-3') {
       const alivePlayers: { piece: DndPiece; r: number; c: number }[] = [];
       for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
