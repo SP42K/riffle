@@ -796,7 +796,6 @@ function buildDndGameView(room: Room, game: DndState): DndGameView {
     seats: game.seats,
     ranking: game.ranking.slice(),
     level: game.level || 1,
-    rogueTraps: game.rogueTraps ? game.rogueTraps.slice() : [],
     fireWalls: game.fireWalls ? game.fireWalls.map((wall) => ({ ...wall })) : [],
     difficulty: game.difficulty ?? 'normal',
     bossPlayerId: game.bossSeat === null ? null : (room.seats[game.bossSeat] ?? null),

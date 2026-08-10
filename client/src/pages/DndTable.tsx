@@ -16,8 +16,8 @@ import { useGame } from '../state/GameProvider';
 import { useSkin } from '../state/skinContext';
 
 const DND_CLASSES: Array<{ id: DownstairsCharacterId; name: string; hp: number; ac: number; desc: string }> = [
-  { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁（優先拖進盜賊陷阱）。【反射】：受擊時把 1/3 的傷害彈回攻擊者（常駐）。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
-  { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12, desc: '突襲刺客，極高機動。【陷阱】：佈置陷阱困住怪物。【弱點打擊】：命中時各1/2機率把目標的 AC 或傷害降到六成（2回合）。 (移動5格)' },
+  { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【反射】：受擊時把 1/3 的傷害彈回攻擊者（常駐）。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
+  { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12, desc: '突襲刺客，極高機動。【撒網】：拘束 5 格內的一隻怪物 3 回合。【弱點打擊】：命中時各1/2機率把目標的 AC 或傷害降到六成（2回合）。 (移動5格)' },
   { id: 'tangerine', name: '法師 (Mage) 🧙', hp: 16, ac: 10, desc: '遠程爆發。【火牆】：對3格內的地面拉出一道3格火牆，站在裡面的怪物每回合燒3點HP，持續2回合。 (移動1格)' },
   { id: 'star', name: '牧師 (Cleric) ⛪', hp: 20, ac: 12, desc: '神聖判官，攻擊時治癒隊友。【神聖治癒】：補3格內隊友4點HP；由NPC操作時會優先搶救血量低於70%的隊友。 (移動1格)' },
 ];
@@ -120,7 +120,7 @@ export function DndRoom({ room }: { room: RoomView }) {
   const getSkillName = (classId: string) => {
     switch (classId) {
       case 'brave': return '⛓️ 鎖鏈';
-      case 'bubble': return '🪤 佈置陷阱';
+      case 'bubble': return '🕸️ 撒網';
       case 'tangerine': return '🔥 火牆';
       case 'star': return '✨ 神聖治癒';
       default: return '✨ 技能';
@@ -200,8 +200,8 @@ export function DndRoom({ room }: { room: RoomView }) {
           executeTurn({ kind: 'skill', targetId: cell.piece.id });
         }
       } else if (classId === 'bubble') {
-        if (!cell.piece && dist <= 5) {
-          executeTurn({ kind: 'skill', r, c });
+        if (cell.piece?.type === 'goblin' && dist <= 5) {
+          executeTurn({ kind: 'skill', targetId: cell.piece.id });
         }
       } else if (classId === 'tangerine') {
         // 【火牆】是對地技，點空地或點怪物腳下都行
@@ -273,16 +273,6 @@ export function DndRoom({ room }: { room: RoomView }) {
         <div className="dnd-token" style={{ opacity: 0.9 }}>
           <span className="token-icon" style={{ fontSize: '1.2rem' }}>🔥</span>
           <span className="token-label" style={{ color: '#e67e22', fontSize: '0.65rem' }}>火牆 {fireWall.turns}</span>
-        </div>
-      );
-    }
-
-    const isRogueTrap = game?.rogueTraps?.some((t) => t.r === r && t.c === c);
-    if (isRogueTrap && !cell.piece) {
-      return (
-        <div className="dnd-token trap-token" style={{ opacity: 0.9 }}>
-          <span className="token-icon" style={{ fontSize: '1.2rem' }}>🪤</span>
-          <span className="token-label" style={{ color: 'var(--gold)', fontSize: '0.65rem' }}>盜賊陷阱</span>
         </div>
       );
     }
@@ -660,11 +650,11 @@ export function DndRoom({ room }: { room: RoomView }) {
                         const isMoveable = distFromOriginal > 0 && distFromOriginal <= moveRange
                           && !!landingCell && (!landingCell.piece || landingCell.piece.type === 'staircase');
                         const isAttackable = myPosition && dist <= attackRange && cell.piece?.type === 'goblin';
-                        const isSkillable = myPosition && dist <= 3 && (
+                        const skillRange = classId === 'bubble' ? 5 : 3;
+                        const isSkillable = myPosition && dist <= skillRange && (
                           classId === 'star' ? cell.piece?.type === 'player'
                           : classId === 'tangerine' ? true // 火牆是對地技，任何格子都能點
-                          : classId === 'brave' ? cell.piece?.type === 'goblin'
-                          : !cell.piece
+                          : cell.piece?.type === 'goblin' // 戰士【鎖鏈】與盜賊【撒網】都是指定怪物
                         );
 
                         let borderClass = '';

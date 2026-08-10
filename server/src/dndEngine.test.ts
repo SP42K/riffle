@@ -402,33 +402,55 @@ describe('D&D Game Engine', () => {
     expect(state.turnSeat).toBe(0);
   });
 
-  it('should snare a monster that the Warrior chains onto a rogue trap', () => {
+  it('should let the Rogue net a monster within five cells for three rounds', () => {
     const seats: Seats = ['p1', null, null, null];
-    const state = dealDnd(seats, { p1: 'brave' });
+    const state = dealDnd(seats, { p1: 'bubble' });
     state.traps = [];
-
-    // 戰士放到空曠處，怪物擺在 3 格外（鎖鏈射程上限）
-    const warrior = findPiece(state, (p) => p.playerId === 'p1');
-    state.board[warrior.r][warrior.c].piece = null;
-    state.board[10][6].piece = warrior.piece;
     clearGoblins(state);
-    state.board[10][9].piece = {
-      id: 'm-chain', type: 'goblin', name: 'Goblin Chain', hp: 14, maxHp: 14, ac: 11,
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+
+    // 6 格外的目標撒不到
+    state.board[8][12].piece = {
+      id: 'm-far', type: 'goblin', name: 'Goblin Far', hp: 20, maxHp: 20, ac: 11,
     };
-    // 盜賊陷阱就佈在戰士右邊那格
-    state.rogueTraps = [{ r: 10, c: 7 }];
+    const tooFar = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-far' });
+    expect(tooFar.ok).toBe(false);
+    expect(tooFar.error).toBe('TARGET_OUT_OF_RANGE');
 
-    const result = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-chain' });
-    expect(result.ok).toBe(true);
+    // 剛好 5 格的目標會被纏住
+    state.board[8][11].piece = {
+      id: 'm-net', type: 'goblin', name: 'Goblin Net', hp: 20, maxHp: 20, ac: 11,
+    };
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-net' }, () => 0.01);
+    expect(cast.ok).toBe(true);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('羅網'))).toBe(true);
 
-    // 有陷阱的那格會被優先選為落點，怪物落地就中陷阱
-    const monster = findPiece(state, (p) => p.id === 'm-chain');
-    expect(monster.r).toBe(10);
-    expect(monster.c).toBe(7);
-    // 綁 3 回合，而同一次動作裡的怪物回合馬上就吃掉一回合並扣 1 點血
-    expect(monster.piece.trappedTurns).toBe(2);
-    expect(monster.piece.hp).toBe(13);
-    expect(state.rogueTraps).toHaveLength(0); // 陷阱是一次性的
+    // 綁 3 回合，而同一次動作裡的怪物回合馬上吃掉一回合並扣 1 點血
+    const netted = findPiece(state, (p) => p.id === 'm-net');
+    expect(netted.piece.trappedTurns).toBe(2);
+    expect(netted.piece.hp).toBe(19);
+    expect(netted.c).toBe(11); // 被纏住就不會往前走
+  });
+
+  it('should reject netting anything that is not a monster', () => {
+    const seats: Seats = ['p1', 'p2', null, null];
+    const state = dealDnd(seats, { p1: 'bubble', p2: 'brave' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    const mate = findPiece(state, (p) => p.playerId === 'p2');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[mate.r][mate.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    state.board[8][7].piece = mate.piece;
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: mate.piece.id });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('TARGET_NOT_FOUND');
   });
 
   it('should end the run when every human seat is down, even if NPC party members survive', () => {

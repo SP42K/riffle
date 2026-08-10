@@ -642,7 +642,7 @@ export interface DndPiece {
   damagedByRogue?: boolean;
   /** 被戰士被動【暈眩】命中時，剩餘無法行動的回合數 */
   stunnedTurns?: number;
-  /** 踩到盜賊陷阱後，剩餘無法移動且每回合扣 1 HP 的回合數 */
+  /** 被盜賊【撒網】纏住後，剩餘無法移動且每回合扣 1 HP 的回合數 */
   trappedTurns?: number;
   /** 怪物一回合能走幾步，沒填是 2（哥布林盜賊是 5） */
   speed?: number;
@@ -696,8 +696,6 @@ export interface DndGameView {
   seats: Record<number, DndSeatInfo>;
   ranking: PlayerId[];
   level: number;
-  /** 盜賊放置的專屬陷阱，己方隊伍看得到（怪物 AI 不會刻意避開） */
-  rogueTraps: Array<{ r: number; c: number }>;
   /** 法師【火牆】燒著的格子，turns 是還會燒幾回合 */
   fireWalls: Array<{ r: number; c: number; turns: number }>;
   /** 這一局的難度，開局時定案 */

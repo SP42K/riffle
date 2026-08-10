@@ -11,7 +11,6 @@ export interface DndState {
   ranking: PlayerId[];
   level: number;
   traps: Array<{ r: number; c: number; triggered: boolean }>;
-  rogueTraps: Array<{ r: number; c: number }>;
   /** 法師【火牆】燒著的格子，turns 是還會燒幾回合 */
   fireWalls: Array<{ r: number; c: number; turns: number }>;
   bossSpawned: boolean;
@@ -76,7 +75,7 @@ const MAX_ROUND_LAPS = 12;
 
 export const CLASS_STATS: Record<DownstairsCharacterId, { name: string; hp: number; ac: number; attackBonus: number; dmgDice: number; dmgFlat: number; description: string }> = {
   brave: { name: 'Warrior (戰士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【反射】：受擊時把 1/3 傷害彈回攻擊者！ (移動2格)' },
-  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動 (移動5格)' },
+  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動。【撒網】：拘束 5 格內的一隻怪物 3 回合 (移動5格)' },
   tangerine: { name: 'Mage (法師)', hp: 16, ac: 10, attackBonus: 3, dmgDice: 10, dmgFlat: 2, description: '遠程爆發，高傷害 (移動1格)' },
   star: { name: 'Cleric (牧師)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '神聖判官，攻擊時治癒隊友 (移動1格)' },
 };
@@ -113,29 +112,6 @@ function spawnTraps(state: DndState, count: number, rng: () => number) {
       }
     }
   }
-}
-
-function rogueTrapAt(state: DndState, r: number, c: number): boolean {
-  return !!state.rogueTraps?.some((trap) => trap.r === r && trap.c === c);
-}
-
-/**
- * 怪物進到盜賊陷阱格的判定。怪物自己走進去、被戰士【鎖鏈】拖進去都走這裡 ——
- * 兩邊各寫一份的話規則遲早會漂移。
- */
-function triggerRogueTrap(state: DndState, piece: DndPiece, r: number, c: number): LogEvent[] {
-  if (!state.rogueTraps) return [];
-  const trapIndex = state.rogueTraps.findIndex((trap) => trap.r === r && trap.c === c);
-  if (trapIndex === -1) return [];
-
-  state.rogueTraps.splice(trapIndex, 1);
-  piece.trappedTurns = 3;
-  return [
-    {
-      t: 'dndMessage',
-      message: `💥 ${piece.name} 踩中了盜賊陷阱，接下來 3 回合將無法移動並持續受傷！`,
-    } as any,
-  ];
 }
 
 function inBounds(r: number, c: number): boolean {
@@ -269,6 +245,10 @@ function checkBossFinalPhase(state: DndState, rng: () => number): LogEvent[] {
 
 const DEBUFF_TURNS = 2;
 const DEBUFF_RATIO = 0.6;
+
+/** 盜賊【撒網】的射程與拘束回合數。 */
+const ROGUE_NET_RANGE = 5;
+const ROGUE_NET_TURNS = 3;
 
 /** 戰士被動【反射】彈回去的比例：實際吃到的傷害的 1/3。 */
 const WARRIOR_REFLECT_RATIO = 1 / 3;
@@ -491,7 +471,6 @@ function warriorPassive(
     state.board[tr]![tc]!.piece = null;
     state.board[landedR]![landedC]!.piece = target;
     events.push({ t: 'dndMessage', message: `💥 ${who} 一記盾擊，把 ${target.name} 擊退了！` } as any);
-    events.push(...triggerRogueTrap(state, target, landedR, landedC));
     return events;
   }
 
@@ -706,7 +685,6 @@ function transitionToNextLevel(
   }
 
   spawnTraps(state, 8, rng);
-  state.rogueTraps = [];
   state.fireWalls = [];
   state.bossSpawned = false;
   state.finalPhase = false;
@@ -897,7 +875,6 @@ export function dealDnd(
     ranking: [],
     level: 1,
     traps: [],
-    rogueTraps: [],
     fireWalls: [],
     bossSpawned: false,
     turnHasMoved: false,
@@ -990,7 +967,7 @@ function endRound(seats: Seats, state: DndState, rng: () => number, events: LogE
     }
   }
 
-  // 怪物也可能死在自己的回合裡（踩到盜賊陷阱被扣血致死），那條路徑沒有經過玩家的
+  // 怪物也可能死在自己的回合裡（被撒網纏住持續扣血、或被火牆燒死），那些路徑沒有經過玩家的
   // 擊殺判定，這裡補一次檢查，否則這層會變成「沒有怪、也沒有 Boss／樓梯」的死局。
   checkAndSpawnBossOrStaircase(seats, state, events, rng);
 }
@@ -1454,18 +1431,19 @@ export function applyDndAction(
       events.push({ t: 'dndMessage', message: `✨ ${playerPiece.name.split(' ')[0]} 施放治癒術，恢復了 ${targetPiece.name.split(' ')[0]} ${healAmt} 點 HP！` } as any);
       
     } else if (classId === 'bubble') {
-      if (currentAction.r === undefined || currentAction.c === undefined) return { ok: false, error: 'BAD_ACTION' };
-      const tr = currentAction.r;
-      const tc = currentAction.c;
-      const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
-      
-      if (dist > 5) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
-      if (state.board[tr]?.[tc]?.piece !== null) return { ok: false, error: 'CELL_OCCUPIED' };
-      
-      if (!state.rogueTraps) state.rogueTraps = [];
-      state.rogueTraps.push({ r: tr, c: tc });
-      
-      events.push({ t: 'dndMessage', message: `🪤 ${playerPiece.name.split(' ')[0]} 在 (${tr}, ${tc}) 佈置了專屬陷阱！` } as any);
+      // 【撒網】：對 5 格內的一隻怪物撒網把牠拘束住
+      if (!targetId) return { ok: false, error: 'BAD_ACTION' };
+      const netted = findPieceById(state, targetId);
+      if (!netted || netted.piece.type !== 'goblin') return { ok: false, error: 'TARGET_NOT_FOUND' };
+
+      const dist = Math.abs(pr - netted.r) + Math.abs(pc - netted.c);
+      if (dist > ROGUE_NET_RANGE) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
+
+      netted.piece.trappedTurns = ROGUE_NET_TURNS;
+      events.push({
+        t: 'dndMessage',
+        message: `🕸️ ${playerPiece.name.split(' ')[0]} 撒出羅網纏住 ${netted.piece.name}，接下來 ${ROGUE_NET_TURNS} 回合牠無法移動並持續受傷！`,
+      } as any);
 
     } else if (classId === 'brave') {
       if (!targetId) return { ok: false, error: 'BAD_ACTION' };
@@ -1491,9 +1469,7 @@ export function applyDndAction(
         if (pos.r < 0 || pos.r >= BOARD_SIZE || pos.c < 0 || pos.c >= BOARD_SIZE) return false;
         return state.board[pos.r]?.[pos.c]?.piece === null;
       });
-      // 身旁有盜賊陷阱就優先往那格拉 ——「盜賊佈陷阱 → 戰士鎖鏈拖進去」是刻意成立的連段
-      const pullCell =
-        openCells.find((pos) => rogueTrapAt(state, pos.r, pos.c)) ?? openCells[0] ?? null;
+      const pullCell = openCells[0] ?? null;
 
       if (!pullCell) {
         events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 施放【鎖鏈】，但周圍沒有空間可以將怪物拉過來！` } as any);
@@ -1504,7 +1480,6 @@ export function applyDndAction(
           newMonsterCell.piece = targetMonster;
           oldMonsterCell.piece = null;
           events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 揮出【鎖鏈】，將 ${targetMonster.name} 強行拉到身旁！` } as any);
-          events.push(...triggerRogueTrap(state, targetMonster, pullCell.r, pullCell.c));
         }
       }
 
@@ -1615,7 +1590,6 @@ function applyBossAction(
     state.monsterMoved.add(mon.piece.id);
 
     events.push({ t: 'dndMove', player: mon.piece.name, dir: 'moveTo' } as any);
-    events.push(...triggerRogueTrap(state, mon.piece, tr, tc));
     return { ok: true, events };
   }
 
@@ -2135,7 +2109,6 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
             mon.r = bestMove.r;
             mon.c = bestMove.c;
             events.push({ t: 'dndMove', player: mon.piece.name, dir: bestMove.dir });
-            events.push(...triggerRogueTrap(state, mon.piece, bestMove.r, bestMove.c));
           }
         } else {
           break;
