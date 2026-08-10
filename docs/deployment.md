@@ -20,6 +20,9 @@
 如果只是想找個地方把遊戲開起來給人玩，**方案 C 最省事**；
 如果想吃 Vercel 的 CDN 與 preview deployment，走**方案 A**。
 
+> **本專案採用方案 A**（Vercel 前端 + Render 後端），程式與設定檔都已就緒，
+> 剩下的只有兩個平台上要填的環境變數。詳見下面的〈方案 A〉。
+
 ---
 
 ## 為什麼後端跟 Vercel 衝突
@@ -90,82 +93,73 @@ Vercel Cron 的最小粒度也差了好幾個數量級。
 
 ---
 
-## 方案 A：Vercel 放前端，後端放常駐容器（建議）
+## 方案 A：Vercel 放前端，Render 放後端（採用中）
 
 ```
 瀏覽器 ──── https://xxx.vercel.app ────► Vercel（靜態 client/dist）
-   └────── wss://game.example.com/socket.io ────► 常駐容器（server，socket.io）
+   └────── wss://xxx.onrender.com/socket.io ────► Render（server，socket.io）
 ```
 
 好處是**遊戲邏輯完全不動** —— 單行程、記憶體狀態、`turnSeat` 的語意、
 `scheduleTurn` 的兩段時鐘，這些 `CLAUDE.md` 裡的架構前提全部維持原樣。
 
-### 需要的改動
+### 需要的改動（全部已完成）
 
-**1. 前端要能指向別的網域。** 現在 `client/src/net/socket.ts:65` 是同源連線，
-沒有任何伺服器位址的設定：
+| # | 改動 | 落點 |
+|---|---|---|
+| 1 | 前端能指向別的網域 | `client/src/net/socket.ts` 讀 `VITE_SERVER_URL`，沒設就走同源（方案 C 不受影響）；型別在 `client/src/vite-env.d.ts` |
+| 2 | CORS 收緊 | `server/src/index.ts` 讀 `CORS_ORIGIN`。`cors` 只管得到 polling，所以白名單另外掛在 `allowRequest`，WebSocket 升級一起擋 |
+| 3 | `vercel.json` | repo root。`installCommand: npm ci` 必須在 **repo root** 跑（`shared` 是 workspace 相依），所以 Vercel 的 Root Directory 要留 `./`，不能設成 `client/` |
+| 4 | 後端容器 / 執行設定 | `Dockerfile`（`server` 與 `fullstack` 兩個 target）＋ `docker-compose.yml`；Render 走的是 `render.yaml` 的 Node 原生 runtime，不經過 Docker |
+| 5 | Node 版本釘住 | root `package.json` 的 `engines.node: ">=22.12"`。client 用 vite 7，撞到平台的舊預設就是 build 失敗；Vercel 與 Render 都讀這一欄 |
 
-```ts
-export const socket: GameSocket = io({ autoConnect: false });
-```
-
-改成讀環境變數，讓「單一容器同源」與「前後端分家」兩種模式都成立：
-
-```ts
-export const socket: GameSocket = io(import.meta.env.VITE_SERVER_URL || undefined, {
-  autoConnect: false,
-});
-```
-
-沒設 `VITE_SERVER_URL` 時 `undefined` 會走同源，方案 C 不受影響。
-
-**2. CORS 要收緊。** `server/src/index.ts:37` 現在是 `cors: { origin: true, credentials: true }`，
-同源部署下無所謂，跨網域之後太鬆，應該改成環境變數給的白名單。
-
-**3. 新增 `vercel.json`。** Vercel 要在 repo root 安裝 workspace（`shared` 是 workspace 相依）：
-
-```json
-{
-  "buildCommand": "npm run build",
-  "outputDirectory": "client/dist",
-  "installCommand": "npm ci",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
-}
-```
-
-`rewrites` 取代 `server/src/index.ts:32` 那個 SPA fallback（前端不再由後端吐出）。
-
-**4. 新增 `Dockerfile`（通用，Fly.io / Railway / Render / VPS 都能吃）：**
-
-```dockerfile
-FROM node:24-slim
-WORKDIR /app
-COPY package.json package-lock.json ./
-COPY shared/package.json shared/
-COPY server/package.json server/
-COPY client/package.json client/
-RUN npm ci --omit=dev --workspace server --include-workspace-root
-COPY . .
-ENV PORT=3001 HOST=0.0.0.0
-EXPOSE 3001
-CMD ["npm", "start", "-w", "server"]
-```
+`vercel.json` 的 `rewrites` 取代 `server/src/index.ts` 那個 SPA fallback（前端不再由後端吐出）。
+Render 用 Node runtime 是因為**它沒有 Docker `--target` 設定**，直接指 Dockerfile 會建到最後一個
+stage（`fullstack`，含前端）；Node runtime 下沒有 `client/dist`，`existsSync` 算不到就只跑 API。
 
 要點：
 
 - **目錄結構不能動。** 後端是用相對路徑 `../../client/dist` 找前端的
   （`.github/workflows/release.yml` 的註解也點名這件事）。
-- 容器裡**不需要** `client/dist` —— `existsSync` 在啟動時算一次算不到，
-  伺服器就只跑 API，前端交給 Vercel。
-- health check 直接用現成的 `GET /healthz`（`server/src/index.ts:25`）。
+- health check 直接用現成的 `GET /healthz`（`server/src/index.ts`）。
 - 一個 instance，不要開 autoscaling —— 狀態在記憶體裡，多開一台就是兩個平行世界。
+
+### 要填的環境變數
+
+**Vercel — Project Settings → Environment Variables**
+
+| 變數 | 值 | 環境 | 備註 |
+|---|---|---|---|
+| `VITE_SERVER_URL` | `https://<service>.onrender.com` | Production | **build 當下寫死進 bundle**，改值一定要重新 deploy 才生效 |
+
+不是環境變數、但要在 Project Settings 對的欄位：Root Directory = `./`、
+Framework Preset = Vite（Build / Install / Output 由 `vercel.json` 覆寫）。
+
+**Render — Web Service → Environment**（其餘由 `render.yaml` 帶入）
+
+| 變數 | 值 | 備註 |
+|---|---|---|
+| `CORS_ORIGIN` | `https://<project>.vercel.app` | 逗號分隔可多個。**設了卻解析不出任何來源會直接 `process.exit(1)`**，不要留空字串 |
+| `HOST` | `0.0.0.0` | `render.yaml` 已帶 |
+| `NODE_VERSION` | `24` | `render.yaml` 已帶 |
+| `PORT` | 不要自己設 | Render 會注入，`server/src/index.ts` 已經讀 `process.env.PORT` |
+
+第一次上線是雞生蛋順序，必定要來回兩趟：
+Render 開服務拿到網域 → 填 Vercel 的 `VITE_SERVER_URL` → deploy Vercel 拿到網域 →
+回填 Render 的 `CORS_ORIGIN` → Render 重新 deploy。
 
 ### 代價
 
 - 多一個網域、多一套 CORS 設定。
-- 玩家身分是 `sessionStorage` 的 `ws.sid`（`client/src/net/socket.ts:10`），不是 cookie，
+- 玩家身分是 `sessionStorage` 的 `ws.sid`（`client/src/net/socket.ts`），不是 cookie，
   所以**不受第三方 cookie 政策影響**，跨網域沒有額外問題。
-- Vercel 的 preview deployment 會指向同一台後端，多人同時測試會共用房間列表。
+- **Render free 方案閒置 15 分鐘會停機**，喚醒約 50 秒。這個專案沒有任何持久化，
+  停機一次所有房間、牌局、籌碼歸零，而 `DISCONNECT_GRACE_MS` 只有 30 秒，玩家一定被踢出座位。
+  要能連著玩就把 `render.yaml` 的 `plan: free` 改成 `starter`（$7/月）。
+  **每次 deploy 也一樣會清空**（換行程 = 換世界），這點付費方案不會變。
+- **Vercel 的 preview deployment 連不上後端**：preview 網址是隨機的，而白名單是精確比對，
+  一律被拒。preview 只驗「前端 build 得出來」；真要測某次 preview，把該網址手動加進
+  `CORS_ORIGIN` 即可。
 
 ---
 
