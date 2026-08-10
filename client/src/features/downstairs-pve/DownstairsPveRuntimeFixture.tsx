@@ -54,6 +54,7 @@ const room: Pick<RoomView, 'me' | 'seats' | 'hostId'> = {
     ready: true,
     connected: true,
     characterId: ['brave', 'bubble', 'tangerine', 'star'][index] as 'brave' | 'bubble' | 'tangerine' | 'star',
+    dndRole: 'hero' as const,
   })),
 };
 

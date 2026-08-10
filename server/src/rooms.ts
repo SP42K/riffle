@@ -40,8 +40,10 @@ import {
   type DownstairsGameView,
   type DownstairsState,
   type DownstairsCharacterId,
+  DND_BOSS_SEAT,
   DND_DIFFICULTIES,
   type DndDifficulty,
+  type DndRole,
   downstairsView,
   type MinesweeperGameView,
   type MinesweeperSeatInfo,
@@ -70,6 +72,8 @@ export interface Member {
   /** 斷線寬限計時器，重新連上時要清掉。 */
   graceTimer: NodeJS.Timeout | null;
   characterId: DownstairsCharacterId;
+  /** 只有龍與地下城使用：當冒險者還是當操控怪物的魔王。 */
+  dndRole: DndRole;
 }
 
 export interface PlayerMember extends Member {
@@ -301,6 +305,25 @@ export function canStart(room: Room): boolean {
   return players.every((p) => p.ready || p.playerId === room.hostId);
 }
 
+/**
+ * 對調兩個座位。魔王一定要坐在最後一個座位，所以認領／放棄角色時用它搬人；
+ * 只在開局前呼叫 —— 遊戲進行中換座位會把手牌與棋子對應弄壞。
+ */
+export function swapSeats(room: Room, a: number, b: number): void {
+  if (a === b) return;
+  const holder = room.seats[a] ?? null;
+  room.seats[a] = room.seats[b] ?? null;
+  room.seats[b] = holder;
+}
+
+/** 這間房的魔王坐在哪個座位；沒有人當魔王就回 null。 */
+export function bossSeatOf(room: Room): number | null {
+  const playerId = room.seats[DND_BOSS_SEAT];
+  if (!playerId) return null;
+  return room.players.get(playerId)?.dndRole === 'boss' ? DND_BOSS_SEAT : null;
+}
+
+
 /** 德州撲克：把籌碼歸零的人補回起始籌碼，回傳補了哪些人。 */
 export function refillChips(room: Room): PlayerId[] {
   const refilled: PlayerId[] = [];
@@ -495,6 +518,7 @@ function buildSeats(room: Room): SeatView[] {
         ready: player.ready,
         connected: player.connected,
         characterId: player.characterId,
+        dndRole: player.dndRole,
       } satisfies SeatView,
     ];
   });
@@ -775,6 +799,10 @@ function buildDndGameView(room: Room, game: DndState): DndGameView {
     rogueTraps: game.rogueTraps ? game.rogueTraps.slice() : [],
     fireWalls: game.fireWalls ? game.fireWalls.map((wall) => ({ ...wall })) : [],
     difficulty: game.difficulty ?? 'normal',
+    bossPlayerId: game.bossSeat === null ? null : (room.seats[game.bossSeat] ?? null),
+    phase: game.phase,
+    actedMonsterIds: [...game.monsterActed],
+    movedMonsterIds: [...game.monsterMoved],
     turnHasMoved: !!game.turnHasMoved,
   };
 }

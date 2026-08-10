@@ -16,7 +16,7 @@ import { useGame } from '../state/GameProvider';
 import { useSkin } from '../state/skinContext';
 
 const DND_CLASSES: Array<{ id: DownstairsCharacterId; name: string; hp: number; ac: number; desc: string }> = [
-  { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁（優先拖進盜賊陷阱）。【掩護】：自動幫鄰近隊友承擔傷害。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
+  { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁（優先拖進盜賊陷阱）。【掩護】：自動幫 4 格內的隊友承擔傷害（每輪一次）。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
   { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12, desc: '突襲刺客，極高機動。【陷阱】：佈置陷阱困住怪物。【弱點打擊】：命中時各1/2機率把目標的 AC 或傷害降到六成（2回合）。 (移動5格)' },
   { id: 'tangerine', name: '法師 (Mage) 🧙', hp: 16, ac: 10, desc: '遠程爆發。【火牆】：對3格內的地面拉出一道3格火牆，站在裡面的怪物每回合燒3點HP，持續2回合。 (移動1格)' },
   { id: 'star', name: '牧師 (Cleric) ⛪', hp: 20, ac: 12, desc: '神聖判官，攻擊時治癒隊友。【神聖治癒】：補3格內隊友4點HP；由NPC操作時會優先搶救血量低於70%的隊友。 (移動1格)' },
@@ -37,13 +37,48 @@ export function DndRoom({ room }: { room: RoomView }) {
   const [turnPhase, setTurnPhase] = useState<'idle' | 'targeting_move' | 'moved' | 'targeting_attack' | 'targeting_skill'>('idle');
   const [pendingMove, setPendingMove] = useState<{ r: number; c: number } | null>(null);
   const [chatInput, setChatInput] = useState('');
+  const [selectedMonsterId, setSelectedMonsterId] = useState<string | null>(null);
+  const [bossMode, setBossMode] = useState<'pick' | 'move' | 'attack'>('pick');
+
+  const iAmBoss = !!game && game.bossPlayerId === me.playerId;
+  const bossPhase = game?.phase === 'boss';
+  const myBossTurn = iAmBoss && bossPhase && isMyTurn;
 
   useEffect(() => {
     if (!isMyTurn) {
       setTurnPhase('idle');
       setPendingMove(null);
+      setSelectedMonsterId(null);
+      setBossMode('pick');
     }
   }, [isMyTurn]);
+
+  /** 魔王選中的那隻怪，連同牠的位置。 */
+  const selectedMonster = useMemo(() => {
+    if (!game || !selectedMonsterId) return null;
+    for (let r = 0; r < game.board.length; r++) {
+      const row = game.board[r];
+      if (!row) continue;
+      for (let c = 0; c < row.length; c++) {
+        const piece = row[c]?.piece;
+        if (piece && piece.id === selectedMonsterId) return { r, c, piece };
+      }
+    }
+    return null;
+  }, [game, selectedMonsterId]);
+
+  /** keepSelection：移動之後保留選取並切到攻擊，跟玩家「移動 → 終結動作」的節奏一致。 */
+  const selectedHasMoved = !!(game && selectedMonsterId && game.movedMonsterIds.includes(selectedMonsterId));
+
+  const bossCommand = (action: unknown, keepSelection = false) => {
+    run(() => emitWithAck('game:dnd', { action: action as any }));
+    if (keepSelection) {
+      setBossMode('attack');
+    } else {
+      setSelectedMonsterId(null);
+      setBossMode('pick');
+    }
+  };
 
   const lastAttackEvent = useMemo(() => {
     const attacks = room.log.filter((e) => ['dndAttack', 'dndTrap', 'dndLevelUp'].includes(e.t));
@@ -89,7 +124,39 @@ export function DndRoom({ room }: { room: RoomView }) {
   };
 
   const handleCellClick = (r: number, c: number) => {
-    if (!isMyTurn || !game || game.over || !myPosition) return;
+    if (!isMyTurn || !game || game.over) return;
+
+    // 魔王回合：先點怪物選中牠，再點目標格／目標角色
+    if (myBossTurn) {
+      const clicked = game.board[r]?.[c]?.piece;
+
+      // 點到另一隻還能指揮的怪就直接換過去（含還沒選任何怪的情況）
+      if (clicked?.type === 'goblin' && !game.actedMonsterIds.includes(clicked.id)) {
+        if (clicked.id !== selectedMonsterId) {
+          setSelectedMonsterId(clicked.id);
+          setBossMode(game.movedMonsterIds.includes(clicked.id) ? 'attack' : 'move');
+        }
+        return;
+      }
+
+      if (bossMode === 'pick' || !selectedMonster) return;
+
+      const dist = Math.abs(r - selectedMonster.r) + Math.abs(c - selectedMonster.c);
+      if (bossMode === 'move') {
+        const speed = selectedMonster.piece.speed ?? 2;
+        if (dist > 0 && dist <= speed && !clicked) {
+          bossCommand({ kind: 'bossMove', monsterId: selectedMonster.piece.id, r, c }, true);
+        }
+      } else if (bossMode === 'attack') {
+        const range = selectedMonster.piece.range ?? (selectedMonster.piece.id === 'boss-3' ? 2 : 1);
+        if (clicked?.type === 'player' && dist <= range) {
+          bossCommand({ kind: 'bossAttack', monsterId: selectedMonster.piece.id, targetId: clicked.id });
+        }
+      }
+      return;
+    }
+
+    if (!myPosition) return;
 
     const currentR = pendingMove ? pendingMove.r : myPosition.r;
     const currentC = pendingMove ? pendingMove.c : myPosition.c;
@@ -260,8 +327,17 @@ export function DndRoom({ room }: { room: RoomView }) {
       else if (piece.name.includes('酋長') || piece.name.includes('Chief')) icon = '👑';
       else if (piece.name.includes('盜賊') || piece.name.includes('Rogue')) icon = '🥷';
       else if (piece.name.includes('法師') || piece.name.includes('Mage')) icon = '🧿';
+      const acted = !!game?.actedMonsterIds.includes(piece.id);
+      const picked = selectedMonsterId === piece.id;
       return (
-        <div className="dnd-token goblin-token">
+        <div
+          className="dnd-token goblin-token"
+          style={{
+            opacity: bossPhase && acted ? 0.35 : 1,
+            outline: picked ? '2px solid var(--gold)' : undefined,
+            borderRadius: picked ? '4px' : undefined,
+          }}
+        >
           <span className="token-icon">{icon}</span>
           <span className="token-label">{piece.name.split(' ')[0]}</span>
           {(piece.stunnedTurns || piece.trappedTurns || piece.acDebuffTurns || piece.atkDebuffTurns) ? (
@@ -275,6 +351,88 @@ export function DndRoom({ room }: { room: RoomView }) {
         </div>
       );
     }
+  };
+
+  const renderBossMenu = () => {
+    if (!game) return null;
+    const monsters: Array<{ id: string; name: string; hp: number; maxHp: number; acted: boolean }> = [];
+    for (const row of game.board) {
+      for (const cell of row) {
+        const piece = cell.piece;
+        if (piece?.type === 'goblin') {
+          monsters.push({
+            id: piece.id,
+            name: piece.name.split(' ')[0]!,
+            hp: piece.hp,
+            maxHp: piece.maxHp,
+            acted: game.actedMonsterIds.includes(piece.id),
+          });
+        }
+      }
+    }
+    const pending = monsters.filter((m) => !m.acted).length;
+
+    return (
+      <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '100%' }}>
+        <h4 style={{ color: 'var(--red)', textAlign: 'center', margin: 0, fontSize: '0.9rem' }}>
+          👑 魔王回合 · 還有 {pending} 隻可以指揮
+        </h4>
+
+        {selectedMonster ? (
+          <>
+            <div style={{ textAlign: 'center', fontSize: '0.85rem', color: 'var(--gold)' }}>
+              已選中 {selectedMonster.piece.name.split(' ')[0]}
+              （移動 {selectedMonster.piece.speed ?? 2} 格 · 射程 {selectedMonster.piece.range ?? (selectedMonster.piece.id === 'boss-3' ? 2 : 1)} 格）
+              {selectedHasMoved && <span style={{ color: 'var(--muted)' }}> · 已移動</span>}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                className={bossMode === 'move' ? 'btn btn--primary' : 'btn'}
+                style={{ flex: 1, justifyContent: 'center', opacity: selectedHasMoved ? 0.45 : 1 }}
+                disabled={selectedHasMoved}
+                onClick={() => setBossMode('move')}
+              >
+                👣 移動
+              </button>
+              <button
+                className={bossMode === 'attack' ? 'btn btn--primary' : 'btn'}
+                style={{ flex: 1, justifyContent: 'center' }}
+                onClick={() => setBossMode('attack')}
+              >
+                ⚔️ 攻擊
+              </button>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--muted)', textAlign: 'center' }}>
+              {bossMode === 'move' ? '點棋盤上的空格移動過去' : '點射程內的冒險者發動攻擊'}
+              <br />可以先移動再攻擊；打不到人就按待命
+            </div>
+            <button
+              className="btn"
+              style={{ width: '100%', justifyContent: 'center' }}
+              onClick={() => bossCommand({ kind: 'bossHold', monsterId: selectedMonster.piece.id })}
+            >
+              🛑 待命（結束這隻的行動）
+            </button>
+            <button className="btn" style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem' }} onClick={() => { setSelectedMonsterId(null); setBossMode('pick'); }}>
+              只是取消選取
+            </button>
+          </>
+        ) : (
+          <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center' }}>
+            點棋盤上的怪物來指揮牠。<br />沒有下令的怪物會在你結束回合後自動行動。
+          </div>
+        )}
+
+        <div style={{ borderTop: '1px solid var(--line)', margin: '0.2rem 0' }} />
+        <button
+          className="btn btn--primary"
+          style={{ width: '100%', justifyContent: 'center' }}
+          onClick={() => bossCommand({ kind: 'bossEnd' })}
+        >
+          ⏭️ 結束回合（其餘交給 AI）
+        </button>
+      </div>
+    );
   };
 
   const renderActionMenu = () => {
@@ -367,6 +525,11 @@ export function DndRoom({ room }: { room: RoomView }) {
                 🏰 地下城第 {game.level} 層 / 共 3 層
                 <span style={{ marginLeft: '0.8rem', fontSize: '0.8rem', color: 'var(--muted)', letterSpacing: 'normal' }}>
                   {DND_DIFFICULTY_LABEL[game.difficulty]}模式 · 怪物強度 {Math.round(DND_DIFFICULTY_MULTIPLIER[game.difficulty] * 100)}%
+                  {game.bossPlayerId && (
+                    <span style={{ color: 'var(--red)' }}>
+                      {' '}· 👑 {room.seats.find((s) => s.playerId === game.bossPlayerId)?.nickname ?? '魔王'} 操控怪物
+                    </span>
+                  )}
                 </span>
               </h3>
               <div style={{ textAlign: 'left', margin: '0 auto', width: '100%', fontSize: '0.9rem', color: 'var(--muted)', background: 'rgba(0,0,0,0.4)', padding: '1rem', borderRadius: '8px', borderLeft: '3px solid var(--gold)', lineHeight: '1.4' }}>
@@ -501,7 +664,23 @@ export function DndRoom({ room }: { room: RoomView }) {
                         );
 
                         let borderClass = '';
-                        if (isMyTurn) {
+                        if (myBossTurn) {
+                          if (!selectedMonster) {
+                            // 還沒選怪：可以指揮的怪物亮起來
+                            if (cell.piece?.type === 'goblin' && !game.actedMonsterIds.includes(cell.piece.id)) {
+                              borderClass = 'can-attack';
+                            }
+                          } else {
+                            const bossDist = Math.abs(r - selectedMonster.r) + Math.abs(c - selectedMonster.c);
+                            const speed = selectedMonster.piece.speed ?? 2;
+                            const range = selectedMonster.piece.range ?? (selectedMonster.piece.id === 'boss-3' ? 2 : 1);
+                            if (bossMode === 'move' && !selectedHasMoved && bossDist > 0 && bossDist <= speed && !cell.piece) {
+                              borderClass = 'can-move';
+                            } else if (bossMode === 'attack' && bossDist <= range && cell.piece?.type === 'player') {
+                              borderClass = 'can-attack';
+                            }
+                          }
+                        } else if (isMyTurn) {
                           if (turnPhase === 'targeting_move') {
                             if (isMoveable) borderClass = 'can-move';
                             if (r === myPosition?.r && c === myPosition?.c) borderClass = 'can-move'; 
@@ -585,11 +764,13 @@ export function DndRoom({ room }: { room: RoomView }) {
           {/* 2. 聊天室下方的【選擇行動操作鍵盤】 */}
           {playing && game && (
             <div>
-              {isMyTurn && myPosition ? (
+              {myBossTurn ? (
+                renderBossMenu()
+              ) : isMyTurn && myPosition ? (
                 renderActionMenu()
               ) : (
                 <div className="panel" style={{ opacity: 0.5, textAlign: 'center', padding: '1.5rem 1rem', fontSize: '0.85rem', color: 'var(--muted)', border: '1px dashed var(--line)' }}>
-                  ⏳ 靜待其他玩家行動
+                  {bossPhase ? '👑 魔王正在指揮怪物…' : '⏳ 靜待其他玩家行動'}
                 </div>
               )}
             </div>
@@ -599,7 +780,11 @@ export function DndRoom({ room }: { room: RoomView }) {
             <div className="game-over-panel" style={{ textAlign: 'center', background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '8px' }}>
               <h2 className="game-over-title" style={{ color: 'var(--gold)', fontSize: '1.2rem', marginBottom: '0.5rem' }}>🎉 冒險結束</h2>
               <p className="game-over-desc" style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
-                {game.ranking.length > 0 ? '隊伍完成了地城清理！' : '隊伍全軍覆沒，冒險失敗！'}
+                {game.ranking.length > 0
+                  ? '隊伍完成了地城清理！'
+                  : game.bossPlayerId
+                    ? '👑 冒險者全軍覆沒 —— 魔王獲勝！'
+                    : '隊伍全軍覆沒，冒險失敗！'}
               </p>
               {isHost && (
                 <button type="button" className="btn btn--primary" onClick={() => emitWithAck('game:start', {})}>
@@ -649,15 +834,65 @@ export function DndRoom({ room }: { room: RoomView }) {
 }
 
 function DndCharacterLobby({ room }: { room: RoomView }) {
-  const mine = room.seats.find((seat) => seat.playerId === room.me.playerId)?.characterId ?? 'brave';
+  const mySeat = room.seats.find((seat) => seat.playerId === room.me.playerId);
+  const mine = mySeat?.characterId ?? 'brave';
+  const myRole = mySeat?.dndRole ?? 'hero';
   const isHost = room.hostId === room.me.playerId;
   const difficulty = room.dndDifficulty ?? 'normal';
+  const bossSeat = room.seats.find((seat) => seat.dndRole === 'boss');
+  const bossTakenByOther = !!bossSeat && bossSeat.playerId !== room.me.playerId;
+  const humanAdventurers = room.seats.filter((seat) => seat.dndRole !== 'boss').length;
 
   return (
     <div className="dnd-lobby-container" style={{ width: '100%', maxWidth: '640px', margin: '0 auto', padding: '1rem' }}>
       <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
         <h2 style={{ color: 'var(--gold)', marginBottom: '0.5rem' }}>⚔️ 選擇你的冒險職業 ⚔️</h2>
         <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>地下城難度已大幅提升！請與隊友協商挑選互補的職業以利破關。</p>
+      </div>
+
+      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>
+        <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.3rem 0', color: 'var(--text)' }}>🎭 你的位置</h3>
+        <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 0.8rem 0' }}>
+          魔王不下場冒險，改成親自指揮場上的怪物。一間房只能有一位魔王；
+          沒有真人冒險者也能開局 —— 四個位置會全部交給 NPC。
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {([
+            { role: 'hero', label: '🗡️ 冒險者', desc: '選職業下地城' },
+            { role: 'boss', label: '👑 魔王', desc: '操控所有怪物' },
+          ] as const).map((option) => {
+            const selected = myRole === option.role;
+            const disabled = option.role === 'boss' && bossTakenByOther;
+            return (
+              <button
+                key={option.role}
+                type="button"
+                disabled={disabled}
+                onClick={() => socket.emit('room:dndRole', { role: option.role })}
+                style={{
+                  flex: '1 1 0',
+                  background: selected ? 'rgba(227, 179, 65, 0.12)' : 'var(--panel)',
+                  border: selected ? '2px solid var(--gold)' : '1px solid var(--line)',
+                  borderRadius: '6px',
+                  padding: '0.6rem',
+                  color: selected ? 'var(--gold)' : 'var(--text)',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  opacity: disabled ? 0.45 : 1,
+                }}
+              >
+                <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{option.label}</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
+                  {disabled ? `${bossSeat?.nickname} 已經選了` : option.desc}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {bossSeat && humanAdventurers === 0 && (
+          <p style={{ fontSize: '0.78rem', color: 'var(--gold)', margin: '0.8rem 0 0 0' }}>
+            🕹️ 單人魔王模式：四位冒險者全部由 NPC 操作，你負責指揮怪物把他們攔下來。
+          </p>
+        )}
       </div>
 
       <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>
@@ -694,7 +929,7 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginBottom: '2rem', opacity: myRole === 'boss' ? 0.35 : 1, pointerEvents: myRole === 'boss' ? 'none' : 'auto' }}>
         {DND_CLASSES.map((cls) => {
           const isSelected = mine === cls.id;
           return (
@@ -736,11 +971,12 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
           {room.seats.map((seat) => {
             if (!seat) return null;
             const classInfo = DND_CLASSES.find((c) => c.id === seat.characterId) || DND_CLASSES[0]!;
+            const isBoss = seat.dndRole === 'boss';
             return (
-              <div key={seat.playerId} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.03)', padding: '6px 12px', borderRadius: '20px', border: '1px solid var(--line)' }}>
-                <span style={{ fontSize: '0.9rem' }}>👤</span>
+              <div key={seat.playerId} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: isBoss ? 'rgba(231, 76, 60, 0.12)' : 'rgba(255,255,255,0.03)', padding: '6px 12px', borderRadius: '20px', border: isBoss ? '1px solid var(--red)' : '1px solid var(--line)' }}>
+                <span style={{ fontSize: '0.9rem' }}>{isBoss ? '👑' : '👤'}</span>
                 <strong style={{ fontSize: '0.85rem' }}>{seat.nickname}</strong>
-                <span style={{ color: 'var(--gold)', fontSize: '0.8rem' }}>[{classInfo.name.split(' ')[0]}]</span>
+                <span style={{ color: 'var(--gold)', fontSize: '0.8rem' }}>[{isBoss ? '魔王' : classInfo.name.split(' ')[0]}]</span>
                 <span className={seat.ready || seat.playerId === room.hostId ? 'tag tag--ready' : 'tag'} style={{ fontSize: '0.7rem' }}>
                   {seat.ready || seat.playerId === room.hostId ? '已準備' : '等待中'}
                 </span>

@@ -248,7 +248,8 @@ export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
   downstairs: { min: 1, max: 4 },
   snake: { min: 2, max: 4 },
   minesweeper: { min: 1, max: 4 },
-  dnd: { min: 1, max: 4 },
+  // 第 5 個座位是魔王專用（4 個冒險者位 + 1 個魔王位）
+  dnd: { min: 1, max: 5 },
 };
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -304,6 +305,8 @@ export interface SeatView {
   connected: boolean;
   /** 只有樓梯小勇者使用；其他玩法仍保留預設值但不呈現。 */
   characterId: DownstairsCharacterId;
+  /** 只有龍與地下城使用：當冒險者還是當魔王。 */
+  dndRole: DndRole;
 }
 
 export interface SpectatorView {
@@ -536,6 +539,8 @@ export interface ClientToServerEvents {
   'room:character': (p: { characterId: DownstairsCharacterId }) => void;
   /** 龍與地下城：房主在開局前選難度。 */
   'room:dndDifficulty': (p: { difficulty: DndDifficulty }) => void;
+  /** 龍與地下城：開局前選要當冒險者還是魔王。 */
+  'room:dndRole': (p: { role: DndRole }) => void;
   'game:start': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 大老二專用。 */
   'game:play': (p: { cardIds: string[] }, ack: Ack<null>) => void;
@@ -599,6 +604,15 @@ export const LOG_HISTORY = 60;
  * 開局前由房主決定，開打之後整局固定。
  */
 export type DndDifficulty = 'easy' | 'normal' | 'hard' | 'hell';
+
+/**
+ * 龍與地下城的位置：冒險者，或是操控怪物的魔王。
+ * 一間房最多一位魔王，而且固定坐在最後一個座位（DND_BOSS_SEAT），
+ * 這樣引擎裡「隊伍就是座位 0~3」的假設一行都不用改。
+ */
+export type DndRole = 'hero' | 'boss';
+
+export const DND_BOSS_SEAT = 4;
 
 export const DND_DIFFICULTIES: readonly DndDifficulty[] = ['easy', 'normal', 'hard', 'hell'];
 
@@ -690,10 +704,29 @@ export interface DndGameView {
   difficulty: DndDifficulty;
   /** 目前輪到的這位玩家，本回合是否已經移動過（決定前端要顯示「移動」還是只剩「攻擊/技能/休息」） */
   turnHasMoved: boolean;
+  /** 操控怪物的玩家；沒有人當魔王時為 null，怪物全部由 AI driving */
+  bossPlayerId: PlayerId | null;
+  /** 現在是冒險者的回合還是魔王的怪物回合 */
+  phase: 'party' | 'boss';
+  /** 這一輪已經行動完的怪物（攻擊過／被自動結算），魔王端據此把牠們畫成已用過 */
+  actedMonsterIds: string[];
+  /** 這一輪已經移動過的怪物，還可以攻擊一次 */
+  movedMonsterIds: string[];
 }
 
 export interface DndAction {
-  kind: 'move' | 'attack' | 'moveTo' | 'rest' | 'skill' | 'turnCombo';
+  kind:
+    | 'move'
+    | 'attack'
+    | 'moveTo'
+    | 'rest'
+    | 'skill'
+    | 'turnCombo'
+    // 魔王回合專用：指揮某一隻怪物，或結束怪物回合（沒動過的怪交給 AI）
+    | 'bossMove'
+    | 'bossAttack'
+    | 'bossHold'
+    | 'bossEnd';
   dir?: 'up' | 'down' | 'left' | 'right';
   targetId?: string;
   r?: number;
@@ -704,4 +737,6 @@ export interface DndAction {
    * 編譯不過」的唯一保障，開一個 any 進來等於兩端都失去檢查。
    */
   action?: DndAction | null;
+  /** 魔王要指揮的那隻怪物 */
+  monsterId?: string;
 }

@@ -4,6 +4,7 @@ import {
   dealDnd,
   applyDndAction,
   autoActDnd,
+  openingDndTurn,
   removePlayerFromDnd,
   checkAndSpawnBossOrStaircase,
   checkDndGameOver,
@@ -77,6 +78,7 @@ describe('D&D Game Engine', () => {
   it('should allow player to move in valid directions and reject invalid moves', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats);
+    state.traps = []; // 隨機陷阱剛好落在目的地會讓這個案例偶發失敗
 
     // Initial position is (15, 6)
     expect(state.board[15][6].piece).not.toBeNull();
@@ -166,6 +168,7 @@ describe('D&D Game Engine', () => {
   it('should check game over conditions and rank players accordingly', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats);
+    state.traps = [];
     
     // Set level to 3 to satisfy victory condition
     state.level = 3;
@@ -190,6 +193,7 @@ describe('D&D Game Engine', () => {
   it('should generate NPC party members for empty seats and execute their turns automatically', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats);
+    state.traps = [];
 
     // Verify 3 NPC adventurers are created, each with a different class
     expect(state.seats[1]?.isNpc).toBe(true);
@@ -223,6 +227,7 @@ describe('D&D Game Engine', () => {
     const seats: Seats = ['p1', null, null, null];
     // 全程假設 p1 是 maxHp 24 的戰士（下面驗算換層回血是 +12）
     const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
     
     // Kill NPC seats to prevent them from taking the stairs automatically
     state.seats[1].alive = false;
@@ -382,6 +387,7 @@ describe('D&D Game Engine', () => {
   it('should run the monster round once per full lap of the seat ring, whichever seat acted', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats);
+    state.traps = [];
 
     // 座位 0 行動：0 → 1 就交棒給另一個真人，這一輪還沒繞完，怪物不動
     const first = applyDndAction(seats, state, 'p1', { kind: 'rest' });
@@ -957,6 +963,388 @@ describe('D&D Game Engine', () => {
     expect(damageOn('easy')).toBe(9);   // round(13 * 0.7)
     expect(damageOn('hard')).toBe(16);  // round(13 * 1.2)
     expect(damageOn('hell')).toBe(20);  // round(13 * 1.5)
+  });
+
+  // ---------------------------------------------------------------------------
+  // 魔王模式：玩家操控怪物
+  // ---------------------------------------------------------------------------
+
+  /** 一個魔王坐第 5 位、真人冒險者坐第 1 位的乾淨盤面，場上只有一隻指定的怪。 */
+  function bossTable() {
+    const seats: Seats = ['p1', null, null, null, 'boss'];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', 4);
+    state.traps = [];
+    clearGoblins(state);
+
+    const hero = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[hero.r][hero.c].piece = null;
+    state.board[8][6].piece = hero.piece;
+    state.seats[0].hp = 999;
+    hero.piece.hp = 999;
+    hero.piece.maxHp = 999;
+
+    // NPC 隊友先移出戰場，讓斷言只跟這一隻怪有關
+    for (const seat of [1, 2, 3]) state.seats[seat].alive = false;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const piece = state.board[r][c].piece;
+        if (piece && piece.type === 'player' && !piece.playerId) state.board[r][c].piece = null;
+      }
+    }
+
+    state.board[8][10].piece = {
+      id: 'm-boss-test', type: 'goblin', name: 'Goblin Pawn', hp: 40, maxHp: 40, ac: 11,
+    };
+    return { seats, state };
+  }
+
+  it('should hand the monster round to the boss player instead of running the AI', () => {
+    const { seats, state } = bossTable();
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(result.ok).toBe(true);
+
+    // 停在魔王身上，而且怪物「還沒動」
+    expect(state.phase).toBe('boss');
+    expect(state.turnSeat).toBe(4);
+    expect(findPiece(state, (p) => p.id === 'm-boss-test').c).toBe(10);
+    expect(state.monsterActed.size).toBe(0);
+  });
+
+  it('should let the boss move and then attack with the same monster', () => {
+    const { seats, state } = bossTable();
+    // 擺到「移動 2 格之後剛好貼到英雄」的位置
+    const pawn = findPiece(state, (p) => p.id === 'm-boss-test');
+    state.board[pawn.r][pawn.c].piece = null;
+    state.board[8][9].piece = pawn.piece;
+    pawn.piece.attackBonus = 40; // 必中，斷言才穩
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    // 一般哥布林速度 2：走 4 格要被擋
+    const tooFar = applyDndAction(seats, state, 'boss', {
+      kind: 'bossMove', monsterId: 'm-boss-test', r: 8, c: 5,
+    });
+    expect(tooFar.ok).toBe(false);
+    expect(tooFar.error).toBe('INVALID_CELL');
+
+    const moved = applyDndAction(seats, state, 'boss', {
+      kind: 'bossMove', monsterId: 'm-boss-test', r: 8, c: 7,
+    });
+    expect(moved.ok).toBe(true);
+    expect(findPiece(state, (p) => p.id === 'm-boss-test').c).toBe(7);
+
+    // 移動只能一次
+    const moveAgain = applyDndAction(seats, state, 'boss', {
+      kind: 'bossMove', monsterId: 'm-boss-test', r: 8, c: 8,
+    });
+    expect(moveAgain.ok).toBe(false);
+    expect(moveAgain.error).toBe('MONSTER_ALREADY_MOVED');
+
+    // 但移動之後還可以攻擊 —— 跟玩家的「移動 → 終結動作」一樣
+    const hpBefore = state.seats[0].hp;
+    const hit = applyDndAction(seats, state, 'boss', {
+      kind: 'bossAttack', monsterId: 'm-boss-test', targetId: 'p-p1',
+    }, () => 0.9);
+    expect(hit.ok).toBe(true);
+    expect(state.seats[0].hp).toBeLessThan(hpBefore);
+
+    // 攻擊完這隻怪就結束了，不能再攻擊也不能再移動
+    const attackAgain = applyDndAction(seats, state, 'boss', {
+      kind: 'bossAttack', monsterId: 'm-boss-test', targetId: 'p-p1',
+    });
+    expect(attackAgain.ok).toBe(false);
+    expect(attackAgain.error).toBe('MONSTER_ALREADY_ACTED');
+  });
+
+  it('should let the boss stand a monster down when there is nobody to hit', () => {
+    const { seats, state } = bossTable();
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    // 移動之後旁邊沒有人可以打 —— 要有「待命」這條路可以結束牠的行動
+    const moved = applyDndAction(seats, state, 'boss', {
+      kind: 'bossMove', monsterId: 'm-boss-test', r: 8, c: 8,
+    });
+    expect(moved.ok).toBe(true);
+
+    const held = applyDndAction(seats, state, 'boss', {
+      kind: 'bossHold', monsterId: 'm-boss-test',
+    });
+    expect(held.ok).toBe(true);
+    expect(state.monsterActed.has('m-boss-test')).toBe(true);
+
+    // 待命之後就不能再動了
+    const after = applyDndAction(seats, state, 'boss', {
+      kind: 'bossAttack', monsterId: 'm-boss-test', targetId: 'p-p1',
+    });
+    expect(after.ok).toBe(false);
+    expect(after.error).toBe('MONSTER_ALREADY_ACTED');
+
+    // 而且結束回合時 AI 也不會再幫牠動一次
+    const at = findPiece(state, (p) => p.id === 'm-boss-test');
+    applyDndAction(seats, state, 'boss', { kind: 'bossEnd' }, () => 0.5);
+    expect(findPiece(state, (p) => p.id === 'm-boss-test').c).toBe(at.c);
+  });
+
+  it('should not let the boss move a monster after it has attacked', () => {
+    const { seats, state } = bossTable();
+    const pawn = findPiece(state, (p) => p.id === 'm-boss-test');
+    state.board[pawn.r][pawn.c].piece = null;
+    state.board[8][7].piece = pawn.piece; // 一開始就貼著英雄
+    pawn.piece.attackBonus = 40;
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    const hit = applyDndAction(seats, state, 'boss', {
+      kind: 'bossAttack', monsterId: 'm-boss-test', targetId: 'p-p1',
+    }, () => 0.9);
+    expect(hit.ok).toBe(true);
+
+    const moveAfter = applyDndAction(seats, state, 'boss', {
+      kind: 'bossMove', monsterId: 'm-boss-test', r: 8, c: 8,
+    });
+    expect(moveAfter.ok).toBe(false);
+    expect(moveAfter.error).toBe('MONSTER_ALREADY_ACTED');
+  });
+
+  it('should resolve a boss-ordered attack with the same rules the AI uses', () => {
+    const { seats, state } = bossTable();
+    // 把怪擺到英雄旁邊
+    const pawn = findPiece(state, (p) => p.id === 'm-boss-test');
+    state.board[pawn.r][pawn.c].piece = null;
+    state.board[8][7].piece = pawn.piece;
+    pawn.piece.attackBonus = 40; // 必中
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    const outOfRange = applyDndAction(seats, state, 'boss', {
+      kind: 'bossAttack', monsterId: 'm-boss-test', targetId: 'no-such-piece',
+    });
+    expect(outOfRange.ok).toBe(false);
+
+    const hpBefore = state.seats[0].hp;
+    const hit = applyDndAction(seats, state, 'boss', {
+      kind: 'bossAttack', monsterId: 'm-boss-test', targetId: 'p-p1',
+    }, () => 0.9);
+    expect(hit.ok).toBe(true);
+    expect(hit.events.some((e) => e.t === 'dndAttack' && e.hit)).toBe(true);
+    expect(state.seats[0].hp).toBeLessThan(hpBefore);
+  });
+
+  it('should only run the AI for monsters the boss did not command', () => {
+    const { seats, state } = bossTable();
+    // 第二隻怪，離英雄很遠
+    state.board[2][2].piece = {
+      id: 'm-idle', type: 'goblin', name: 'Goblin Idle', hp: 20, maxHp: 20, ac: 11,
+    };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    applyDndAction(seats, state, 'boss', { kind: 'bossMove', monsterId: 'm-boss-test', r: 8, c: 8 });
+
+    const commanded = findPiece(state, (p) => p.id === 'm-boss-test');
+    const end = applyDndAction(seats, state, 'boss', { kind: 'bossEnd' }, () => 0.5);
+    expect(end.ok).toBe(true);
+
+    // 被指揮過的沒有再動一次；沒被指揮的由 AI 往英雄靠近
+    expect(findPiece(state, (p) => p.id === 'm-boss-test').c).toBe(commanded.c);
+    const idle = findPiece(state, (p) => p.id === 'm-idle');
+    expect(idle.r + idle.c).toBeGreaterThan(4);
+
+    // 回合交還給冒險者
+    expect(state.phase).toBe('party');
+    expect(state.turnSeat).toBe(0);
+    expect(state.monsterActed.size).toBe(0);
+  });
+
+  it('should treat a boss timeout as ending the monster round', () => {
+    const { seats, state } = bossTable();
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.phase).toBe('boss');
+
+    const acted = autoActDnd(seats, state);
+    expect(acted?.ok).toBe(true);
+    expect(state.phase).toBe('party');
+    expect(state.turnSeat).toBe(0);
+  });
+
+  it('should fall back to full AI control when the boss player leaves', () => {
+    const { seats, state } = bossTable();
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.phase).toBe('boss');
+
+    removePlayerFromDnd(seats, state, 'boss');
+
+    expect(state.bossSeat).toBeNull();
+    expect(state.phase).toBe('party');
+    expect(state.turnSeat).toBe(0);
+
+    // 之後的輪次直接跑怪物 AI，不會再停在魔王身上
+    const after = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(after.ok).toBe(true);
+    expect(state.phase).toBe('party');
+    expect(after.events.some((e) => e.t === 'dndMonsterTurn')).toBe(true);
+  });
+
+  it('should auto-resolve stunned monsters at the start of the boss turn', () => {
+    const { seats, state } = bossTable();
+    const pawn = findPiece(state, (p) => p.id === 'm-boss-test');
+    pawn.piece.stunnedTurns = 1;
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    // 暈眩自動結算掉，魔王不能拿牠來行動
+    expect(state.monsterActed.has('m-boss-test')).toBe(true);
+    const blocked = applyDndAction(seats, state, 'boss', {
+      kind: 'bossMove', monsterId: 'm-boss-test', r: 8, c: 9,
+    });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toBe('MONSTER_ALREADY_ACTED');
+  });
+
+  it('should let a Warrior cover a teammate from up to four cells away, once per round', () => {
+    const seats: Seats = ['p1', 'p2', null, null];
+    const state = dealDnd(seats, { p1: 'brave', p2: 'tangerine' }, 'normal', null);
+    state.traps = [];
+    clearGoblins(state);
+
+    const warrior = findPiece(state, (p) => p.playerId === 'p1');
+    const mage = findPiece(state, (p) => p.playerId === 'p2');
+    state.board[warrior.r][warrior.c].piece = null;
+    state.board[mage.r][mage.c].piece = null;
+
+    // 法師被怪貼著打，戰士站在 4 格外
+    state.board[8][6].piece = mage.piece;
+    state.board[8][7].piece = {
+      id: 'm-cover', type: 'goblin', name: 'Goblin Cover', hp: 40, maxHp: 40, ac: 11,
+      attackBonus: 40, dmgDice: 6,
+    };
+    state.board[8][2].piece = warrior.piece; // 距離法師 4 格
+
+    state.turnSeat = 1;
+    const result = applyDndAction(seats, state, 'p2', { kind: 'rest' }, () => 0.9);
+    expect(result.ok).toBe(true);
+
+    // 這一擊由戰士承受
+    expect(result.events.some(
+      (e) => e.t === 'dndMessage' && e.message.includes('掩護'),
+    )).toBe(true);
+    expect(result.events.some(
+      (e) => e.t === 'dndAttack' && e.hit && e.target.includes('Warrior'),
+    )).toBe(true);
+    expect(state.seats[1].hp).toBe(16); // 法師毫髮無傷
+    expect(state.seats[0].hp).toBeLessThan(24);
+  });
+
+  it('should not cover a teammate further than four cells away', () => {
+    const seats: Seats = ['p1', 'p2', null, null];
+    const state = dealDnd(seats, { p1: 'brave', p2: 'tangerine' }, 'normal', null);
+    state.traps = [];
+    clearGoblins(state);
+
+    const warrior = findPiece(state, (p) => p.playerId === 'p1');
+    const mage = findPiece(state, (p) => p.playerId === 'p2');
+    state.board[warrior.r][warrior.c].piece = null;
+    state.board[mage.r][mage.c].piece = null;
+
+    state.board[8][6].piece = mage.piece;
+    state.board[8][7].piece = {
+      id: 'm-cover', type: 'goblin', name: 'Goblin Cover', hp: 40, maxHp: 40, ac: 11,
+      attackBonus: 40, dmgDice: 6,
+    };
+    state.board[8][1].piece = warrior.piece; // 距離法師 5 格，超出守備範圍
+
+    state.turnSeat = 1;
+    const result = applyDndAction(seats, state, 'p2', { kind: 'rest' }, () => 0.9);
+    expect(result.ok).toBe(true);
+
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('掩護'))).toBe(false);
+    expect(state.seats[1].hp).toBeLessThan(16); // 法師自己吃這一擊
+  });
+
+  it('should let an all-NPC party take the stairs so a solo boss run can progress', () => {
+    const seats: Seats = [null, null, null, null, 'boss'];
+    const state = dealDnd(seats, {}, 'normal', 4);
+    state.traps = [];
+    clearGoblins(state);
+    state.bossSpawned = true;
+
+    // 樓梯就在 NPC 隔壁
+    const npc = findPiece(state, (p) => p.id === 'npc-0');
+    state.board[npc.r][npc.c].piece = null;
+    state.board[8][6].piece = npc.piece;
+    state.board[8][7].piece = {
+      id: 'staircase', type: 'staircase', name: '樓梯 (Stairs)', hp: 0, maxHp: 0, ac: 0,
+    };
+
+    openingDndTurn(seats, state, () => 0.5);
+    // 魔王結束回合 → 換 NPC 隊伍行動，這次牠們必須自己走下去
+    applyDndAction(seats, state, 'boss', { kind: 'bossEnd' }, () => 0.5);
+
+    expect(state.level).toBe(2);
+  });
+
+  it('should keep NPCs off the stairs while a human adventurer is still in the party', () => {
+    const seats: Seats = ['p1', null, null, null, 'boss'];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', 4);
+    state.traps = [];
+    clearGoblins(state);
+    state.bossSpawned = true;
+
+    const npc = findPiece(state, (p) => p.id === 'npc-1');
+    state.board[npc.r][npc.c].piece = null;
+    state.board[8][6].piece = npc.piece;
+    state.board[8][7].piece = {
+      id: 'staircase', type: 'staircase', name: '樓梯 (Stairs)', hp: 0, maxHp: 0, ac: 0,
+    };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.level).toBe(1);
+    expect(findPiece(state, (p) => p.type === 'staircase')).not.toBeNull();
+  });
+
+  it('should support a solo boss run where the whole party is NPC', () => {
+    // 只有魔王一個真人，四個冒險者位全部是 NPC
+    const seats: Seats = [null, null, null, null, 'boss'];
+    const state = dealDnd(seats, {}, 'normal', 4);
+
+    // 開局就要把 NPC 隊伍跑完並把回合交給魔王，不能停在 NPC 座位空轉
+    const opening = openingDndTurn(seats, state, () => 0.5);
+    expect(state.over).toBe(false);
+    expect(state.phase).toBe('boss');
+    expect(state.turnSeat).toBe(4);
+    expect(opening.length).toBeGreaterThan(0);
+
+    // 魔王結束回合後，NPC 隊伍再跑一輪，回合又回到魔王
+    const end = applyDndAction(seats, state, 'boss', { kind: 'bossEnd' }, () => 0.5);
+    expect(end.ok).toBe(true);
+    expect(state.over).toBe(false);
+    expect(state.phase).toBe('boss');
+    expect(state.turnSeat).toBe(4);
+  });
+
+  it('should still end a boss-less run when every human adventurer is down', () => {
+    // 沒有魔王時維持原本的判定：真人全滅就結束
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats);
+    state.seats[0].alive = false;
+
+    const result = checkDndGameOver(seats, state);
+    expect(result.over).toBe(true);
+    expect(result.won).toBe(false);
+  });
+
+  it('should let the party keep playing for the boss until they are wiped out', () => {
+    const seats: Seats = [null, null, null, null, 'boss'];
+    const state = dealDnd(seats, {}, 'normal', 4);
+
+    // 全 NPC 隊伍還活著 → 這一局還沒結束
+    expect(checkDndGameOver(seats, state).over).toBe(false);
+
+    // 隊伍全滅 → 魔王獲勝
+    for (const seat of [0, 1, 2, 3]) state.seats[seat].alive = false;
+    const wiped = checkDndGameOver(seats, state);
+    expect(wiped.over).toBe(true);
+    expect(wiped.won).toBe(false);
   });
 
   it('should allow Mage to attack targets from a distance of up to 3 cells', () => {
