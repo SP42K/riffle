@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm install            # npm workspaces: shared / server / client
-npm run dev            # concurrently: server (tsx watch, :3001) + vite dev (:5173)
+npm run dev            # concurrently: server (tsx watch, :3005) + vite dev (:5173)
 npm test               # vitest run — shared/src/**/*.test.ts + server/src/**/*.test.ts
 npm run test:watch
 npm run typecheck      # tsc -p shared && tsc -p server && tsc -p client (all noEmit)
@@ -232,7 +232,7 @@ everything game-agnostic (header, seat row, log, spectator/chat aside, footer sl
 centre and the controls — `SnakeTable` is the only one with a `keydown` listener (arrows + WASD via
 `event.code`, suppressed while the chat box has focus). Put shared chrome in `RoomShell`, not in a table. `components/Seat.tsx` takes an explicit
 `gameType` prop and switches on it — it used to sniff `chips !== undefined`, which breaks the
-moment a second game has money. The dev server proxies `/socket.io` (including ws) to `:3001`.
+moment a second game has money. The dev server proxies `/socket.io` (including ws) to `:3005`.
 
 Monopoly's board is a **list, one row per tile** (`components/MonopolyBoard.tsx`), not a square
 ring. That is a disguise requirement, not a layout preference: a 40-row list is the only shape the
