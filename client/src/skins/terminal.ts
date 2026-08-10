@@ -242,6 +242,10 @@ function formatLog(event: LogEvent): string {
       return `dungeon session ended — ${event.won ? 'SUCCESS' : 'FAILED'}`;
     case 'timeoutDnd':
       return `${event.player} timeout — auto action`;
+    case 'dndLevelUp':
+      return `level ${event.level} loaded — party healed 50%`;
+    case 'dndTrap':
+      return `trap ${event.player} (-${event.damage} HP)`;
   }
 }
 

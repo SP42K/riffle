@@ -88,6 +88,7 @@ import {
   nicknameOf,
   normalizeBigTwoRules,
   normalizeGameType,
+  normalizeDndDifficulty,
   normalizeMonopolyOptions,
   pushChat,
   pushLog,
@@ -256,6 +257,7 @@ export class GameServer {
     socket.on('game:snake', (payload, ack) => this.onSnake(socket, payload, ack));
     socket.on('game:minesweeper', (payload, ack) => this.onMinesweeper(socket, payload, ack));
     socket.on('game:dnd', (payload, ack) => this.onDnd(socket, payload, ack));
+    socket.on('room:dndDifficulty', (payload) => this.onDndDifficulty(socket, payload));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -643,6 +645,18 @@ export class GameServer {
     this.broadcastRoom(room);
   }
 
+  /** 難度是房主的決定，而且只能在開局前改。 */
+  private onDndDifficulty(socket: GameSocket, payload: { difficulty?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room || room.gameType !== 'dnd') return;
+    if (room.hostId !== session.playerId || statusOf(room) === 'playing') return;
+
+    room.dndDifficulty = normalizeDndDifficulty(payload?.difficulty);
+    this.broadcastRoom(room);
+  }
+
   // -------------------------------------------------------------------------
   // 遊戲
   // -------------------------------------------------------------------------
@@ -723,7 +737,7 @@ export class GameServer {
         const characterIds = Object.fromEntries(
           players.map((player) => [player.playerId, player.characterId])
         );
-        const state = dealDnd(room.seats, characterIds);
+        const state = dealDnd(room.seats, characterIds, room.dndDifficulty);
         room.game = { type: 'dnd', state };
         pushLog(room, { t: 'dndStart', players: seatedPlayers(room).length });
         break;
@@ -1010,7 +1024,7 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
-  private onDnd(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
+private onDnd(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
     const context = this.gameContext(socket, ack);
     if (!context) return;
     const { room, game, playerId } = context;
@@ -1019,14 +1033,19 @@ export class GameServer {
     }
 
     const rawAction = payload?.action as Partial<DndAction>;
-    if (!rawAction || (rawAction.kind !== 'move' && rawAction.kind !== 'attack')) {
+    // 修正這裡：把 rest, skill, turnCombo 放進白名單
+    if (!rawAction || !['move', 'attack', 'moveTo', 'rest', 'skill', 'turnCombo'].includes(rawAction.kind!)) {
       return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的動作' } });
     }
 
     const action: DndAction = {
-      kind: rawAction.kind,
+      kind: rawAction.kind as any,
       dir: rawAction.dir,
       targetId: rawAction.targetId,
+      r: rawAction.r,
+      c: rawAction.c,
+      move: rawAction.move,     // 支援組合動作的移動座標
+      action: rawAction.action, // 支援組合動作的終結招式
     };
 
     const result = applyDndAction(room.seats, game.state, playerId, action);

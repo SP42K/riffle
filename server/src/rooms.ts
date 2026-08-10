@@ -40,6 +40,8 @@ import {
   type DownstairsGameView,
   type DownstairsState,
   type DownstairsCharacterId,
+  DND_DIFFICULTIES,
+  type DndDifficulty,
   downstairsView,
   type MinesweeperGameView,
   type MinesweeperSeatInfo,
@@ -95,6 +97,8 @@ export interface Room {
   bigTwoRules: BigTwoRules;
   /** 大富翁的房間選項。建房時決定，其他玩法用不到但一律有值。 */
   monopolyOptions: MonopolyOptions;
+  /** 龍與地下城的難度。房主在開局前決定，開打之後整局固定。 */
+  dndDifficulty: DndDifficulty;
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -185,6 +189,11 @@ export function normalizeMonopolyOptions(value: unknown): MonopolyOptions {
   return options;
 }
 
+/** 只收認得的難度，其他一律吃一般模式。 */
+export function normalizeDndDifficulty(value: unknown): DndDifficulty {
+  return DND_DIFFICULTIES.find((difficulty) => difficulty === value) ?? 'normal';
+}
+
 export function clampMaxPlayers(value: unknown, gameType: GameType): number {
   const limits = SEAT_LIMITS[gameType];
   const n = Math.floor(Number(value));
@@ -210,6 +219,7 @@ export function createRoom(input: CreateRoomInput): Room {
     gameType,
     bigTwoRules,
     monopolyOptions,
+    dndDifficulty: 'normal',
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -761,6 +771,11 @@ function buildDndGameView(room: Room, game: DndState): DndGameView {
     board: game.board,
     seats: game.seats,
     ranking: game.ranking.slice(),
+    level: game.level || 1,
+    rogueTraps: game.rogueTraps ? game.rogueTraps.slice() : [],
+    fireWalls: game.fireWalls ? game.fireWalls.map((wall) => ({ ...wall })) : [],
+    difficulty: game.difficulty ?? 'normal',
+    turnHasMoved: !!game.turnHasMoved,
   };
 }
 
@@ -824,6 +839,7 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     gameType: room.gameType,
     bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
     monopolyOptions: room.gameType === 'monopoly' ? room.monopolyOptions : null,
+    dndDifficulty: room.gameType === 'dnd' ? room.dndDifficulty : null,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),

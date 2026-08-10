@@ -246,6 +246,10 @@ function formatLog(event: LogEvent): string {
       return `dungeon execution ${event.won ? 'SUCCESS' : 'FAILED'}`;
     case 'timeoutDnd':
       return `${event.player} execution timed out — auto action dispatched`;
+    case 'dndLevelUp':
+      return `[LEVEL] transitioned to dungeon floor ${event.level} (party healed by 50% max HP)`;
+    case 'dndTrap':
+      return `[TRAP] ${event.player} triggered a hidden trap and suffered ${event.damage} dmg`;
   }
 }
 

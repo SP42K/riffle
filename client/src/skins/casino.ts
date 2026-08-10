@@ -240,6 +240,10 @@ function formatLog(event: LogEvent): string {
       return `冒險結束！冒險者隊伍 ${event.won ? '勝利！' : '全軍覆沒…失敗！'}`;
     case 'timeoutDnd':
       return `${event.player} 行動逾時，由系統自動代打`;
+    case 'dndLevelUp':
+      return `✨【樓梯】隊伍成功爬上了地下城第 ${event.level} 層！所有隊員恢復 50% 最大生命值！`;
+    case 'dndTrap':
+      return `⚠️【陷阱】${event.player} 踩到了隱藏陷阱！受到了 ${event.damage} 點傷害！`;
   }
 }
 
