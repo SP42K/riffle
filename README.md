@@ -57,6 +57,70 @@ npm run dev -w client -- --port 80        # dev server 也可以換埠（Vite �
 > Windows 的 80 埠常被 IIS 或 http.sys 占著。若出現 `EADDRINUSE` 就換一個埠，
 > `EACCES` 則需要用系統管理員身分執行。
 
+## 用 Docker 跑
+
+| 跑法 | 指令 | 用途 |
+|---|---|---|
+| 直接執行（現況，不變） | `npm run serve` | 區網開一局、release zip |
+| 容器全套 | `docker build -t riffle .` | 單一容器同源，等同 `npm run serve` |
+| 容器只跑 API | `docker build --target server .` | 前端另外部署（例如 Vercel），後端在常駐容器 |
+
+```bash
+docker build -t riffle .            # 全套（前端 + API）
+docker run -p 8080:3001 riffle
+
+docker build --target server -t riffle-api .   # 只跑 API
+docker run -p 3001:3001 -e CORS_ORIGIN=https://xxx.vercel.app riffle-api
+```
+
+狀態全在記憶體裡（rooms / sessions / playerRoom），所以只能跑單一 instance，不要加
+replicas 或開 autoscaling。前後端分家部署時才需要下面兩個設定，**兩個的時機不一樣**：
+
+- `CORS_ORIGIN`（執行期環境變數）：後端允許的前端來源，逗號分隔；沒設就沿用同源部署的
+  寬鬆預設。有設卻解析不出任何來源（例如只打了逗號）伺服器會直接不啟動，免得靜靜退回全開。
+- `VITE_SERVER_URL`（**build 參數**）：前端要打的後端網域；沒設就走同源。vite 是在打包當下
+  把它寫死進 bundle 的，執行期再設沒有作用，所以要在 build 時帶：
+
+  ```bash
+  docker build --build-arg VITE_SERVER_URL=https://api.example.com -t riffle .
+  ```
+
+  前端上 Vercel 時同理 —— 在 Vercel 的環境變數頁設好，它是在那邊 build 的。
+
+> `CORS_ORIGIN` 擋的是瀏覽器發起的跨站連線（polling 與 WebSocket 升級都會驗）。
+> 這個服務本來就沒有帳號密碼，白名單不等於存取控制，別拿它當權限用。
+
+## 部署到 Vercel + Render
+
+前端（`client/dist`）上 Vercel，後端上 Render 的常駐服務，兩個設定檔都在 repo root：
+`vercel.json` 與 `render.yaml`。遊戲邏輯完全不動。權衡與其他方案見
+[`docs/deployment.md`](docs/deployment.md)。
+
+第一次上線是雞生蛋順序，一定要來回兩趟：
+
+1. Render 接這個 repo 開 Web Service（會讀 `render.yaml`），拿到 `https://xxx.onrender.com`。
+2. Vercel 接這個 repo，**Root Directory 留 `./`**（`shared` 是 workspace 相依，必須在 root 安裝），
+   環境變數填 `VITE_SERVER_URL=https://xxx.onrender.com`，deploy 拿到 `https://xxx.vercel.app`。
+3. 回 Render 填 `CORS_ORIGIN=https://xxx.vercel.app`，重新 deploy。
+
+| 平台 | 變數 | 時機 | 備註 |
+|---|---|---|---|
+| Vercel | `VITE_SERVER_URL` | **build 時** | 寫死進 bundle，改值要重新 deploy 才生效 |
+| Render | `CORS_ORIGIN` | 執行期 | 逗號分隔可多個；設了卻解析不出來源，伺服器會直接不啟動 |
+| Render | `PORT` | — | **不要自己設**，Render 會注入 |
+
+其餘（`HOST`、`NODE_VERSION`）由 `render.yaml` 帶入。Render 走 Node 原生 runtime 而不是 Docker，
+因為 Render 沒有 `--target` 設定，會建到 Dockerfile 的最後一個 stage（含前端那個）；
+Node runtime 下沒有 `client/dist`，後端就只跑 API。
+
+兩件先知道比較好的事：
+
+- **Render free 方案閒置 15 分鐘會停機**，喚醒約 50 秒。狀態全在記憶體，停機一次所有房間與
+  牌局歸零，斷線寬限只有 30 秒，玩家一定被踢出座位。要能連著玩就把 `render.yaml` 的
+  `plan: free` 改成 `starter`。**每次 deploy 也一樣會清空**，這點付費方案不會變。
+- **Vercel 的 preview deployment 連不上後端**：preview 網址是隨機的，白名單是精確比對，
+  一律被拒。preview 只驗前端 build 得出來；真要測就把該網址手動加進 `CORS_ORIGIN`。
+
 ## 大老二
 
 **牌組**　52 張。點數 `3 < 4 < … < K < A < 2`，花色 `♦ < ♣ < ♥ < ♠`。
