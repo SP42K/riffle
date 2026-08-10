@@ -50,14 +50,16 @@ export function DndRoom({ room }: { room: RoomView }) {
   const bossPhase = game?.phase === 'boss';
   const myBossTurn = iAmBoss && bossPhase && isMyTurn;
 
+  // 換人（或代打時換到另一個座位）就把選到一半的東西清乾淨。
+  // 只看 isMyTurn 不夠：代打時從自己的角色換到 NPC、或從一個 NPC 換到下一個，
+  // isMyTurn 一路都是 true，上一顆棋子留下的 pendingMove 會被套到新的棋子上，
+  // 送出去的座標對牠來說超出範圍（或是把牠傳送到玩家沒選過的格子）。
   useEffect(() => {
-    if (!isMyTurn) {
-      setTurnPhase('idle');
-      setPendingMove(null);
-      setSelectedMonsterId(null);
-      setBossMode('pick');
-    }
-  }, [isMyTurn]);
+    setTurnPhase('idle');
+    setPendingMove(null);
+    setSelectedMonsterId(null);
+    setBossMode('pick');
+  }, [isMyTurn, game?.turnSeat]);
 
   /** 魔王選中的那隻怪，連同牠的位置。 */
   const selectedMonster = useMemo(() => {

@@ -1553,6 +1553,34 @@ describe('D&D Game Engine', () => {
     expect(byHero.ok).toBe(true);
   });
 
+  it('should charge the skill cooldown to the seat that acted, not to the controller', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1');
+    state.traps = [];
+    state.turnSeat = 1; // NPC 座位，由 p1 代打
+    state.seats[0].skillCooldown = 1; // p1 自己剛用過技能
+
+    const acted = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(acted.ok).toBe(true);
+    // 代打 NPC 的行動不能去動操作者自己的冷卻
+    expect(state.seats[0].skillCooldown).toBe(1);
+  });
+
+  it('should keep advancing an NPC seat after the controller has left', () => {
+    const seats: Seats = ['p1', 'p2', null, null];
+    const state = dealDnd(seats, { p1: 'brave', p2: 'star' }, 'normal', null, 'p1');
+    state.traps = [];
+    state.turnSeat = 3; // 回合正好停在 NPC 座位上
+
+    removePlayerFromDnd(seats, state, 'p1');
+    expect(state.npcController).toBeNull();
+
+    // 代打者走了，這個座位不能再等人輸入 —— autoActDnd 回 null 的話房間會每 45 秒空轉一次
+    const acted = autoActDnd(seats, state, () => 0.5);
+    expect(acted).not.toBeNull();
+    expect(state.over || state.turnSeat === 1).toBe(true);
+  });
+
   it('should support a solo boss run where the whole party is NPC', () => {
     // 只有魔王一個真人，四個冒險者位全部是 NPC
     const seats: Seats = [null, null, null, null, 'boss'];
