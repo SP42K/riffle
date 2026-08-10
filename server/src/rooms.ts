@@ -243,9 +243,28 @@ export function createRoom(input: CreateRoomInput): Room {
   return room;
 }
 
+/**
+ * 下一個可以自動入座的座位；沒有空位回 -1。
+ *
+ * 龍與地下城要特別處理：`DND_BOSS_SEAT` 是魔王專用位，只能透過 `room:dndRole` 認領 ——
+ * 讓自動入座撿走的話，那個人整局都不會有棋子（`dealDnd` 只發座位 0~3）也輪不到回合。
+ * 冒險者位另外照 `maxPlayers` 算額度，這樣「2 人房 + 一位魔王」不會偷偷變成 3 個人。
+ */
+export function freeSeatOf(room: Room): number {
+  if (room.gameType !== 'dnd') return room.seats.indexOf(null);
+
+  const budget = room.maxPlayers - (room.seats[DND_BOSS_SEAT] ? 1 : 0);
+  let taken = 0;
+  for (let i = 0; i < DND_BOSS_SEAT; i++) if (room.seats[i]) taken++;
+  if (taken >= budget) return -1;
+
+  for (let i = 0; i < DND_BOSS_SEAT; i++) if (!room.seats[i]) return i;
+  return -1;
+}
+
 /** 讓成員入座，回傳座位編號；沒有空位回 null。 */
 export function seatPlayer(room: Room, member: Member): number | null {
-  const seat = room.seats.indexOf(null);
+  const seat = freeSeatOf(room);
   if (seat === -1) return null;
   room.seats[seat] = member.playerId;
   room.players.set(member.playerId, { ...member, ready: false });
@@ -268,6 +287,10 @@ export function addSpectator(room: Room, member: Member): void {
 export function removeMember(room: Room, playerId: PlayerId): void {
   const seat = room.seats.indexOf(playerId);
   if (seat !== -1) room.seats[seat] = null;
+  // 離開座位就不再是魔王。改觀戰再改回來時 Member 物件是同一個，不清掉的話那面
+  // 'boss' 旗子會跟著他坐到冒險者位上，之後房裡就再也沒有人能認領魔王。
+  const member = room.players.get(playerId) ?? room.spectators.get(playerId);
+  if (member) member.dndRole = 'hero';
   room.players.delete(playerId);
   room.spectators.delete(playerId);
 
@@ -311,6 +334,9 @@ export function canStart(room: Room): boolean {
  */
 export function swapSeats(room: Room, a: number, b: number): void {
   if (a === b) return;
+  // 房間可能是用小於 DND_BOSS_SEAT+1 的人數開的，直接寫 seats[4] 會留下「洞」——
+  // every/indexOf/filter 對洞的行為各不相同，先補成 null 才不會踩到。
+  for (let i = room.seats.length; i <= Math.max(a, b); i++) room.seats[i] = null;
   const holder = room.seats[a] ?? null;
   room.seats[a] = room.seats[b] ?? null;
   room.seats[b] = holder;

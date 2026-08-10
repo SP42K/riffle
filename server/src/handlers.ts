@@ -92,6 +92,7 @@ import {
   normalizeBigTwoRules,
   normalizeGameType,
   bossSeatOf,
+  freeSeatOf,
   swapSeats,
   normalizeDndDifficulty,
   normalizeMonopolyOptions,
@@ -501,7 +502,8 @@ export class GameServer {
           error: { code: 'IN_PROGRESS', message: '這局已經開打了，可以先觀戰' },
         });
       }
-      if (room.seats.every((seat) => seat !== null)) {
+      // 用 freeSeatOf 而不是「座位陣列填滿了沒」—— 龍與地下城的魔王位不開放自動入座
+      if (freeSeatOf(room) === -1) {
         return reply(ack, { ok: false, error: { code: 'ROOM_FULL', message: '房間已滿，可以先觀戰' } });
       }
     }
@@ -600,7 +602,8 @@ export class GameServer {
         removePlayerFromMinesweeper(room.seats, game.state, playerId);
         return;
       case 'dnd':
-        removePlayerFromDnd(room.seats, game.state, playerId);
+        // 魔王中離會代打完一整輪怪物行動，那些事件要寫進戰報
+        for (const ev of removePlayerFromDnd(room.seats, game.state, playerId)) pushLog(room, ev);
         return;
       default:
         assertNeverGame(game);
@@ -670,14 +673,15 @@ export class GameServer {
     if (seat === -1) return;
 
     if (role === 'boss') {
-      // 已經有人當魔王就不受理
-      const taken = [...room.players.values()].some((p) => p.dndRole === 'boss');
-      if (taken) return;
+      // 已經有人當魔王就不受理。認的是「座位」不是旗子 —— bossSeatOf 才是唯一的真相
+      if (bossSeatOf(room) !== null) return;
       swapSeats(room, seat, DND_BOSS_SEAT);
     } else {
-      // 放回前面第一個空的冒險者位；沒空位就維持原狀
-      const free = room.seats.findIndex((id, idx) => idx < DND_BOSS_SEAT && id === null);
-      if (free !== -1) swapSeats(room, seat, free);
+      // 放回前面第一個空的冒險者位。沒有空位就不能放棄魔王 ——
+      // 讓他留在 DND_BOSS_SEAT 卻標成冒險者的話，dealDnd 不會發給他棋子，整局都輪不到他。
+      const free = room.seats.findIndex((id, idx) => idx < DND_BOSS_SEAT && !id);
+      if (free === -1) return;
+      swapSeats(room, seat, free);
     }
 
     player.dndRole = role;

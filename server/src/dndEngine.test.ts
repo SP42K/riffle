@@ -384,6 +384,39 @@ describe('D&D Game Engine', () => {
     expect(state.board[7][7].piece?.type).toBe('staircase');
   });
 
+  it('should let NPCs descend once every human adventurer is down, so a boss run cannot stall', () => {
+    // 魔王模式：真人陣亡但 NPC 隊友還活著時遊戲會繼續（刻意的），
+    // 這時 NPC 必須自己下樓 —— 否則清完這一層之後整隊會站在樓梯旁邊，房間永遠跑不完。
+    const seats: Seats = ['p1', null, null, null, 'boss'];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', 4);
+
+    clearGoblins(state);
+    state.bossSpawned = true;
+    state.traps = [];
+
+    // 真人陣亡：座位還留著 playerId，只有棋子離場
+    const hero = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[hero.r][hero.c].piece = null;
+    state.seats[0].alive = false;
+
+    state.board[7][7].piece = {
+      id: 'staircase', type: 'staircase', name: '樓梯 (Stairs)', hp: 0, maxHp: 0, ac: 0,
+    };
+    const npc = findPiece(state, (p) => p.id === 'npc-1');
+    state.board[npc.r][npc.c].piece = null;
+    state.board[7][6].piece = npc.piece;
+
+    // 有魔王時全 NPC 隊伍也是合法的一局，遊戲不該在這裡結束
+    expect(checkDndGameOver(seats, state).over).toBe(false);
+
+    state.phase = 'boss';
+    state.turnSeat = 4;
+    const result = applyDndAction(seats, state, 'boss', { kind: 'bossEnd' }, () => 0.5);
+    expect(result.ok).toBe(true);
+
+    expect(state.level).toBe(2);
+  });
+
   it('should run the monster round once per full lap of the seat ring, whichever seat acted', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats);

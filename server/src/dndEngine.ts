@@ -417,13 +417,17 @@ function voidChiefPassive(
 }
 
 /**
- * 隊伍裡還有沒有真人操作的冒險者。
- * 沒有的話（單人魔王模式）NPC 必須自己下樓 —— 否則清完一層之後整隊會站在樓梯旁邊，
- * 永遠不會進到下一層。
+ * 隊伍裡還有沒有「活著的」真人冒險者。
+ * 沒有的話（單人魔王模式、或真人全倒只剩 NPC 隊友）NPC 必須自己下樓 ——
+ * 否則清完一層之後整隊會站在樓梯旁邊，永遠不會進到下一層。
+ *
+ * 一定要看 alive：陣亡的真人 `seats[seat]` 還留著 playerId（只有離開房間才會清成 null），
+ * 只判斷「有沒有人坐在那」的話，魔王模式下真人一死整局就會卡在同一層無限空轉。
  */
 function partyHasHuman(seats: Seats, state: DndState): boolean {
   for (let seat = 0; seat < SEAT_COUNT; seat++) {
-    if (seats[seat] && !state.seats[seat]?.isNpc) return true;
+    const info = state.seats[seat];
+    if (seats[seat] && info?.alive && !info.isNpc) return true;
   }
   return false;
 }
@@ -1559,8 +1563,9 @@ function fearedTarget(
 }
 
 /**
- * 魔王的指令。一隻怪一輪只能做一件事 —— 移動或攻擊，跟 AI 完全一致
- * （runMonstersTurn 是「打得到就打，打不到才走」），這樣手動指揮不會平白變強。
+ * 魔王的指令。一隻怪一輪可以「移動一次 + 攻擊一次」，跟玩家的「移動 → 終結動作」同一個節奏：
+ * bossMove 記進 monsterMoved（只擋再次移動），bossAttack／bossHold 記進 monsterActed
+ * （這隻怪這一輪就結束了）。這比 AI 的「打得到就打，打不到才走」強一階，是刻意的。
  * 沒被指揮過的怪在 bossEnd 時由原本的 AI 接手。
  */
 function applyBossAction(
@@ -2250,21 +2255,26 @@ export function autoActDnd(seats: Seats, state: DndState): DndApplyResult | null
   return applyDndAction(seats, state, playerId, { kind: 'rest' });
 }
 
-export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: PlayerId): void {
+/**
+ * 有人離開這一局。回傳要寫進戰報的事件 —— 魔王中離時會代打完整整一輪怪物行動
+ * （攻擊、陣亡、火牆燒死怪、Boss／樓梯生成都在裡面），丟掉的話冒險者會看到血條無聲無息地掉。
+ */
+export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: PlayerId): LogEvent[] {
+  const events: LogEvent[] = [];
   const seatIndex = seats.indexOf(playerId);
-  if (seatIndex === -1) return;
+  if (seatIndex === -1) return events;
 
   // 魔王中離：怪物退回全自動，如果剛好停在他的回合就替他把這一輪打完
   if (state.bossSeat !== null && seatIndex === state.bossSeat) {
     seats[seatIndex] = null;
     state.bossSeat = null;
     if (state.phase === 'boss') {
-      finishBossTurn(seats, state, [], Math.random);
+      finishBossTurn(seats, state, events, Math.random);
     }
     state.phase = 'party';
     state.monsterMoved.clear();
     state.monsterActed.clear();
-    return;
+    return events;
   }
 
   if (state.seats[seatIndex]) {
@@ -2289,7 +2299,7 @@ export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: Pla
   if (activePlayers.length === 0) {
     state.over = true;
     state.won = false;
-    return;
+    return events;
   }
 
   if (state.turnSeat === seatIndex) {
@@ -2309,13 +2319,15 @@ export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: Pla
       state.over = true;
       state.won = false;
       state.ranking = rankDndSeats(seats, state);
-      return;
+      return events;
     }
 
     state.turnSeat = handOff;
     state.turnDeadline = Date.now() + TURN_MS;
     state.turnHasMoved = false;
   }
+
+  return events;
 }
 
 function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => number): LogEvent[] {

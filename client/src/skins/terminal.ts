@@ -581,6 +581,10 @@ const ERRORS: Skin['errors'] = {
   TARGET_NOT_FOUND: 'no such target',
   ALREADY_MOVED: 'already moved this turn — pick an action',
   SKILL_ON_COOLDOWN: 'still on cooldown',
+  NOT_BOSS_TURN: 'not the root pass right now',
+  MONSTER_NOT_FOUND: 'no such process',
+  MONSTER_ALREADY_ACTED: 'process already ran this pass',
+  MONSTER_ALREADY_MOVED: 'process already moved this pass — exec only',
 };
 
 /** 偽裝成終端機：等寬字、深色、牌變成短代號。 */
