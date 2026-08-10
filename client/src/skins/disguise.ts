@@ -16,4 +16,6 @@ export const GAME_DISGUISABLE: Record<GameType, boolean> = {
   monopoly: true,
   downstairs: false,
   snake: false,
+  minesweeper: true,
+  dnd: true,
 };

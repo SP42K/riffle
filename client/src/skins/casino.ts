@@ -216,6 +216,38 @@ function formatLog(event: LogEvent): string {
       return `${event.player} 吃到自己的地雷果實，大加分`;
     case 'snakeOver':
       return `本局結束：${event.ranking.map((n, i) => `第 ${i + 1} 名 ${n}`).join('、')}`;
+    case 'minesweeperStart':
+      return `新的一局開始，共 ${event.players} 人`;
+    case 'minesweeperReveal':
+      return `${event.player} 點開了 (${event.r + 1}, ${event.c + 1})，${event.points > 0 ? '安全（+1 分）' : '踩雷（-1 分）'}`;
+    case 'minesweeperFlag':
+      return `${event.player} 在 (${event.r + 1}, ${event.c + 1}) ${event.flagged ? '插上旗子' : '拔掉旗子'}`;
+    case 'minesweeperOver':
+      return `遊戲結束：${event.ranking.map((n, i) => `第 ${i + 1} 名 ${n}`).join('、')}`;
+    case 'timeoutMinesweeper':
+      return `${event.player} 逾時，自動隨機點擊`;
+    case 'dndStart':
+      return `地下城冒險開始！隊伍共 ${event.players} 人`;
+    case 'dndMove':
+      return `${event.player} 往 ${event.dir === 'up' ? '上' : event.dir === 'down' ? '下' : event.dir === 'left' ? '左' : '右'} 移動了一格`;
+    case 'dndAttack':
+      return event.damage < 0
+        ? `✨【治療】${event.player} 施放神聖治療，恢復了 ${event.target} ${-event.damage} 點生命值！`
+        : `${event.player} 攻擊了 ${event.target}（ D20: ${event.roll}）— ${event.hit ? `命中！造成 ${event.damage} 點傷害` : '未命中'}`;
+    case 'dndMonsterTurn':
+      return `【怪物回合】哥布林開始行動！`;
+    case 'dndOver':
+      return `冒險結束！冒險者隊伍 ${event.won ? '勝利！' : '全軍覆沒…失敗！'}`;
+    case 'timeoutDnd':
+      return `${event.player} 行動逾時，由系統自動代打`;
+    case 'dndLevelUp':
+      return `✨【樓梯】隊伍成功爬上了地下城第 ${event.level} 層！所有隊員恢復 50% 最大生命值！`;
+    case 'dndTrap':
+      return `⚠️【陷阱】${event.player} 踩到了隱藏陷阱！受到了 ${event.damage} 點傷害！`;
+    // 引擎大部分的地下城敘述都走 dndMessage；漏掉這個 case 的話 formatLog 會回
+    // undefined，戰報整排變空白
+    case 'dndMessage':
+      return event.message;
   }
 }
 

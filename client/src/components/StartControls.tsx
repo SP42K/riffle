@@ -11,6 +11,8 @@ const START_LABEL_KEY: Record<GameType, TextKey> = {
   monopoly: 'start.startMonopoly',
   downstairs: 'start.startDownstairs',
   snake: 'start.startSnake',
+  minesweeper: 'start.startMinesweeper',
+  dnd: 'start.startDnd',
 };
 
 /** 開局前的準備 / 開始遊戲，兩種玩法共用。 */

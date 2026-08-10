@@ -40,7 +40,13 @@ import {
   type DownstairsGameView,
   type DownstairsState,
   type DownstairsCharacterId,
+  DND_DIFFICULTIES,
+  type DndDifficulty,
   downstairsView,
+  type MinesweeperGameView,
+  type MinesweeperSeatInfo,
+  type MinesweeperCellView,
+  type DndGameView,
 } from 'shared';
 import { seatOfPlayer, type GameState, type Seats } from './gameEngine.js';
 import { actionsFor, type HoldemState } from './holdemEngine.js';
@@ -53,6 +59,8 @@ import {
 } from './monopolyEngine.js';
 import type { SnakeEvent, SnakeState } from './snakeEngine.js';
 import { assertNeverGame, type TurnBased } from './turnBased.js';
+import { type MinesweeperState, countAdjacentMines } from './minesweeperEngine.js';
+import { type DndState } from './dndEngine.js';
 
 export interface Member {
   playerId: PlayerId;
@@ -77,7 +85,9 @@ export type RoomGame =
   | { type: 'holdem'; state: HoldemState }
   | { type: 'monopoly'; state: MonopolyState }
   | { type: 'downstairs'; state: DownstairsState }
-  | { type: 'snake'; state: SnakeState };
+  | { type: 'snake'; state: SnakeState }
+  | { type: 'minesweeper'; state: MinesweeperState }
+  | { type: 'dnd'; state: DndState };
 
 export interface Room {
   id: string;
@@ -87,6 +97,8 @@ export interface Room {
   bigTwoRules: BigTwoRules;
   /** 大富翁的房間選項。建房時決定，其他玩法用不到但一律有值。 */
   monopolyOptions: MonopolyOptions;
+  /** 龍與地下城的難度。房主在開局前決定，開打之後整局固定。 */
+  dndDifficulty: DndDifficulty;
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -177,6 +189,11 @@ export function normalizeMonopolyOptions(value: unknown): MonopolyOptions {
   return options;
 }
 
+/** 只收認得的難度，其他一律吃一般模式。 */
+export function normalizeDndDifficulty(value: unknown): DndDifficulty {
+  return DND_DIFFICULTIES.find((difficulty) => difficulty === value) ?? 'normal';
+}
+
 export function clampMaxPlayers(value: unknown, gameType: GameType): number {
   const limits = SEAT_LIMITS[gameType];
   const n = Math.floor(Number(value));
@@ -202,6 +219,7 @@ export function createRoom(input: CreateRoomInput): Room {
     gameType,
     bigTwoRules,
     monopolyOptions,
+    dndDifficulty: 'normal',
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -668,6 +686,59 @@ function buildSnakeGameView(game: SnakeState): SnakeGameView {
   };
 }
 
+function buildMinesweeperGameView(room: Room, game: MinesweeperState): MinesweeperGameView {
+  const board: MinesweeperCellView[][] = [];
+  for (let r = 0; r < game.board.length; r++) {
+    const gameRow = game.board[r]!;
+    const row: MinesweeperCellView[] = [];
+    for (let c = 0; c < gameRow.length; c++) {
+      const cell = gameRow[c]!;
+      const adjacentMines = cell.revealed && !cell.hasMine ? countAdjacentMines(game.board, r, c) : null;
+      row.push({
+        r,
+        c,
+        revealed: cell.revealed,
+        flaggedBy: cell.flaggedBy,
+        exploded: cell.exploded,
+        adjacentMines,
+      });
+    }
+    board.push(row);
+  }
+
+  const seats: Record<number, MinesweeperSeatInfo> = {};
+  for (const [seat, playerId] of room.seats.entries()) {
+    if (!playerId || !room.players.has(playerId)) continue;
+    seats[seat] = {
+      score: game.scores[playerId] ?? 0,
+      finalScore: game.finalScores ? (game.finalScores[playerId] ?? null) : null,
+    };
+  }
+
+  let foundMines = 0;
+  for (let r = 0; r < game.board.length; r++) {
+    const gameRow = game.board[r]!;
+    for (let c = 0; c < gameRow.length; c++) {
+      const cell = gameRow[c]!;
+      if (cell.hasMine && (cell.exploded || cell.flaggedBy !== null)) {
+        foundMines++;
+      }
+    }
+  }
+  const remainingMines = Math.max(0, 15 - foundMines);
+
+  return {
+    type: 'minesweeper',
+    turnPlayerId: game.over ? null : (room.seats[game.turnSeat] ?? null),
+    turnDeadline: game.turnDeadline,
+    over: game.over,
+    board,
+    seats,
+    remainingMines,
+    ranking: game.ranking.slice(),
+  };
+}
+
 function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
   const game = room.game;
   if (!game) return null;
@@ -682,9 +753,30 @@ function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
       return downstairsView(game.state) satisfies DownstairsGameView;
     case 'snake':
       return buildSnakeGameView(game.state);
+    case 'minesweeper':
+      return buildMinesweeperGameView(room, game.state);
+    case 'dnd':
+      return buildDndGameView(room, game.state);
     default:
       return assertNeverGame(game);
   }
+}
+
+function buildDndGameView(room: Room, game: DndState): DndGameView {
+  return {
+    type: 'dnd',
+    turnPlayerId: game.over ? null : (room.seats[game.turnSeat] ?? null),
+    turnDeadline: game.turnDeadline,
+    over: game.over,
+    board: game.board,
+    seats: game.seats,
+    ranking: game.ranking.slice(),
+    level: game.level || 1,
+    rogueTraps: game.rogueTraps ? game.rogueTraps.slice() : [],
+    fireWalls: game.fireWalls ? game.fireWalls.map((wall) => ({ ...wall })) : [],
+    difficulty: game.difficulty ?? 'normal',
+    turnHasMoved: !!game.turnHasMoved,
+  };
 }
 
 /**
@@ -701,6 +793,8 @@ function handOf(game: RoomGame, playerId: PlayerId): Card[] | null {
       return null;
     case 'downstairs':
     case 'snake':
+    case 'minesweeper':
+    case 'dnd':
       return null;
     default:
       return assertNeverGame(game);
@@ -745,6 +839,7 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     gameType: room.gameType,
     bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
     monopolyOptions: room.gameType === 'monopoly' ? room.monopolyOptions : null,
+    dndDifficulty: room.gameType === 'dnd' ? room.dndDifficulty : null,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),

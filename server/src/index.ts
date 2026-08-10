@@ -14,7 +14,7 @@ function arg(name: string): string | undefined {
   return index === -1 ? undefined : process.argv[index + 1];
 }
 
-const PORT = Number(arg('port') ?? process.env.PORT ?? 3001);
+const PORT = Number(arg('port') ?? process.env.PORT ?? 3005);
 /** 預設綁在所有網卡上，同區網的手機／其他電腦才連得進來。 */
 const HOST = arg('host') ?? process.env.HOST ?? '0.0.0.0';
 

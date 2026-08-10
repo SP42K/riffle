@@ -21,7 +21,7 @@ npm run dev
 
 | 指令 | 用途 |
 | --- | --- |
-| `npm run dev` | 同時啟動後端 (3001) 與前端 dev server (5173) |
+| `npm run dev` | 同時啟動後端 (3005) 與前端 dev server (5173) |
 | `npm test` | 規則引擎與遊戲流程的單元測試 |
 | `npm run typecheck` | 三個套件的型別檢查（沒有 linter，這個就是關卡） |
 | `npm run build` | 打包前端到 `client/dist` |
