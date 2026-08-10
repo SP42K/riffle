@@ -435,6 +435,65 @@ describe('D&D Game Engine', () => {
     expect(netted.c).toBe(11); // 被纏住就不會往前走
   });
 
+  it('should keep a netted monster attacking, only pinned in place', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    state.seats[0].hp = 999;
+    rogue.piece.hp = 999;
+    rogue.piece.maxHp = 999;
+
+    // 網住一隻就貼在盜賊旁邊的怪：牠不能走，但打得到人就該照打
+    state.board[8][7].piece = {
+      id: 'm-net', type: 'goblin', name: 'Goblin Net', hp: 20, maxHp: 20, ac: 11,
+      attackBonus: 40, dmgDice: 6,
+    };
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-net' }, () => 0.9);
+    expect(cast.ok).toBe(true);
+
+    // 沒有跳過回合：牠在同一輪的怪物回合裡照樣揮了一刀
+    expect(cast.events.some(
+      (e) => e.t === 'dndAttack' && e.player === 'Goblin Net' && e.hit,
+    )).toBe(true);
+    // 但位置沒有變
+    const netted = findPiece(state, (p) => p.id === 'm-net');
+    expect(netted.r).toBe(8);
+    expect(netted.c).toBe(7);
+  });
+
+  it('should stop a netted monster from closing the distance', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    state.board[8][10].piece = {
+      id: 'm-net', type: 'goblin', name: 'Goblin Net', hp: 20, maxHp: 20, ac: 11,
+    };
+
+    applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-net' }, () => 0.5);
+    expect(findPiece(state, (p) => p.id === 'm-net').c).toBe(10);
+
+    // 下一輪還在網裡，照樣不能靠近
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(findPiece(state, (p) => p.id === 'm-net').c).toBe(10);
+
+    // 網子撐 3 回合，到期之後就會往前壓
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(findPiece(state, (p) => p.id === 'm-net').piece.trappedTurns).toBe(0);
+    expect(findPiece(state, (p) => p.id === 'm-net').c).toBeLessThan(10);
+  });
+
   it('should reject netting anything that is not a monster', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats, { p1: 'bubble', p2: 'brave' });

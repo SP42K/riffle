@@ -44,7 +44,8 @@ export type DndError =
   | 'NOT_BOSS_TURN'
   | 'MONSTER_NOT_FOUND'
   | 'MONSTER_ALREADY_ACTED'
-  | 'MONSTER_ALREADY_MOVED';
+  | 'MONSTER_ALREADY_MOVED'
+  | 'MONSTER_RESTRAINED';
 
 export const DND_ERROR_MESSAGE: Record<DndError, string> = {
   GAME_NOT_RUNNING: '遊戲尚未開始或已結束',
@@ -60,6 +61,7 @@ export const DND_ERROR_MESSAGE: Record<DndError, string> = {
   MONSTER_NOT_FOUND: '找不到這隻怪物',
   MONSTER_ALREADY_ACTED: '這隻怪物這一輪已經行動過了',
   MONSTER_ALREADY_MOVED: '這隻怪物這一輪已經移動過了，只能選擇攻擊',
+  MONSTER_RESTRAINED: '這隻怪物被網子纏住，這幾回合不能移動，但還可以攻擊',
 };
 
 export const BOARD_SIZE = 16;
@@ -75,7 +77,7 @@ const MAX_ROUND_LAPS = 12;
 
 export const CLASS_STATS: Record<DownstairsCharacterId, { name: string; hp: number; ac: number; attackBonus: number; dmgDice: number; dmgFlat: number; description: string }> = {
   brave: { name: 'Warrior (戰士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【反射】：受擊時把 1/3 傷害彈回攻擊者！ (移動2格)' },
-  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動。【撒網】：拘束 5 格內的一隻怪物 3 回合 (移動5格)' },
+  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合（牠仍能攻擊）(移動5格)' },
   tangerine: { name: 'Mage (法師)', hp: 16, ac: 10, attackBonus: 3, dmgDice: 10, dmgFlat: 2, description: '遠程爆發，高傷害 (移動1格)' },
   star: { name: 'Cleric (牧師)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '神聖判官，攻擊時治癒隊友 (移動1格)' },
 };
@@ -906,7 +908,7 @@ export function nextActiveDndSeat(seats: Seats, currentSeat: number, stateSeats:
  * 一輪的前半：放逐倒數與回場、火牆燒人。
  * 跟後半拆開的理由是中間那段「怪物行動」可能由魔王玩家接管，要能停在中間等他輸入。
  */
-function beginRound(state: DndState, events: LogEvent[]) {
+function beginRound(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
   for (let idx = 0; idx < 4; idx++) {
     const seatInfo = state.seats[idx];
     if (seatInfo && seatInfo.alive && seatInfo.banishedTurns && seatInfo.banishedTurns > 0) {
@@ -940,6 +942,31 @@ function beginRound(state: DndState, events: LogEvent[]) {
   // 火牆先燒再讓怪物行動：規則是「站在火牆裡面每回合扣 3」，
   // 等牠們走完才結算的話，被蓋在火牆下的怪只要抬腳就一點傷都不用吃。
   events.push(...burnFireWalls(state));
+
+  // 撒網的持續傷害與倒數。放在這裡而不是怪物 AI 裡，是因為被網住的怪
+  // 仍然會行動（只是不能移動），有魔王時牠也可能由魔王親自指揮 ——
+  // 結算擺在回合開頭才保證「一輪剛好扣一次」。
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r]?.[c]?.piece;
+      if (!piece || piece.type !== 'goblin') continue;
+      if (!piece.trappedTurns || piece.trappedTurns <= 0) continue;
+
+      piece.hp = Math.max(0, piece.hp - 1);
+      piece.trappedTurns--;
+      events.push({
+        t: 'dndMessage',
+        message: `🕸️ ${piece.name} 被網子纏住，原地掙扎並受到 1 點傷害！`,
+      } as any);
+      if (piece.hp <= 0) {
+        state.board[r]![c]!.piece = null;
+        events.push({ t: 'dndMessage', message: `🕸️ ${piece.name} 力竭倒在網中！` } as any);
+      }
+    }
+  }
+
+  // 網子或火牆有可能剛好清掉這一層最後一隻怪，補一次判定才不會卡在「沒怪也沒樓梯」
+  checkAndSpawnBossOrStaircase(seats, state, events, rng);
 }
 
 /** 一輪的後半：減益倒數、玩家身上的增益倒數、補一次 Boss／樓梯判定。 */
@@ -984,15 +1011,6 @@ function autoResolveHelplessMonsters(state: DndState): LogEvent[] {
       const piece = state.board[r]?.[c]?.piece;
       if (!piece || piece.type !== 'goblin') continue;
 
-      if (piece.trappedTurns && piece.trappedTurns > 0) {
-        piece.hp = Math.max(0, piece.hp - 1);
-        piece.trappedTurns--;
-        state.monsterActed.add(piece.id);
-        events.push({ t: 'dndMessage', message: `🪤 ${piece.name} 被陷阱束縛，動彈不得並受到 1 點傷害！` } as any);
-        if (piece.hp <= 0) state.board[r]![c]!.piece = null;
-        continue;
-      }
-
       if (piece.stunnedTurns && piece.stunnedTurns > 0) {
         piece.stunnedTurns--;
         state.monsterActed.add(piece.id);
@@ -1036,7 +1054,7 @@ function finishBossTurn(
 
 /** 沒有魔王時的完整一輪：前半 → 怪物 AI → 後半。 */
 function processRoundEnd(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
-  beginRound(state, events);
+  beginRound(seats, state, rng, events);
   events.push({ t: 'dndMonsterTurn' }); // 戰報上的分隔線，要排在怪物的動作前面
   events.push(...runMonstersTurn(seats, state, rng));
   endRound(seats, state, rng, events);
@@ -1442,7 +1460,7 @@ export function applyDndAction(
       netted.piece.trappedTurns = ROGUE_NET_TURNS;
       events.push({
         t: 'dndMessage',
-        message: `🕸️ ${playerPiece.name.split(' ')[0]} 撒出羅網纏住 ${netted.piece.name}，接下來 ${ROGUE_NET_TURNS} 回合牠無法移動並持續受傷！`,
+        message: `🕸️ ${playerPiece.name.split(' ')[0]} 撒出羅網纏住 ${netted.piece.name}，接下來 ${ROGUE_NET_TURNS} 回合牠被釘在原地並持續受傷！`,
       } as any);
 
     } else if (classId === 'brave') {
@@ -1569,6 +1587,9 @@ function applyBossAction(
   }
 
   if (action.kind === 'bossMove') {
+    if (mon.piece.trappedTurns && mon.piece.trappedTurns > 0) {
+      return { ok: false, error: 'MONSTER_RESTRAINED' };
+    }
     if (state.monsterMoved.has(mon.piece.id)) {
       return { ok: false, error: 'MONSTER_ALREADY_MOVED' };
     }
@@ -1721,7 +1742,7 @@ function advanceParty(
         skipRoundEnd = false;
       } else if (state.bossSeat !== null) {
         laps++;
-        beginRound(state, events);
+        beginRound(seats, state, rng, events);
         if (settleGameOver()) break;
         events.push(...autoResolveHelplessMonsters(state));
         state.phase = 'boss';
@@ -1926,23 +1947,16 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
   }
 
   monsters.forEach((mon) => {
-    if (mon.piece.trappedTurns && mon.piece.trappedTurns > 0) {
-      mon.piece.hp = Math.max(0, mon.piece.hp - 1);
-      mon.piece.trappedTurns--;
-      events.push({ t: 'dndMessage', message: `🪤 ${mon.piece.name} 被陷阱束縛，動彈不得並受到 1 點傷害！` } as any);
-      if (mon.piece.hp <= 0) {
-        const cell = state.board[mon.r]?.[mon.c];
-        if (cell && cell.piece?.id === mon.piece.id) cell.piece = null;
-      }
-      return;
-    }
+    // 被網住的怪只是被釘在原地：照樣會攻擊、薩滿照樣會治療與召喚，只是不能移動。
+    // 持續傷害與倒數已經在 beginRound 結算過了。
+    const netted = !!(mon.piece.trappedTurns && mon.piece.trappedTurns > 0);
 
     if (mon.piece.stunnedTurns && mon.piece.stunnedTurns > 0) {
       mon.piece.stunnedTurns--;
       return;
     }
 
-    if (mon.piece.id === 'boss-3') {
+    if (mon.piece.id === 'boss-3' && !netted) {
       const alivePlayers: { piece: DndPiece; r: number; c: number }[] = [];
       for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
@@ -2073,7 +2087,7 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
 
     if (minDist <= attackRange) {
       events.push(...resolveMonsterAttack(seats, state, mon, targetPlayer, rng));
-    } else {
+    } else if (!netted) {
       // 哥布林盜賊靠 speed 一次衝 5 格，其餘怪物照舊 2 格
       const steps = mon.piece.speed ?? 2;
       for (let s = 0; s < steps; s++) {

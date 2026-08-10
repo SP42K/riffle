@@ -17,7 +17,7 @@ import { useSkin } from '../state/skinContext';
 
 const DND_CLASSES: Array<{ id: DownstairsCharacterId; name: string; hp: number; ac: number; desc: string }> = [
   { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【反射】：受擊時把 1/3 的傷害彈回攻擊者（常駐）。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
-  { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12, desc: '突襲刺客，極高機動。【撒網】：拘束 5 格內的一隻怪物 3 回合。【弱點打擊】：命中時各1/2機率把目標的 AC 或傷害降到六成（2回合）。 (移動5格)' },
+  { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12, desc: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合，期間牠無法移動、每回合扣 1 HP，但仍能攻擊打得到的目標。【弱點打擊】：命中時各1/2機率把目標的 AC 或傷害降到六成（2回合）。 (移動5格)' },
   { id: 'tangerine', name: '法師 (Mage) 🧙', hp: 16, ac: 10, desc: '遠程爆發。【火牆】：對3格內的地面拉出一道3格火牆，站在裡面的怪物每回合燒3點HP，持續2回合。 (移動1格)' },
   { id: 'star', name: '牧師 (Cleric) ⛪', hp: 20, ac: 12, desc: '神聖判官，攻擊時治癒隊友。【神聖治癒】：補3格內隊友4點HP；由NPC操作時會優先搶救血量低於70%的隊友。 (移動1格)' },
 ];
