@@ -1,0 +1,30 @@
+# Render 的後端服務。前端在 Vercel（見 vercel.json 與 docs/deployment.md 的方案 A）。
+#
+# 狀態全在記憶體裡（rooms / sessions / playerRoom / chips），所以：
+#   - 只能一個 instance。free 方案本來就固定 1 台，日後升級付費也不要開 autoscaling。
+#   - 每次 deploy 都會清空所有進行中的房間與牌局，這是換行程的必然結果。
+services:
+  - type: web
+    name: riffle
+    runtime: node
+    # free 閒置 15 分鐘會停機，喚醒約 50 秒，期間所有牌局歸零。
+    # 要能連著玩就改成 starter（$7/月，不 spin down），只有這一行要動。
+    plan: free
+    region: singapore
+    # 跟 Dockerfile 的 deps 階段同一道指令：只裝 server 的執行期相依，
+    # 不把 client 的 react / vite 拖進來。shared 是 workspace 相依，靠 symlink 解析。
+    buildCommand: npm ci --omit=dev --workspace server --include-workspace-root
+    # tsx 是 server 的 prod dependency，直接跑 TypeScript，沒有 build 產物要等。
+    # 映像裡沒有 client/dist，index.ts 的 existsSync 算不到，就只跑 API。
+    startCommand: npm start -w server
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      - key: HOST
+        value: '0.0.0.0'
+      # 允許的前端來源，逗號分隔。留在 dashboard 填，因為要等 Vercel 先給網域。
+      # 有設卻解析不出任何來源，伺服器會直接不啟動（server/src/index.ts）。
+      - key: CORS_ORIGIN
+        sync: false
+    # PORT 由 Render 注入，不要自己設 —— server/src/index.ts 已經讀 process.env.PORT。
