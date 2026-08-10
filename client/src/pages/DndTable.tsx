@@ -16,7 +16,7 @@ import { useGame } from '../state/GameProvider';
 import { useSkin } from '../state/skinContext';
 
 const DND_CLASSES: Array<{ id: DownstairsCharacterId; name: string; hp: number; ac: number; desc: string }> = [
-  { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁（優先拖進盜賊陷阱）。【掩護】：自動幫 4 格內的隊友承擔傷害（每輪一次）。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
+  { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁（優先拖進盜賊陷阱）。【反射】：受擊時把 1/3 的傷害彈回攻擊者（常駐）。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
   { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12, desc: '突襲刺客，極高機動。【陷阱】：佈置陷阱困住怪物。【弱點打擊】：命中時各1/2機率把目標的 AC 或傷害降到六成（2回合）。 (移動5格)' },
   { id: 'tangerine', name: '法師 (Mage) 🧙', hp: 16, ac: 10, desc: '遠程爆發。【火牆】：對3格內的地面拉出一道3格火牆，站在裡面的怪物每回合燒3點HP，持續2回合。 (移動1格)' },
   { id: 'star', name: '牧師 (Cleric) ⛪', hp: 20, ac: 12, desc: '神聖判官，攻擊時治癒隊友。【神聖治癒】：補3格內隊友4點HP；由NPC操作時會優先搶救血量低於70%的隊友。 (移動1格)' },
@@ -102,6 +102,10 @@ export function DndRoom({ room }: { room: RoomView }) {
   }, [game, me.playerId]);
 
   const mySeat = room.seats.find((seat) => seat.playerId === me.playerId)?.seat ?? -1;
+  // 自己倒了但隊友還站著 —— 這種結束要講清楚，不然畫面看起來像莫名其妙跳出來
+  const iDiedWithTeammatesLeft =
+    !!game && mySeat !== -1 && game.seats[mySeat]?.alive === false &&
+    [0, 1, 2, 3].some((seat) => seat !== mySeat && game.seats[seat]?.alive);
   const myFearTurns = mySeat === -1 ? 0 : (game?.seats[mySeat]?.fearTurns ?? 0);
 
   /**
@@ -780,11 +784,14 @@ export function DndRoom({ room }: { room: RoomView }) {
             <div className="game-over-panel" style={{ textAlign: 'center', background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '8px' }}>
               <h2 className="game-over-title" style={{ color: 'var(--gold)', fontSize: '1.2rem', marginBottom: '0.5rem' }}>🎉 冒險結束</h2>
               <p className="game-over-desc" style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
-                {game.ranking.length > 0
+                {/* ranking 勝敗都有值（它是名次表），要看 won 才知道輸贏 */}
+                {game.won
                   ? '隊伍完成了地城清理！'
                   : game.bossPlayerId
                     ? '👑 冒險者全軍覆沒 —— 魔王獲勝！'
-                    : '隊伍全軍覆沒，冒險失敗！'}
+                    : iDiedWithTeammatesLeft
+                      ? '你已陣亡，冒險就此結束 —— 沒有你，隊伍走不下去了。'
+                      : '隊伍全軍覆沒，冒險失敗！'}
               </p>
               {isHost && (
                 <button type="button" className="btn btn--primary" onClick={() => emitWithAck('game:start', {})}>

@@ -800,6 +800,7 @@ function buildDndGameView(room: Room, game: DndState): DndGameView {
     fireWalls: game.fireWalls ? game.fireWalls.map((wall) => ({ ...wall })) : [],
     difficulty: game.difficulty ?? 'normal',
     bossPlayerId: game.bossSeat === null ? null : (room.seats[game.bossSeat] ?? null),
+    won: game.over ? game.won : null,
     phase: game.phase,
     actedMonsterIds: [...game.monsterActed],
     movedMonsterIds: [...game.monsterMoved],

@@ -22,14 +22,14 @@ export interface DndState {
   difficulty: DndDifficulty;
   /** 操控怪物的玩家座位（固定是 DND_BOSS_SEAT）；null 代表沒人當魔王，怪物全自動。 */
   bossSeat: number | null;
+  /** 這一局是不是打贏了。over 為 false 時沒有意義。 */
+  won: boolean;
   /** 現在輪到冒險者還是魔王。沒有魔王時恆為 'party'。 */
   phase: 'party' | 'boss';
   /** 這一輪已經用掉「移動」的怪物 id。 */
   monsterMoved: Set<string>;
   /** 這一輪已經用掉「行動」（攻擊／自動結算）的怪物 id —— 對牠來說這輪結束了。 */
   monsterActed: Set<string>;
-  /** 這一輪已經用掉【掩護】的戰士 id。放在 state 而不是區域變數，魔王逐隻下令時才擋得住重複觸發。 */
-  shieldedThisRound: Set<string>;
 }
 
 export type DndError =
@@ -75,7 +75,7 @@ const SEAT_COUNT = 4;
 const MAX_ROUND_LAPS = 12;
 
 export const CLASS_STATS: Record<DownstairsCharacterId, { name: string; hp: number; ac: number; attackBonus: number; dmgDice: number; dmgFlat: number; description: string }> = {
-  brave: { name: 'Warrior (戰士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【掩護】：自動幫鄰近隊友承擔傷害！ (移動2格)' },
+  brave: { name: 'Warrior (戰士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【反射】：受擊時把 1/3 傷害彈回攻擊者！ (移動2格)' },
   bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動 (移動5格)' },
   tangerine: { name: 'Mage (法師)', hp: 16, ac: 10, attackBonus: 3, dmgDice: 10, dmgFlat: 2, description: '遠程爆發，高傷害 (移動1格)' },
   star: { name: 'Cleric (牧師)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '神聖判官，攻擊時治癒隊友 (移動1格)' },
@@ -270,11 +270,8 @@ function checkBossFinalPhase(state: DndState, rng: () => number): LogEvent[] {
 const DEBUFF_TURNS = 2;
 const DEBUFF_RATIO = 0.6;
 
-/**
- * 戰士被動【掩護】的守備範圍（曼哈頓距離，量的是「戰士 ↔ 被攻擊的隊友」）。
- * 一位戰士每輪仍然只能擋一次，所以放寬距離不會變成無限擋。
- */
-const WARRIOR_COVER_RANGE = 4;
+/** 戰士被動【反射】彈回去的比例：實際吃到的傷害的 1/3。 */
+const WARRIOR_REFLECT_RATIO = 1 / 3;
 
 /** 牧師 NPC 的補血門檻：隊友血量低於這個比例就先補血再說 */
 const NPC_HEAL_THRESHOLD = 0.7;
@@ -907,10 +904,10 @@ export function dealDnd(
     finalPhase: false,
     difficulty,
     bossSeat,
+    won: false,
     phase: 'party',
     monsterMoved: new Set(),
     monsterActed: new Set(),
-    shieldedThisRound: new Set(),
   };
 
   spawnTraps(state, 8, rng);
@@ -933,8 +930,6 @@ export function nextActiveDndSeat(seats: Seats, currentSeat: number, stateSeats:
  * 跟後半拆開的理由是中間那段「怪物行動」可能由魔王玩家接管，要能停在中間等他輸入。
  */
 function beginRound(state: DndState, events: LogEvent[]) {
-  state.shieldedThisRound.clear();
-
   for (let idx = 0; idx < 4; idx++) {
     const seatInfo = state.seats[idx];
     if (seatInfo && seatInfo.alive && seatInfo.banishedTurns && seatInfo.banishedTurns > 0) {
@@ -1051,6 +1046,7 @@ function finishBossTurn(
   const result = checkDndGameOver(seats, state);
   if (result.over) {
     state.over = true;
+    state.won = result.won;
     state.ranking = result.ranking;
     events.push({ t: 'dndOver', won: result.won });
     return { ok: true, events };
@@ -1232,6 +1228,7 @@ export function applyDndAction(
     const moveOverCheck = checkDndGameOver(seats, state);
     if (moveOverCheck.over) {
       state.over = true;
+      state.won = moveOverCheck.won;
       state.ranking = moveOverCheck.ranking;
       events.push({ t: 'dndOver', won: moveOverCheck.won });
     }
@@ -1642,6 +1639,7 @@ function applyBossAction(
   const over = checkDndGameOver(seats, state);
   if (over.over) {
     state.over = true;
+    state.won = over.won;
     state.ranking = over.ranking;
     events.push({ t: 'dndOver', won: over.won });
   }
@@ -1698,6 +1696,7 @@ function finishDndTurn(
     const result = checkDndGameOver(seats, state);
     if (!result.over) return false;
     state.over = true;
+    state.won = result.won;
     state.ranking = result.ranking;
     events.push({ t: 'dndOver', won: result.won });
     return true;
@@ -1725,6 +1724,7 @@ function advanceParty(
     const result = checkDndGameOver(seats, state);
     if (!result.over) return false;
     state.over = true;
+    state.won = result.won;
     state.ranking = result.ranking;
     events.push({ t: 'dndOver', won: result.won });
     return true;
@@ -1785,6 +1785,7 @@ function advanceParty(
     // 那個座位的 seats[i] 是 null，autoActDnd 會回 null，房間會每 45 秒空轉一次、
     // 永遠不會結束。這裡直接判定冒險失敗。
     state.over = true;
+    state.won = false;
     state.ranking = rankDndSeats(seats, state);
     events.push({ t: 'dndOver', won: false });
     return { ok: true, events };
@@ -1798,7 +1799,7 @@ function advanceParty(
 
 /**
  * 一隻怪物打一位冒險者的完整結算：命中骰、難度乘數、盜賊【削弱】、戰士【極限防禦】上限、
- * 戰士【掩護】轉移、法師受擊【閃現退避】、死亡處理、虛空酋長的攻擊被動。
+ * 戰士【反射】、法師受擊【閃現退避】、死亡處理、虛空酋長的攻擊被動。
  *
  * 怪物 AI 與魔王玩家的 bossAttack 共用這一份 —— 兩邊各寫一份傷害公式一定會漂移。
  */
@@ -1810,33 +1811,7 @@ function resolveMonsterAttack(
   rng: () => number,
 ): LogEvent[] {
   const events: LogEvent[] = [];
-    const actualTarget = target;
-
-    let shieldingWarrior: { piece: DndPiece; r: number; c: number; seat: number } | null = null;
-    if (actualTarget.piece.classId !== 'brave') {
-      for (let wr = 0; wr < BOARD_SIZE; wr++) {
-        for (let wc = 0; wc < BOARD_SIZE; wc++) {
-          const wp = state.board[wr]?.[wc]?.piece;
-          if (wp && wp.type === 'player' && wp.classId === 'brave' && !state.shieldedThisRound.has(wp.id)) {
-            let wSeatIdx = -1;
-            if (wp.playerId) wSeatIdx = seats.indexOf(wp.playerId);
-            else if (wp.id.startsWith('npc-')) wSeatIdx = parseInt(wp.id.split('-')[1]!, 10);
-            
-            if (wSeatIdx !== -1 && state.seats[wSeatIdx]?.alive) {
-              const wDist = Math.abs(wr - actualTarget.r) + Math.abs(wc - actualTarget.c);
-              if (wDist <= WARRIOR_COVER_RANGE) {
-                state.shieldedThisRound.add(wp.id);
-                shieldingWarrior = { piece: wp, r: wr, c: wc, seat: wSeatIdx };
-                break;
-              }
-            }
-          }
-        }
-        if (shieldingWarrior) break;
-      }
-    }
-
-    const hitTarget = shieldingWarrior ? shieldingWarrior : actualTarget;
+    const hitTarget = target;
 
     const isShaman = mon.piece.name.includes('薩滿') || mon.piece.name.includes('Shaman');
     const attackBonus =
@@ -1876,13 +1851,6 @@ function resolveMonsterAttack(
         playerSeat.hp = hitTarget.piece.hp;
       }
 
-      if (shieldingWarrior) {
-        events.push({
-          t: 'dndMessage',
-          message: `🛡️ ${shieldingWarrior.piece.name.split(' ')[0]} 施展【掩護】，挺身而出為 ${actualTarget.piece.name.split(' ')[0]} 承擔了這次傷害！`
-        } as any);
-      }
-
       events.push({
         t: 'dndAttack',
         player: mon.piece.name,
@@ -1891,6 +1859,26 @@ function resolveMonsterAttack(
         hit: true,
         damage: dmg,
       });
+
+      // 戰士被動【反射】：把實際吃到的傷害彈 1/3 回去給攻擊者。
+      // 這是常駐的，所以「輪到自己之前」被打幾次就反射幾次。
+      if (hitTarget.piece.classId === 'brave') {
+        const reflected = Math.round(dmg * WARRIOR_REFLECT_RATIO);
+        if (reflected > 0) {
+          mon.piece.hp = Math.max(0, mon.piece.hp - reflected);
+          events.push({
+            t: 'dndMessage',
+            message: `🪞 ${hitTarget.piece.name.split(' ')[0]} 的【反射】把 ${reflected} 點傷害彈回 ${mon.piece.name} 身上！`,
+          } as any);
+
+          if (mon.piece.hp <= 0) {
+            const monCell = state.board[mon.r]?.[mon.c];
+            if (monCell && monCell.piece?.id === mon.piece.id) monCell.piece = null;
+            events.push({ t: 'dndMessage', message: `💥 ${mon.piece.name} 被自己的攻擊反噬倒下了！` } as any);
+            checkAndSpawnBossOrStaircase(seats, state, events, rng);
+          }
+        }
+      }
 
       if (hitTarget.piece.classId === 'tangerine' && hitTarget.piece.hp > 0) {
         const dr = Math.sign(hitTarget.r - mon.r);
@@ -1929,7 +1917,7 @@ function resolveMonsterAttack(
         if (playerCell && playerCell.piece?.id === hitTarget.piece.id) {
           playerCell.piece = null;
         }
-      } else if (mon.piece.id === 'boss-3') {
+      } else if (mon.piece.id === 'boss-3' && mon.piece.hp > 0) {
         events.push(...voidChiefPassive(state, hitTarget, rng));
       }
     } else {
@@ -2304,6 +2292,7 @@ export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: Pla
   const activePlayers = seats.filter((id): id is PlayerId => id !== null);
   if (activePlayers.length === 0) {
     state.over = true;
+    state.won = false;
     return;
   }
 
@@ -2322,6 +2311,7 @@ export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: Pla
 
     if (handOff === -1) {
       state.over = true;
+      state.won = false;
       state.ranking = rankDndSeats(seats, state);
       return;
     }

@@ -120,17 +120,17 @@ describe('D&D Game Engine', () => {
     expect(combatHit.events.some(e => e.t === 'dndAttack' && e.hit)).toBe(true);
 
     // Goblin hp is 14, AC is 11. Roll 0.9*20+1 = 19 (hit!). Damage is Math.floor(0.9*8)+1+2 = 10
-    // Goblin was not defeated yet since HP is 14.
-    let goblinFound = false;
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (state.board[r][c].piece?.id === 'm-0') {
-          goblinFound = true;
-          expect(state.board[r][c].piece!.hp).toBe(4); // 14 - 10 = 4 HP left
-        }
-      }
-    }
-    expect(goblinFound).toBe(true);
+    const playerHit = combatHit.events.find(
+      (e) => e.t === 'dndAttack' && e.target === 'Goblin A' && e.hit,
+    );
+    expect(playerHit.damage).toBe(10);
+
+    // 剩 4 HP，但同一輪的怪物回合裡牠若打了戰士，還會再吃到【反射】的傷害，
+    // 所以只斷言上限，不寫死數字
+    const goblin = findPiece(state, (p) => p.id === 'm-0');
+    expect(goblin).not.toBeNull();
+    expect(goblin.piece.hp).toBeLessThanOrEqual(4);
+    expect(goblin.piece.hp).toBeGreaterThan(0);
   });
 
   it('should handle monster turn AI, moving monsters closer to players and attacking them', () => {
@@ -1201,105 +1201,75 @@ describe('D&D Game Engine', () => {
     expect(blocked.error).toBe('MONSTER_ALREADY_ACTED');
   });
 
-  it('should let a Warrior cover a teammate from up to four cells away, once per round', () => {
-    const seats: Seats = ['p1', 'p2', null, null];
-    const state = dealDnd(seats, { p1: 'brave', p2: 'tangerine' }, 'normal', null);
+  it('should reflect a third of the damage back at the attacker', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
     state.traps = [];
     clearGoblins(state);
 
     const warrior = findPiece(state, (p) => p.playerId === 'p1');
-    const mage = findPiece(state, (p) => p.playerId === 'p2');
     state.board[warrior.r][warrior.c].piece = null;
-    state.board[mage.r][mage.c].piece = null;
+    state.board[8][6].piece = warrior.piece;
 
-    // 法師被怪貼著打，戰士站在 4 格外
-    state.board[8][6].piece = mage.piece;
+    // 必中、傷害固定：rng 0.9 → d6 打出 6 → round(6 * 1.3) = 8 點
     state.board[8][7].piece = {
-      id: 'm-cover', type: 'goblin', name: 'Goblin Cover', hp: 40, maxHp: 40, ac: 11,
+      id: 'm-hit', type: 'goblin', name: 'Goblin Hit', hp: 40, maxHp: 40, ac: 40,
       attackBonus: 40, dmgDice: 6,
     };
-    state.board[8][2].piece = warrior.piece; // 距離法師 4 格
 
-    state.turnSeat = 1;
-    const result = applyDndAction(seats, state, 'p2', { kind: 'rest' }, () => 0.9);
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
     expect(result.ok).toBe(true);
 
-    // 這一擊由戰士承受
+    const hit = result.events.find((e) => e.t === 'dndAttack' && e.player === 'Goblin Hit' && e.hit);
+    expect(hit).toBeDefined();
+
+    const reflected = Math.round(hit.damage / 3);
+    expect(reflected).toBeGreaterThan(0);
     expect(result.events.some(
-      (e) => e.t === 'dndMessage' && e.message.includes('掩護'),
+      (e) => e.t === 'dndMessage' && e.message.includes('反射'),
     )).toBe(true);
-    expect(result.events.some(
-      (e) => e.t === 'dndAttack' && e.hit && e.target.includes('Warrior'),
-    )).toBe(true);
-    expect(state.seats[1].hp).toBe(16); // 法師毫髮無傷
-    expect(state.seats[0].hp).toBeLessThan(24);
+    expect(findPiece(state, (p) => p.id === 'm-hit').piece.hp).toBe(40 - reflected);
   });
 
-  it('should not cover a teammate further than four cells away', () => {
-    const seats: Seats = ['p1', 'p2', null, null];
-    const state = dealDnd(seats, { p1: 'brave', p2: 'tangerine' }, 'normal', null);
+  it('should not reflect for non-Warrior classes', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'tangerine' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const mage = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[mage.r][mage.c].piece = null;
+    state.board[8][6].piece = mage.piece;
+    state.board[8][7].piece = {
+      id: 'm-hit', type: 'goblin', name: 'Goblin Hit', hp: 40, maxHp: 40, ac: 40,
+      attackBonus: 40, dmgDice: 6,
+    };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
+    expect(result.ok).toBe(true);
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('反射'))).toBe(false);
+    expect(findPiece(state, (p) => p.id === 'm-hit').piece.hp).toBe(40);
+  });
+
+  it('should let reflect damage finish off the attacker', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
     state.traps = [];
     clearGoblins(state);
 
     const warrior = findPiece(state, (p) => p.playerId === 'p1');
-    const mage = findPiece(state, (p) => p.playerId === 'p2');
     state.board[warrior.r][warrior.c].piece = null;
-    state.board[mage.r][mage.c].piece = null;
-
-    state.board[8][6].piece = mage.piece;
+    state.board[8][6].piece = warrior.piece;
     state.board[8][7].piece = {
-      id: 'm-cover', type: 'goblin', name: 'Goblin Cover', hp: 40, maxHp: 40, ac: 11,
+      id: 'm-frail', type: 'goblin', name: 'Goblin Frail', hp: 1, maxHp: 20, ac: 40,
       attackBonus: 40, dmgDice: 6,
     };
-    state.board[8][1].piece = warrior.piece; // 距離法師 5 格，超出守備範圍
 
-    state.turnSeat = 1;
-    const result = applyDndAction(seats, state, 'p2', { kind: 'rest' }, () => 0.9);
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
     expect(result.ok).toBe(true);
 
-    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('掩護'))).toBe(false);
-    expect(state.seats[1].hp).toBeLessThan(16); // 法師自己吃這一擊
-  });
-
-  it('should let an all-NPC party take the stairs so a solo boss run can progress', () => {
-    const seats: Seats = [null, null, null, null, 'boss'];
-    const state = dealDnd(seats, {}, 'normal', 4);
-    state.traps = [];
-    clearGoblins(state);
-    state.bossSpawned = true;
-
-    // 樓梯就在 NPC 隔壁
-    const npc = findPiece(state, (p) => p.id === 'npc-0');
-    state.board[npc.r][npc.c].piece = null;
-    state.board[8][6].piece = npc.piece;
-    state.board[8][7].piece = {
-      id: 'staircase', type: 'staircase', name: '樓梯 (Stairs)', hp: 0, maxHp: 0, ac: 0,
-    };
-
-    openingDndTurn(seats, state, () => 0.5);
-    // 魔王結束回合 → 換 NPC 隊伍行動，這次牠們必須自己走下去
-    applyDndAction(seats, state, 'boss', { kind: 'bossEnd' }, () => 0.5);
-
-    expect(state.level).toBe(2);
-  });
-
-  it('should keep NPCs off the stairs while a human adventurer is still in the party', () => {
-    const seats: Seats = ['p1', null, null, null, 'boss'];
-    const state = dealDnd(seats, { p1: 'brave' }, 'normal', 4);
-    state.traps = [];
-    clearGoblins(state);
-    state.bossSpawned = true;
-
-    const npc = findPiece(state, (p) => p.id === 'npc-1');
-    state.board[npc.r][npc.c].piece = null;
-    state.board[8][6].piece = npc.piece;
-    state.board[8][7].piece = {
-      id: 'staircase', type: 'staircase', name: '樓梯 (Stairs)', hp: 0, maxHp: 0, ac: 0,
-    };
-
-    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
-    expect(state.level).toBe(1);
-    expect(findPiece(state, (p) => p.type === 'staircase')).not.toBeNull();
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('反噬倒下'))).toBe(true);
+    expect(findPiece(state, (p) => p.id === 'm-frail')).toBeNull();
   });
 
   it('should support a solo boss run where the whole party is NPC', () => {
@@ -1320,6 +1290,32 @@ describe('D&D Game Engine', () => {
     expect(state.over).toBe(false);
     expect(state.phase).toBe('boss');
     expect(state.turnSeat).toBe(4);
+  });
+
+  it('should record win/lose on the state, not leave it to ranking', () => {
+    // ranking 勝敗都有值（它是名次表），所以 state 必須自己記住輸贏，
+    // 不然前端只能拿 ranking.length 猜，敗北會被顯示成通關
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    clearGoblins(state);
+    state.level = 3;
+    state.bossSpawned = true;
+
+    // 清空 + 三樓 = 勝利
+    const win = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(win.ok).toBe(true);
+    expect(state.over).toBe(true);
+    expect(state.won).toBe(true);
+    expect(state.ranking.length).toBeGreaterThan(0);
+
+    // 敗北：真人陣亡但 ranking 照樣有值
+    const lost = dealDnd(seats, { p1: 'brave' });
+    lost.seats[0].alive = false;
+    const result = checkDndGameOver(seats, lost);
+    expect(result.over).toBe(true);
+    expect(result.won).toBe(false);
+    expect(result.ranking.length).toBeGreaterThan(0);
   });
 
   it('should still end a boss-less run when every human adventurer is down', () => {

@@ -706,6 +706,8 @@ export interface DndGameView {
   turnHasMoved: boolean;
   /** 操控怪物的玩家；沒有人當魔王時為 null，怪物全部由 AI driving */
   bossPlayerId: PlayerId | null;
+  /** 這一局的勝負；over 為 false 時是 null。ranking 勝敗都有值，不能拿它判斷輸贏。 */
+  won: boolean | null;
   /** 現在是冒險者的回合還是魔王的怪物回合 */
   phase: 'party' | 'boss';
   /** 這一輪已經行動完的怪物（攻擊過／被自動結算），魔王端據此把牠們畫成已用過 */
