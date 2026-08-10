@@ -956,9 +956,9 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
   // 等牠們走完才結算的話，被蓋在火牆下的怪只要抬腳就一點傷都不用吃。
   events.push(...burnFireWalls(state));
 
-  // 撒網的持續傷害與倒數。放在這裡而不是怪物 AI 裡，是因為被網住的怪
-  // 仍然會行動（只是不能移動），有魔王時牠也可能由魔王親自指揮 ——
-  // 結算擺在回合開頭才保證「一輪剛好扣一次」。
+  // 撒網的持續傷害。放在這裡而不是怪物 AI 裡，是因為被網住的怪仍然會行動
+  // （只是不能移動），有魔王時牠也可能由魔王親自指揮 —— 扣血擺在回合開頭
+  // 才保證「一輪剛好扣一次」。倒數則要留到 endRound，見那裡的說明。
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       const piece = state.board[r]?.[c]?.piece;
@@ -966,7 +966,6 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
       if (!piece.trappedTurns || piece.trappedTurns <= 0) continue;
 
       piece.hp = Math.max(0, piece.hp - 1);
-      piece.trappedTurns--;
       events.push({
         t: 'dndMessage',
         message: `🕸️ ${piece.name} 被網子纏住，原地掙扎並受到 1 點傷害！`,
@@ -978,14 +977,43 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
     }
   }
 
-  // 網子或火牆有可能剛好清掉這一層最後一隻怪，補一次判定才不會卡在「沒怪也沒樓梯」
+  // 網子或火牆有可能剛好清掉這一層最後一隻怪，補一次判定才不會卡在「沒怪也沒樓梯」。
+  // 但這裡是一輪的開頭，補生出來的 Boss 如果跟著同一輪的怪物回合一起動，
+  // 冒險者連反應的機會都沒有（原本的判定在 endRound，牠要下一輪才下場）。
+  // 所以剛降臨的怪一律記成「這一輪已經行動過」：AI 會跳過牠，魔王也指揮不動牠。
+  let goblinsBefore = 0;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (state.board[r]?.[c]?.piece?.type === 'goblin') goblinsBefore++;
+    }
+  }
   checkAndSpawnBossOrStaircase(seats, state, events, rng);
+  if (goblinsBefore === 0) {
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const piece = state.board[r]?.[c]?.piece;
+        if (piece?.type === 'goblin') state.monsterActed.add(piece.id);
+      }
+    }
+  }
 }
 
 /** 一輪的後半：減益倒數、玩家身上的增益倒數、補一次 Boss／樓梯判定。 */
 function endRound(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
   // 減益要撐過怪物回合才遞減，這樣【削弱】才會真的作用在牠那次攻擊上
   tickMonsterDebuffs(state);
+
+  // 網子的倒數跟減益同理，要撐過怪物回合才遞減：beginRound 先扣血，怪物回合讀到的
+  // 還是「仍被網住」，這樣 ROGUE_NET_TURNS 回合就是實打實的 N 次扣血 + N 輪動不了。
+  // 在 beginRound 就遞減的話最後一輪會扣了血卻還能走，變成只綁得住 N-1 輪。
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r]?.[c]?.piece;
+      if (piece?.type === 'goblin' && piece.trappedTurns && piece.trappedTurns > 0) {
+        piece.trappedTurns--;
+      }
+    }
+  }
 
   // 【極限防禦】保護的就是上面這個怪物回合，所以要等它跑完才遞減；
   // 【恐懼】則是綁玩家自己的回合，跟放逐一樣一輪扣一格。
@@ -1010,6 +1038,11 @@ function endRound(seats: Seats, state: DndState, rng: () => number, events: LogE
   // 怪物也可能死在自己的回合裡（被撒網纏住持續扣血、或被火牆燒死），那些路徑沒有經過玩家的
   // 擊殺判定，這裡補一次檢查，否則這層會變成「沒有怪、也沒有 Boss／樓梯」的死局。
   checkAndSpawnBossOrStaircase(seats, state, events, rng);
+
+  // 魔王的指令紀錄只在一輪之內有效（beginRound 補生的怪也是靠它擋下來的），
+  // 一輪結算完就清空。這裡是每條路徑都會經過的收尾，所以擺在這裡而不是各自清。
+  state.monsterMoved.clear();
+  state.monsterActed.clear();
 }
 
 /**
@@ -1046,9 +1079,7 @@ function finishBossTurn(
   rng: () => number,
 ): DndApplyResult {
   events.push(...runMonstersTurn(seats, state, rng));
-  endRound(seats, state, rng, events);
-  state.monsterMoved.clear();
-  state.monsterActed.clear();
+  endRound(seats, state, rng, events); // monsterMoved／monsterActed 由 endRound 清掉
   state.phase = 'party';
 
   const result = checkDndGameOver(seats, state);
@@ -1471,9 +1502,13 @@ export function applyDndAction(
       if (dist > ROGUE_NET_RANGE) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
 
       netted.piece.trappedTurns = ROGUE_NET_TURNS;
+      // 虛空酋長靠瞬移，網子綁不住牠的位置（isRestrained 的例外），戰報別謊報「被釘在原地」
+      const rogueName = playerPiece.name.split(' ')[0];
       events.push({
         t: 'dndMessage',
-        message: `🕸️ ${playerPiece.name.split(' ')[0]} 撒出羅網纏住 ${netted.piece.name}，接下來 ${ROGUE_NET_TURNS} 回合牠被釘在原地並持續受傷！`,
+        message: isRestrained(netted.piece)
+          ? `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，接下來 ${ROGUE_NET_TURNS} 回合牠被釘在原地並持續受傷！`
+          : `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，但牠一個瞬移就掙開了 —— 接下來 ${ROGUE_NET_TURNS} 回合只會持續受傷！`,
       } as any);
 
     } else if (classId === 'brave') {

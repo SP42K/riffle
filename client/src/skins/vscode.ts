@@ -588,6 +588,7 @@ const ERRORS: Skin['errors'] = {
   MONSTER_NOT_FOUND: 'No such worker process',
   MONSTER_ALREADY_ACTED: 'That worker already ran this pass',
   MONSTER_ALREADY_MOVED: 'That worker already relocated this pass — it can only run a task',
+  MONSTER_RESTRAINED: 'That worker is pinned to its slot for a few passes — it can still run tasks',
 };
 
 /** 偽裝成編輯器：牌變成檔案、出牌變成 commit、戰報變成輸出面板。 */

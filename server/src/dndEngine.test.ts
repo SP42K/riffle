@@ -520,11 +520,51 @@ describe('D&D Game Engine', () => {
     applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
     expect(findPiece(state, (p) => p.id === 'm-net').c).toBe(10);
 
-    // 網子撐 3 回合，到期之後就會往前壓
+    // 第三輪是網子的最後一輪：這一輪扣完血才到期，牠還是動不了
     applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    const lastRound = findPiece(state, (p) => p.id === 'm-net');
+    expect(lastRound.c).toBe(10);
+    expect(lastRound.piece.trappedTurns).toBe(0);
+    expect(lastRound.piece.hp).toBe(17); // 一輪扣 1，剛好三輪
+
+    // 到期之後就會往前壓，而且不再繼續扣血
     applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
-    expect(findPiece(state, (p) => p.id === 'm-net').piece.trappedTurns).toBe(0);
-    expect(findPiece(state, (p) => p.id === 'm-net').c).toBeLessThan(10);
+    const freed = findPiece(state, (p) => p.id === 'm-net');
+    expect(freed.c).toBeLessThan(10);
+    expect(freed.piece.hp).toBe(17);
+  });
+
+  it('should hold a boss that arrives mid-round until the next round', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[7][6].piece = rogue.piece; // 貼著 Boss 會降臨的 (7,7)
+    state.seats[0].hp = 999;
+    rogue.piece.hp = 999;
+    rogue.piece.maxHp = 999;
+
+    // 這層最後一隻怪只剩 1 滴血，會死在 beginRound 的網子傷害裡 —— Boss 就在回合開頭降臨
+    state.board[0][0].piece = {
+      id: 'm-dying', type: 'goblin', name: 'Goblin Dying', hp: 1, maxHp: 20, ac: 11,
+      trappedTurns: 3,
+    };
+
+    const arrival = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.99);
+    expect(findPiece(state, (p) => p.id === 'boss-1')).not.toBeNull();
+    // 降臨的那一輪不出手，冒險者至少有一輪可以反應
+    expect(arrival.events.some(
+      (e) => e.t === 'dndAttack' && e.player.includes('督軍'),
+    )).toBe(false);
+
+    // 下一輪牠就正常行動了
+    const next = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.99);
+    expect(next.events.some(
+      (e) => e.t === 'dndAttack' && e.player.includes('督軍'),
+    )).toBe(true);
   });
 
   it('should still let the netted Void Chief teleport, only bleeding it', () => {
