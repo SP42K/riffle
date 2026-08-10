@@ -584,6 +584,11 @@ const ERRORS: Skin['errors'] = {
   TARGET_NOT_FOUND: 'No such target',
   ALREADY_MOVED: 'Already relocated this pass — finish with an action',
   SKILL_ON_COOLDOWN: 'Still on cooldown this pass',
+  NOT_BOSS_TURN: 'Not the maintainer pass right now',
+  MONSTER_NOT_FOUND: 'No such worker process',
+  MONSTER_ALREADY_ACTED: 'That worker already ran this pass',
+  MONSTER_ALREADY_MOVED: 'That worker already relocated this pass — it can only run a task',
+  MONSTER_RESTRAINED: 'That worker is pinned to its slot for a few passes — it can still run tasks',
 };
 
 /** 偽裝成編輯器：牌變成檔案、出牌變成 commit、戰報變成輸出面板。 */

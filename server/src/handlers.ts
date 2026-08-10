@@ -30,6 +30,8 @@ import {
   DOWNSTAIRS_TICK_MS,
   type MinesweeperAction,
   type DndAction,
+  type DndRole,
+  DND_BOSS_SEAT,
 } from 'shared';
 import {
   PLAY_ERROR_MESSAGE,
@@ -51,6 +53,7 @@ import {
   applyDndAction,
   autoActDnd,
   dealDnd,
+  openingDndTurn,
   removePlayerFromDnd,
 } from './dndEngine.js';
 import {
@@ -88,6 +91,9 @@ import {
   nicknameOf,
   normalizeBigTwoRules,
   normalizeGameType,
+  bossSeatOf,
+  freeSeatOf,
+  swapSeats,
   normalizeDndDifficulty,
   normalizeMonopolyOptions,
   pushChat,
@@ -258,6 +264,7 @@ export class GameServer {
     socket.on('game:minesweeper', (payload, ack) => this.onMinesweeper(socket, payload, ack));
     socket.on('game:dnd', (payload, ack) => this.onDnd(socket, payload, ack));
     socket.on('room:dndDifficulty', (payload) => this.onDndDifficulty(socket, payload));
+    socket.on('room:dndRole', (payload) => this.onDndRole(socket, payload));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -417,6 +424,7 @@ export class GameServer {
       connected: true,
       graceTimer: null,
       characterId: 'brave',
+      dndRole: 'hero',
     };
   }
 
@@ -494,7 +502,8 @@ export class GameServer {
           error: { code: 'IN_PROGRESS', message: '這局已經開打了，可以先觀戰' },
         });
       }
-      if (room.seats.every((seat) => seat !== null)) {
+      // 用 freeSeatOf 而不是「座位陣列填滿了沒」—— 龍與地下城的魔王位不開放自動入座
+      if (freeSeatOf(room) === -1) {
         return reply(ack, { ok: false, error: { code: 'ROOM_FULL', message: '房間已滿，可以先觀戰' } });
       }
     }
@@ -593,7 +602,8 @@ export class GameServer {
         removePlayerFromMinesweeper(room.seats, game.state, playerId);
         return;
       case 'dnd':
-        removePlayerFromDnd(room.seats, game.state, playerId);
+        // 魔王中離會代打完一整輪怪物行動，那些事件要寫進戰報
+        for (const ev of removePlayerFromDnd(room.seats, game.state, playerId)) pushLog(room, ev);
         return;
       default:
         assertNeverGame(game);
@@ -642,6 +652,39 @@ export class GameServer {
     const characterId = DOWNSTAIRS_CHARACTERS.find((id) => id === payload?.characterId);
     if (!characterId) return;
     player.characterId = characterId;
+    this.broadcastRoom(room);
+  }
+
+  /**
+   * 選擇當冒險者還是魔王。一間房最多一位魔王，而且會被換到最後一個座位 ——
+   * 引擎裡「隊伍就是座位 0~3」的假設靠這個維持。
+   */
+  private onDndRole(socket: GameSocket, payload: { role?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    const player = room?.players.get(session.playerId);
+    if (!room || !player || room.gameType !== 'dnd' || statusOf(room) === 'playing') return;
+
+    const role: DndRole = payload?.role === 'boss' ? 'boss' : 'hero';
+    if (role === player.dndRole) return;
+
+    const seat = room.seats.indexOf(session.playerId);
+    if (seat === -1) return;
+
+    if (role === 'boss') {
+      // 已經有人當魔王就不受理。認的是「座位」不是旗子 —— bossSeatOf 才是唯一的真相
+      if (bossSeatOf(room) !== null) return;
+      swapSeats(room, seat, DND_BOSS_SEAT);
+    } else {
+      // 放回前面第一個空的冒險者位。沒有空位就不能放棄魔王 ——
+      // 讓他留在 DND_BOSS_SEAT 卻標成冒險者的話，dealDnd 不會發給他棋子，整局都輪不到他。
+      const free = room.seats.findIndex((id, idx) => idx < DND_BOSS_SEAT && !id);
+      if (free === -1) return;
+      swapSeats(room, seat, free);
+    }
+
+    player.dndRole = role;
     this.broadcastRoom(room);
   }
 
@@ -737,9 +780,11 @@ export class GameServer {
         const characterIds = Object.fromEntries(
           players.map((player) => [player.playerId, player.characterId])
         );
-        const state = dealDnd(room.seats, characterIds, room.dndDifficulty);
+        const state = dealDnd(room.seats, characterIds, room.dndDifficulty, bossSeatOf(room));
         room.game = { type: 'dnd', state };
         pushLog(room, { t: 'dndStart', players: seatedPlayers(room).length });
+        // 第一棒可能是 NPC（單人魔王模式下整隊都是），先把隊伍跑到該輪到真人／魔王為止
+        for (const ev of openingDndTurn(room.seats, state)) pushLog(room, ev);
         break;
       }
       default:
@@ -1034,7 +1079,8 @@ export class GameServer {
 
     const rawAction = payload?.action as Partial<DndAction>;
     // 修正這裡：把 rest, skill, turnCombo 放進白名單
-    if (!rawAction || !['move', 'attack', 'moveTo', 'rest', 'skill', 'turnCombo'].includes(rawAction.kind!)) {
+    const KINDS = ['move', 'attack', 'moveTo', 'rest', 'skill', 'turnCombo', 'bossMove', 'bossAttack', 'bossHold', 'bossEnd'];
+    if (!rawAction || !KINDS.includes(rawAction.kind!)) {
       return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的動作' } });
     }
 
@@ -1046,6 +1092,7 @@ export class GameServer {
       c: rawAction.c,
       move: rawAction.move,     // 支援組合動作的移動座標
       action: rawAction.action, // 支援組合動作的終結招式
+      monsterId: rawAction.monsterId, // 魔王要指揮的那隻怪
     };
 
     const result = applyDndAction(room.seats, game.state, playerId, action);

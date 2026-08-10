@@ -1,4 +1,4 @@
-import { TURN_MS, DND_DIFFICULTY_MULTIPLIER, type DndDifficulty, type PlayerId, type DndAction, type DndCellView, type DndSeatInfo, type DndPiece, type LogEvent, type DownstairsCharacterId } from 'shared';
+import { TURN_MS, DND_BOSS_SEAT, DND_DIFFICULTY_MULTIPLIER, type DndDifficulty, type PlayerId, type DndAction, type DndCellView, type DndSeatInfo, type DndPiece, type LogEvent, type DownstairsCharacterId } from 'shared';
 
 export type Seats = Array<PlayerId | null>;
 
@@ -11,7 +11,6 @@ export interface DndState {
   ranking: PlayerId[];
   level: number;
   traps: Array<{ r: number; c: number; triggered: boolean }>;
-  rogueTraps: Array<{ r: number; c: number }>;
   /** 法師【火牆】燒著的格子，turns 是還會燒幾回合 */
   fireWalls: Array<{ r: number; c: number; turns: number }>;
   bossSpawned: boolean;
@@ -20,6 +19,16 @@ export interface DndState {
   finalPhase: boolean;
   /** 難度，開局時定案。乘數同時吃在怪物的 HP、傷害與 AC 上。 */
   difficulty: DndDifficulty;
+  /** 操控怪物的玩家座位（固定是 DND_BOSS_SEAT）；null 代表沒人當魔王，怪物全自動。 */
+  bossSeat: number | null;
+  /** 這一局是不是打贏了。over 為 false 時沒有意義。 */
+  won: boolean;
+  /** 現在輪到冒險者還是魔王。沒有魔王時恆為 'party'。 */
+  phase: 'party' | 'boss';
+  /** 這一輪已經用掉「移動」的怪物 id。 */
+  monsterMoved: Set<string>;
+  /** 這一輪已經用掉「行動」（攻擊／自動結算）的怪物 id —— 對牠來說這輪結束了。 */
+  monsterActed: Set<string>;
 }
 
 export type DndError =
@@ -31,7 +40,12 @@ export type DndError =
   | 'TARGET_NOT_FOUND'
   | 'BAD_ACTION'
   | 'ALREADY_MOVED'
-  | 'SKILL_ON_COOLDOWN';
+  | 'SKILL_ON_COOLDOWN'
+  | 'NOT_BOSS_TURN'
+  | 'MONSTER_NOT_FOUND'
+  | 'MONSTER_ALREADY_ACTED'
+  | 'MONSTER_ALREADY_MOVED'
+  | 'MONSTER_RESTRAINED';
 
 export const DND_ERROR_MESSAGE: Record<DndError, string> = {
   GAME_NOT_RUNNING: '遊戲尚未開始或已結束',
@@ -43,6 +57,11 @@ export const DND_ERROR_MESSAGE: Record<DndError, string> = {
   BAD_ACTION: '無效的行動指令',
   ALREADY_MOVED: '這回合已經移動過了，只能選擇攻擊／技能／休息來結束回合',
   SKILL_ON_COOLDOWN: '技能還在冷卻中，這回合不能使用',
+  NOT_BOSS_TURN: '現在不是魔王的怪物回合',
+  MONSTER_NOT_FOUND: '找不到這隻怪物',
+  MONSTER_ALREADY_ACTED: '這隻怪物這一輪已經行動過了',
+  MONSTER_ALREADY_MOVED: '這隻怪物這一輪已經移動過了，只能選擇攻擊',
+  MONSTER_RESTRAINED: '這隻怪物被網子纏住，這幾回合不能移動，但還可以攻擊',
 };
 
 export const BOARD_SIZE = 16;
@@ -57,8 +76,8 @@ const SEAT_COUNT = 4;
 const MAX_ROUND_LAPS = 12;
 
 export const CLASS_STATS: Record<DownstairsCharacterId, { name: string; hp: number; ac: number; attackBonus: number; dmgDice: number; dmgFlat: number; description: string }> = {
-  brave: { name: 'Warrior (戰士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【掩護】：自動幫鄰近隊友承擔傷害！ (移動2格)' },
-  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動 (移動5格)' },
+  brave: { name: 'Warrior (戰士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【反射】：受擊時把 1/3 傷害彈回攻擊者！ (移動2格)' },
+  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合（牠仍能攻擊；虛空酋長靠瞬移不受影響）(移動5格)' },
   tangerine: { name: 'Mage (法師)', hp: 16, ac: 10, attackBonus: 3, dmgDice: 10, dmgFlat: 2, description: '遠程爆發，高傷害 (移動1格)' },
   star: { name: 'Cleric (牧師)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '神聖判官，攻擊時治癒隊友 (移動1格)' },
 };
@@ -95,29 +114,6 @@ function spawnTraps(state: DndState, count: number, rng: () => number) {
       }
     }
   }
-}
-
-function rogueTrapAt(state: DndState, r: number, c: number): boolean {
-  return !!state.rogueTraps?.some((trap) => trap.r === r && trap.c === c);
-}
-
-/**
- * 怪物進到盜賊陷阱格的判定。怪物自己走進去、被戰士【鎖鏈】拖進去都走這裡 ——
- * 兩邊各寫一份的話規則遲早會漂移。
- */
-function triggerRogueTrap(state: DndState, piece: DndPiece, r: number, c: number): LogEvent[] {
-  if (!state.rogueTraps) return [];
-  const trapIndex = state.rogueTraps.findIndex((trap) => trap.r === r && trap.c === c);
-  if (trapIndex === -1) return [];
-
-  state.rogueTraps.splice(trapIndex, 1);
-  piece.trappedTurns = 3;
-  return [
-    {
-      t: 'dndMessage',
-      message: `💥 ${piece.name} 踩中了盜賊陷阱，接下來 3 回合將無法移動並持續受傷！`,
-    } as any,
-  ];
 }
 
 function inBounds(r: number, c: number): boolean {
@@ -251,6 +247,22 @@ function checkBossFinalPhase(state: DndState, rng: () => number): LogEvent[] {
 
 const DEBUFF_TURNS = 2;
 const DEBUFF_RATIO = 0.6;
+
+/** 盜賊【撒網】的射程與拘束回合數。 */
+const ROGUE_NET_RANGE = 5;
+const ROGUE_NET_TURNS = 3;
+
+/**
+ * 這隻怪的位置是不是被網子綁住了。
+ * 虛空酋長靠的是瞬間移動而不是雙腳，網子對牠只有持續傷害，擋不住牠的位移。
+ */
+function isRestrained(piece: DndPiece): boolean {
+  if (piece.id === 'boss-3') return false;
+  return !!(piece.trappedTurns && piece.trappedTurns > 0);
+}
+
+/** 戰士被動【反射】彈回去的比例：實際吃到的傷害的 1/3。 */
+const WARRIOR_REFLECT_RATIO = 1 / 3;
 
 /** 牧師 NPC 的補血門檻：隊友血量低於這個比例就先補血再說 */
 const NPC_HEAL_THRESHOLD = 0.7;
@@ -404,6 +416,22 @@ function voidChiefPassive(
   return events;
 }
 
+/**
+ * 隊伍裡還有沒有「活著的」真人冒險者。
+ * 沒有的話（單人魔王模式、或真人全倒只剩 NPC 隊友）NPC 必須自己下樓 ——
+ * 否則清完一層之後整隊會站在樓梯旁邊，永遠不會進到下一層。
+ *
+ * 一定要看 alive：陣亡的真人 `seats[seat]` 還留著 playerId（只有離開房間才會清成 null），
+ * 只判斷「有沒有人坐在那」的話，魔王模式下真人一死整局就會卡在同一層無限空轉。
+ */
+function partyHasHuman(seats: Seats, state: DndState): boolean {
+  for (let seat = 0; seat < SEAT_COUNT; seat++) {
+    const info = state.seats[seat];
+    if (seats[seat] && info?.alive && !info.isNpc) return true;
+  }
+  return false;
+}
+
 /** 棋子對應的座位：真人看 playerId，NPC 隊友看 `npc-<seat>` 的編號。 */
 function seatIndexOfPiece(seats: Seats, piece: DndPiece): number {
   if (piece.playerId) return seats.indexOf(piece.playerId);
@@ -458,7 +486,6 @@ function warriorPassive(
     state.board[tr]![tc]!.piece = null;
     state.board[landedR]![landedC]!.piece = target;
     events.push({ t: 'dndMessage', message: `💥 ${who} 一記盾擊，把 ${target.name} 擊退了！` } as any);
-    events.push(...triggerRogueTrap(state, target, landedR, landedC));
     return events;
   }
 
@@ -673,7 +700,6 @@ function transitionToNextLevel(
   }
 
   spawnTraps(state, 8, rng);
-  state.rogueTraps = [];
   state.fireWalls = [];
   state.bossSpawned = false;
   state.finalPhase = false;
@@ -735,6 +761,7 @@ export function dealDnd(
   seats: Seats,
   characterIds?: Record<PlayerId, DownstairsCharacterId>,
   difficulty: DndDifficulty = 'normal',
+  bossSeat: number | null = null,
   rng: () => number = Math.random,
 ): DndState {
   const board: DndCellView[][] = [];
@@ -863,12 +890,16 @@ export function dealDnd(
     ranking: [],
     level: 1,
     traps: [],
-    rogueTraps: [],
     fireWalls: [],
     bossSpawned: false,
     turnHasMoved: false,
     finalPhase: false,
     difficulty,
+    bossSeat,
+    won: false,
+    phase: 'party',
+    monsterMoved: new Set(),
+    monsterActed: new Set(),
   };
 
   spawnTraps(state, 8, rng);
@@ -886,7 +917,11 @@ export function nextActiveDndSeat(seats: Seats, currentSeat: number, stateSeats:
   return currentSeat;
 }
 
-function processRoundEnd(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
+/**
+ * 一輪的前半：放逐倒數與回場、火牆燒人。
+ * 跟後半拆開的理由是中間那段「怪物行動」可能由魔王玩家接管，要能停在中間等他輸入。
+ */
+function beginRound(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
   for (let idx = 0; idx < 4; idx++) {
     const seatInfo = state.seats[idx];
     if (seatInfo && seatInfo.alive && seatInfo.banishedTurns && seatInfo.banishedTurns > 0) {
@@ -921,12 +956,64 @@ function processRoundEnd(seats: Seats, state: DndState, rng: () => number, event
   // 等牠們走完才結算的話，被蓋在火牆下的怪只要抬腳就一點傷都不用吃。
   events.push(...burnFireWalls(state));
 
-  const monsterEvents = runMonstersTurn(seats, state, rng);
-  events.push({ t: 'dndMonsterTurn' });
-  events.push(...monsterEvents);
+  // 撒網的持續傷害。放在這裡而不是怪物 AI 裡，是因為被網住的怪仍然會行動
+  // （只是不能移動），有魔王時牠也可能由魔王親自指揮 —— 扣血擺在回合開頭
+  // 才保證「一輪剛好扣一次」。倒數則要留到 endRound，見那裡的說明。
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r]?.[c]?.piece;
+      if (!piece || piece.type !== 'goblin') continue;
+      if (!piece.trappedTurns || piece.trappedTurns <= 0) continue;
 
-  // 減益要撐過上面那個怪物回合才遞減，這樣【削弱】才會真的作用在牠這次攻擊上
+      piece.hp = Math.max(0, piece.hp - 1);
+      events.push({
+        t: 'dndMessage',
+        message: `🕸️ ${piece.name} 被網子纏住，原地掙扎並受到 1 點傷害！`,
+      } as any);
+      if (piece.hp <= 0) {
+        state.board[r]![c]!.piece = null;
+        events.push({ t: 'dndMessage', message: `🕸️ ${piece.name} 力竭倒在網中！` } as any);
+      }
+    }
+  }
+
+  // 網子或火牆有可能剛好清掉這一層最後一隻怪，補一次判定才不會卡在「沒怪也沒樓梯」。
+  // 但這裡是一輪的開頭，補生出來的 Boss 如果跟著同一輪的怪物回合一起動，
+  // 冒險者連反應的機會都沒有（原本的判定在 endRound，牠要下一輪才下場）。
+  // 所以剛降臨的怪一律記成「這一輪已經行動過」：AI 會跳過牠，魔王也指揮不動牠。
+  let goblinsBefore = 0;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (state.board[r]?.[c]?.piece?.type === 'goblin') goblinsBefore++;
+    }
+  }
+  checkAndSpawnBossOrStaircase(seats, state, events, rng);
+  if (goblinsBefore === 0) {
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const piece = state.board[r]?.[c]?.piece;
+        if (piece?.type === 'goblin') state.monsterActed.add(piece.id);
+      }
+    }
+  }
+}
+
+/** 一輪的後半：減益倒數、玩家身上的增益倒數、補一次 Boss／樓梯判定。 */
+function endRound(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
+  // 減益要撐過怪物回合才遞減，這樣【削弱】才會真的作用在牠那次攻擊上
   tickMonsterDebuffs(state);
+
+  // 網子的倒數跟減益同理，要撐過怪物回合才遞減：beginRound 先扣血，怪物回合讀到的
+  // 還是「仍被網住」，這樣 ROGUE_NET_TURNS 回合就是實打實的 N 次扣血 + N 輪動不了。
+  // 在 beginRound 就遞減的話最後一輪會扣了血卻還能走，變成只綁得住 N-1 輪。
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r]?.[c]?.piece;
+      if (piece?.type === 'goblin' && piece.trappedTurns && piece.trappedTurns > 0) {
+        piece.trappedTurns--;
+      }
+    }
+  }
 
   // 【極限防禦】保護的就是上面這個怪物回合，所以要等它跑完才遞減；
   // 【恐懼】則是綁玩家自己的回合，跟放逐一樣一輪扣一格。
@@ -948,9 +1035,73 @@ function processRoundEnd(seats: Seats, state: DndState, rng: () => number, event
     }
   }
 
-  // 怪物也可能死在自己的回合裡（踩到盜賊陷阱被扣血致死），那條路徑沒有經過玩家的
+  // 怪物也可能死在自己的回合裡（被撒網纏住持續扣血、或被火牆燒死），那些路徑沒有經過玩家的
   // 擊殺判定，這裡補一次檢查，否則這層會變成「沒有怪、也沒有 Boss／樓梯」的死局。
   checkAndSpawnBossOrStaircase(seats, state, events, rng);
+
+  // 魔王的指令紀錄只在一輪之內有效（beginRound 補生的怪也是靠它擋下來的），
+  // 一輪結算完就清空。這裡是每條路徑都會經過的收尾，所以擺在這裡而不是各自清。
+  state.monsterMoved.clear();
+  state.monsterActed.clear();
+}
+
+/**
+ * 受困／暈眩的怪物本來就沒得選，魔王回合一開始就直接替牠們結算掉，
+ * 並記進 monsterActed —— 魔王不能拿牠們來行動，AI 之後也不會再處理一次。
+ */
+function autoResolveHelplessMonsters(state: DndState): LogEvent[] {
+  const events: LogEvent[] = [];
+
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r]?.[c]?.piece;
+      if (!piece || piece.type !== 'goblin') continue;
+
+      if (piece.stunnedTurns && piece.stunnedTurns > 0) {
+        piece.stunnedTurns--;
+        state.monsterActed.add(piece.id);
+        events.push({ t: 'dndMessage', message: `💫 ${piece.name} 還暈著，這一輪動不了。` } as any);
+      }
+    }
+  }
+
+  return events;
+}
+
+/**
+ * 魔王結束怪物回合：沒被他指揮過的怪交給原本的 AI 打完，
+ * 跑完後半段結算，再把回合交還給冒險者。逾時代打走的也是這條。
+ */
+function finishBossTurn(
+  seats: Seats,
+  state: DndState,
+  events: LogEvent[],
+  rng: () => number,
+): DndApplyResult {
+  events.push(...runMonstersTurn(seats, state, rng));
+  endRound(seats, state, rng, events); // monsterMoved／monsterActed 由 endRound 清掉
+  state.phase = 'party';
+
+  const result = checkDndGameOver(seats, state);
+  if (result.over) {
+    state.over = true;
+    state.won = result.won;
+    state.ranking = result.ranking;
+    events.push({ t: 'dndOver', won: result.won });
+    return { ok: true, events };
+  }
+
+  // 魔王的回合是卡在座位環接縫上的，接回來就從座位 0 重新往下找，
+  // 而且這一輪已經結算過了，不能在同一個接縫再算一次。
+  return advanceParty(seats, state, SEAT_COUNT - 1, events, rng, true);
+}
+
+/** 沒有魔王時的完整一輪：前半 → 怪物 AI → 後半。 */
+function processRoundEnd(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
+  beginRound(seats, state, rng, events);
+  events.push({ t: 'dndMonsterTurn' }); // 戰報上的分隔線，要排在怪物的動作前面
+  events.push(...runMonstersTurn(seats, state, rng));
+  endRound(seats, state, rng, events);
 }
 
 export type DndApplyResult =
@@ -968,6 +1119,17 @@ export function applyDndAction(
 
   const activeSeat = state.turnSeat;
   if (seats[activeSeat] !== playerId) return { ok: false, error: 'NOT_YOUR_TURN' };
+
+  if (
+    action.kind === 'bossMove' ||
+    action.kind === 'bossAttack' ||
+    action.kind === 'bossHold' ||
+    action.kind === 'bossEnd'
+  ) {
+    return applyBossAction(seats, state, action, rng);
+  }
+  // 魔王沒有棋子，冒險者的動作對他一律無效
+  if (state.phase === 'boss') return { ok: false, error: 'NOT_BOSS_TURN' };
 
   let pr = -1, pc = -1;
   let playerPiece: DndPiece | null = null;
@@ -1105,6 +1267,7 @@ export function applyDndAction(
     const moveOverCheck = checkDndGameOver(seats, state);
     if (moveOverCheck.over) {
       state.over = true;
+      state.won = moveOverCheck.won;
       state.ranking = moveOverCheck.ranking;
       events.push({ t: 'dndOver', won: moveOverCheck.won });
     }
@@ -1330,18 +1493,23 @@ export function applyDndAction(
       events.push({ t: 'dndMessage', message: `✨ ${playerPiece.name.split(' ')[0]} 施放治癒術，恢復了 ${targetPiece.name.split(' ')[0]} ${healAmt} 點 HP！` } as any);
       
     } else if (classId === 'bubble') {
-      if (currentAction.r === undefined || currentAction.c === undefined) return { ok: false, error: 'BAD_ACTION' };
-      const tr = currentAction.r;
-      const tc = currentAction.c;
-      const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
-      
-      if (dist > 5) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
-      if (state.board[tr]?.[tc]?.piece !== null) return { ok: false, error: 'CELL_OCCUPIED' };
-      
-      if (!state.rogueTraps) state.rogueTraps = [];
-      state.rogueTraps.push({ r: tr, c: tc });
-      
-      events.push({ t: 'dndMessage', message: `🪤 ${playerPiece.name.split(' ')[0]} 在 (${tr}, ${tc}) 佈置了專屬陷阱！` } as any);
+      // 【撒網】：對 5 格內的一隻怪物撒網把牠拘束住
+      if (!targetId) return { ok: false, error: 'BAD_ACTION' };
+      const netted = findPieceById(state, targetId);
+      if (!netted || netted.piece.type !== 'goblin') return { ok: false, error: 'TARGET_NOT_FOUND' };
+
+      const dist = Math.abs(pr - netted.r) + Math.abs(pc - netted.c);
+      if (dist > ROGUE_NET_RANGE) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
+
+      netted.piece.trappedTurns = ROGUE_NET_TURNS;
+      // 虛空酋長靠瞬移，網子綁不住牠的位置（isRestrained 的例外），戰報別謊報「被釘在原地」
+      const rogueName = playerPiece.name.split(' ')[0];
+      events.push({
+        t: 'dndMessage',
+        message: isRestrained(netted.piece)
+          ? `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，接下來 ${ROGUE_NET_TURNS} 回合牠被釘在原地並持續受傷！`
+          : `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，但牠一個瞬移就掙開了 —— 接下來 ${ROGUE_NET_TURNS} 回合只會持續受傷！`,
+      } as any);
 
     } else if (classId === 'brave') {
       if (!targetId) return { ok: false, error: 'BAD_ACTION' };
@@ -1367,9 +1535,7 @@ export function applyDndAction(
         if (pos.r < 0 || pos.r >= BOARD_SIZE || pos.c < 0 || pos.c >= BOARD_SIZE) return false;
         return state.board[pos.r]?.[pos.c]?.piece === null;
       });
-      // 身旁有盜賊陷阱就優先往那格拉 ——「盜賊佈陷阱 → 戰士鎖鏈拖進去」是刻意成立的連段
-      const pullCell =
-        openCells.find((pos) => rogueTrapAt(state, pos.r, pos.c)) ?? openCells[0] ?? null;
+      const pullCell = openCells[0] ?? null;
 
       if (!pullCell) {
         events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 施放【鎖鏈】，但周圍沒有空間可以將怪物拉過來！` } as any);
@@ -1380,7 +1546,6 @@ export function applyDndAction(
           newMonsterCell.piece = targetMonster;
           oldMonsterCell.piece = null;
           events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 揮出【鎖鏈】，將 ${targetMonster.name} 強行拉到身旁！` } as any);
-          events.push(...triggerRogueTrap(state, targetMonster, pullCell.r, pullCell.c));
         }
       }
 
@@ -1433,6 +1598,99 @@ function fearedTarget(
 }
 
 /**
+ * 魔王的指令。一隻怪一輪可以「移動一次 + 攻擊一次」，跟玩家的「移動 → 終結動作」同一個節奏：
+ * bossMove 記進 monsterMoved（只擋再次移動），bossAttack／bossHold 記進 monsterActed
+ * （這隻怪這一輪就結束了）。這比 AI 的「打得到就打，打不到才走」強一階，是刻意的。
+ * 沒被指揮過的怪在 bossEnd 時由原本的 AI 接手。
+ */
+function applyBossAction(
+  seats: Seats,
+  state: DndState,
+  action: DndAction,
+  rng: () => number,
+): DndApplyResult {
+  if (state.phase !== 'boss') return { ok: false, error: 'NOT_BOSS_TURN' };
+
+  const events: LogEvent[] = [];
+
+  if (action.kind === 'bossEnd') {
+    return finishBossTurn(seats, state, events, rng);
+  }
+
+  if (!action.monsterId) return { ok: false, error: 'BAD_ACTION' };
+  const found = findPieceById(state, action.monsterId);
+  if (!found || found.piece.type !== 'goblin') return { ok: false, error: 'MONSTER_NOT_FOUND' };
+  // 攻擊＝結束這隻怪的回合，之後不能再移動也不能再攻擊
+  if (state.monsterActed.has(found.piece.id)) {
+    return { ok: false, error: 'MONSTER_ALREADY_ACTED' };
+  }
+
+  const mon = { piece: found.piece, r: found.r, c: found.c };
+
+  // 待命：這隻怪這一輪就到此為止。旁邊沒有人可以打的時候要有這個出口，
+  // 不然魔王只剩「結束整個回合」一條路可走。
+  if (action.kind === 'bossHold') {
+    state.monsterActed.add(mon.piece.id);
+    events.push({ t: 'dndMessage', message: `🛑 ${mon.piece.name} 原地待命。` } as any);
+    return { ok: true, events };
+  }
+
+  if (action.kind === 'bossMove') {
+    if (isRestrained(mon.piece)) {
+      return { ok: false, error: 'MONSTER_RESTRAINED' };
+    }
+    if (state.monsterMoved.has(mon.piece.id)) {
+      return { ok: false, error: 'MONSTER_ALREADY_MOVED' };
+    }
+    if (action.r === undefined || action.c === undefined) return { ok: false, error: 'BAD_ACTION' };
+    const tr = action.r;
+    const tc = action.c;
+    if (!inBounds(tr, tc)) return { ok: false, error: 'INVALID_CELL' };
+
+    const dist = Math.abs(mon.r - tr) + Math.abs(mon.c - tc);
+    if (dist === 0 || dist > (mon.piece.speed ?? 2)) return { ok: false, error: 'INVALID_CELL' };
+
+    const targetCell = state.board[tr]?.[tc];
+    const sourceCell = state.board[mon.r]?.[mon.c];
+    if (!targetCell || !sourceCell) return { ok: false, error: 'INVALID_CELL' };
+    if (targetCell.piece !== null) return { ok: false, error: 'CELL_OCCUPIED' };
+
+    targetCell.piece = mon.piece;
+    sourceCell.piece = null;
+    state.monsterMoved.add(mon.piece.id);
+
+    events.push({ t: 'dndMove', player: mon.piece.name, dir: 'moveTo' } as any);
+    return { ok: true, events };
+  }
+
+  // bossAttack
+  if (!action.targetId) return { ok: false, error: 'BAD_ACTION' };
+  const victim = findPieceById(state, action.targetId);
+  if (!victim || victim.piece.type !== 'player') return { ok: false, error: 'TARGET_NOT_FOUND' };
+
+  const seat = seatIndexOfPiece(seats, victim.piece);
+  if (seat === -1 || !state.seats[seat]?.alive) return { ok: false, error: 'TARGET_NOT_FOUND' };
+
+  const range = mon.piece.range ?? (mon.piece.id === 'boss-3' ? 2 : 1);
+  const dist = Math.abs(mon.r - victim.r) + Math.abs(mon.c - victim.c);
+  if (dist > range) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
+
+  state.monsterActed.add(mon.piece.id);
+  events.push(
+    ...resolveMonsterAttack(seats, state, mon, { piece: victim.piece, r: victim.r, c: victim.c, seat }, rng),
+  );
+
+  const over = checkDndGameOver(seats, state);
+  if (over.over) {
+    state.over = true;
+    state.won = over.won;
+    state.ranking = over.ranking;
+    events.push({ t: 'dndOver', won: over.won });
+  }
+  return { ok: true, events };
+}
+
+/**
  * 移動之後這回合還能不能繼續？
  * 換層（棋盤整個重置）或踩中陷阱被放逐（角色從棋盤上移除）都會讓後續動作失去依據。
  */
@@ -1482,6 +1740,7 @@ function finishDndTurn(
     const result = checkDndGameOver(seats, state);
     if (!result.over) return false;
     state.over = true;
+    state.won = result.won;
     state.ranking = result.ranking;
     events.push({ t: 'dndOver', won: result.won });
     return true;
@@ -1489,9 +1748,36 @@ function finishDndTurn(
 
   if (settleGameOver()) return { ok: true, events };
 
-  let cursor = activeSeat;
+  return advanceParty(seats, state, activeSeat, events, rng, false);
+}
+
+/**
+ * 從 cursor 開始往下找可以行動的座位：NPC 就地代打，找到真人就交棒。
+ * 繞過座位環的接縫代表一輪結束 —— 沒有魔王時直接跑完整輪結算，
+ * 有魔王時只跑前半段然後把回合交給魔王，等他指揮完怪物再從這裡接回來。
+ */
+function advanceParty(
+  seats: Seats,
+  state: DndState,
+  fromSeat: number,
+  events: LogEvent[],
+  rng: () => number,
+  roundEndDone: boolean,
+): DndApplyResult {
+  const settleGameOver = (): boolean => {
+    const result = checkDndGameOver(seats, state);
+    if (!result.over) return false;
+    state.over = true;
+    state.won = result.won;
+    state.ranking = result.ranking;
+    events.push({ t: 'dndOver', won: result.won });
+    return true;
+  };
+
+  let cursor = fromSeat;
   let laps = 0;
   let handOff = -1;
+  let skipRoundEnd = roundEndDone;
 
   while (!state.over && laps < MAX_ROUND_LAPS) {
     cursor = (cursor + 1) % SEAT_COUNT;
@@ -1500,9 +1786,25 @@ function finishDndTurn(
     // 結算點必須是座位環的接縫，不是「離起始座位幾步」—— 用步數的話，
     // 座位 1 行動、座位 0 也是真人時會在第 3 步就交棒出去，怪物永遠輪不到。
     if (cursor === 0) {
-      laps++;
-      processRoundEnd(seats, state, rng, events);
-      if (settleGameOver()) break;
+      if (skipRoundEnd) {
+        // 魔王剛打完的那一輪已經結算過了，這一圈不要再算一次
+        skipRoundEnd = false;
+      } else if (state.bossSeat !== null) {
+        laps++;
+        beginRound(seats, state, rng, events);
+        if (settleGameOver()) break;
+        events.push(...autoResolveHelplessMonsters(state));
+        state.phase = 'boss';
+        state.turnSeat = state.bossSeat;
+        state.turnDeadline = Date.now() + TURN_MS;
+        state.turnHasMoved = false;
+        events.push({ t: 'dndMonsterTurn' });
+        return { ok: true, events }; // 停在這裡等魔王輸入
+      } else {
+        laps++;
+        processRoundEnd(seats, state, rng, events);
+        if (settleGameOver()) break;
+      }
     }
 
     const seatInfo = state.seats[cursor];
@@ -1527,6 +1829,7 @@ function finishDndTurn(
     // 那個座位的 seats[i] 是 null，autoActDnd 會回 null，房間會每 45 秒空轉一次、
     // 永遠不會結束。這裡直接判定冒險失敗。
     state.over = true;
+    state.won = false;
     state.ranking = rankDndSeats(seats, state);
     events.push({ t: 'dndOver', won: false });
     return { ok: true, events };
@@ -1538,9 +1841,145 @@ function finishDndTurn(
   return { ok: true, events };
 }
 
+/**
+ * 一隻怪物打一位冒險者的完整結算：命中骰、難度乘數、盜賊【削弱】、戰士【極限防禦】上限、
+ * 戰士【反射】、法師受擊【閃現退避】、死亡處理、虛空酋長的攻擊被動。
+ *
+ * 怪物 AI 與魔王玩家的 bossAttack 共用這一份 —— 兩邊各寫一份傷害公式一定會漂移。
+ */
+function resolveMonsterAttack(
+  seats: Seats,
+  state: DndState,
+  mon: { piece: DndPiece; r: number; c: number },
+  target: { piece: DndPiece; r: number; c: number; seat: number },
+  rng: () => number,
+): LogEvent[] {
+  const events: LogEvent[] = [];
+    const hitTarget = target;
+
+    const isShaman = mon.piece.name.includes('薩滿') || mon.piece.name.includes('Shaman');
+    const attackBonus =
+      mon.piece.attackBonus ?? (mon.piece.id === 'boss-3' ? 5 : isShaman ? 2 : 1);
+    const dmgDice = mon.piece.dmgDice ?? (mon.piece.id === 'boss-3' ? 10 : 6);
+
+    const roll = Math.floor(rng() * 20) + 1;
+    const isHit = roll + attackBonus >= hitTarget.piece.ac;
+
+    if (isHit) {
+      const baseDmg = Math.floor(rng() * dmgDice) + 1;
+      let dmg = Math.round(baseDmg * 1.3);
+
+      // 難度乘數吃在傷害上（HP 與 AC 是生怪時就縮放好的）
+      dmg = Math.max(1, Math.round(dmg * DND_DIFFICULTY_MULTIPLIER[state.difficulty]));
+
+      // 盜賊被動【削弱】：這隻怪的輸出只剩六成
+      if (mon.piece.atkDebuffTurns && mon.piece.atkDebuffTurns > 0) {
+        dmg = Math.max(1, Math.round(dmg * DEBUFF_RATIO));
+      }
+
+      const playerSeat = state.seats[hitTarget.seat];
+      // 戰士被動【極限防禦】：這一輪受到的每一次傷害都被壓到上限以內
+      if (playerSeat?.damageCapTurns && playerSeat.damageCapTurns > 0) {
+        const cap = playerSeat.damageCap ?? 2;
+        if (dmg > cap) {
+          dmg = cap;
+          events.push({
+            t: 'dndMessage',
+            message: `🛡️ ${hitTarget.piece.name.split(' ')[0]} 的【極限防禦】擋下了大部分衝擊，只受到 ${cap} 點傷害！`,
+          } as any);
+        }
+      }
+
+      hitTarget.piece.hp = Math.max(0, hitTarget.piece.hp - dmg);
+      if (playerSeat) {
+        playerSeat.hp = hitTarget.piece.hp;
+      }
+
+      events.push({
+        t: 'dndAttack',
+        player: mon.piece.name,
+        target: hitTarget.piece.name,
+        roll,
+        hit: true,
+        damage: dmg,
+      });
+
+      // 戰士被動【反射】：把實際吃到的傷害彈 1/3 回去給攻擊者。
+      // 這是常駐的，所以「輪到自己之前」被打幾次就反射幾次。
+      if (hitTarget.piece.classId === 'brave') {
+        const reflected = Math.round(dmg * WARRIOR_REFLECT_RATIO);
+        if (reflected > 0) {
+          mon.piece.hp = Math.max(0, mon.piece.hp - reflected);
+          events.push({
+            t: 'dndMessage',
+            message: `🪞 ${hitTarget.piece.name.split(' ')[0]} 的【反射】把 ${reflected} 點傷害彈回 ${mon.piece.name} 身上！`,
+          } as any);
+
+          if (mon.piece.hp <= 0) {
+            const monCell = state.board[mon.r]?.[mon.c];
+            if (monCell && monCell.piece?.id === mon.piece.id) monCell.piece = null;
+            events.push({ t: 'dndMessage', message: `💥 ${mon.piece.name} 被自己的攻擊反噬倒下了！` } as any);
+            checkAndSpawnBossOrStaircase(seats, state, events, rng);
+          }
+        }
+      }
+
+      if (hitTarget.piece.classId === 'tangerine' && hitTarget.piece.hp > 0) {
+        const dr = Math.sign(hitTarget.r - mon.r);
+        const dc = Math.sign(hitTarget.c - mon.c);
+
+        const retreatMoves = [
+          { r: hitTarget.r + dr * 2, c: hitTarget.c + dc * 2 },
+          { r: hitTarget.r + dc * 2, c: hitTarget.c + dr * 2 },
+          { r: hitTarget.r - dc * 2, c: hitTarget.c - dr * 2 },
+          { r: hitTarget.r + dr, c: hitTarget.c + dc },
+          { r: hitTarget.r - dc, c: hitTarget.c + dr },
+          { r: hitTarget.r + dc, c: hitTarget.c - dr },
+        ];
+
+        for (const rm of retreatMoves) {
+          if (rm.r >= 0 && rm.r < BOARD_SIZE && rm.c >= 0 && rm.c < BOARD_SIZE) {
+            const targetCell = state.board[rm.r]?.[rm.c];
+            if (targetCell && targetCell.piece === null) {
+              targetCell.piece = hitTarget.piece;
+              const srcCell = state.board[hitTarget.r]?.[hitTarget.c];
+              if (srcCell) srcCell.piece = null;
+              events.push({ t: 'dndMessage', message: `✨ ${hitTarget.piece.name.split(' ')[0]} 受擊後發動【閃現退避】，向後移動！` } as any);
+              hitTarget.r = rm.r;
+              hitTarget.c = rm.c;
+              break;
+            }
+          }
+        }
+      }
+
+      if (hitTarget.piece.hp <= 0) {
+        if (playerSeat) {
+          playerSeat.alive = false;
+        }
+        const playerCell = state.board[hitTarget.r]?.[hitTarget.c];
+        if (playerCell && playerCell.piece?.id === hitTarget.piece.id) {
+          playerCell.piece = null;
+        }
+      } else if (mon.piece.id === 'boss-3' && mon.piece.hp > 0) {
+        events.push(...voidChiefPassive(state, hitTarget, rng));
+      }
+    } else {
+      events.push({
+        t: 'dndAttack',
+        player: mon.piece.name,
+        target: hitTarget.piece.name,
+        roll,
+        hit: false,
+        damage: 0,
+      });
+    }
+
+  return events;
+}
+
 function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogEvent[] {
   const events: LogEvent[] = [];
-  const warriorsBlocked = new Set<string>();
 
   const monsters: { piece: DndPiece; r: number; c: number }[] = [];
   for (let r = 0; r < BOARD_SIZE; r++) {
@@ -1548,23 +1987,18 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
     if (!row) continue;
     for (let c = 0; c < BOARD_SIZE; c++) {
       const piece = row[c]?.piece;
-      if (piece && piece.type === 'goblin') {
+      // 魔王已經親自指揮過的怪物（移動過或攻擊過）不再由 AI 動一次
+      const commanded = piece && (state.monsterActed.has(piece.id) || state.monsterMoved.has(piece.id));
+      if (piece && piece.type === 'goblin' && !commanded) {
         monsters.push({ piece, r, c });
       }
     }
   }
 
   monsters.forEach((mon) => {
-    if (mon.piece.trappedTurns && mon.piece.trappedTurns > 0) {
-      mon.piece.hp = Math.max(0, mon.piece.hp - 1);
-      mon.piece.trappedTurns--;
-      events.push({ t: 'dndMessage', message: `🪤 ${mon.piece.name} 被陷阱束縛，動彈不得並受到 1 點傷害！` } as any);
-      if (mon.piece.hp <= 0) {
-        const cell = state.board[mon.r]?.[mon.c];
-        if (cell && cell.piece?.id === mon.piece.id) cell.piece = null;
-      }
-      return;
-    }
+    // 被網住的怪只是被釘在原地：照樣會攻擊、薩滿照樣會治療與召喚，只是不能移動。
+    // 持續傷害與倒數已經在 beginRound 結算過了。
+    const netted = isRestrained(mon.piece);
 
     if (mon.piece.stunnedTurns && mon.piece.stunnedTurns > 0) {
       mon.piece.stunnedTurns--;
@@ -1701,139 +2135,8 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
     const attackRange = mon.piece.range ?? (mon.piece.id === 'boss-3' ? 2 : 1);
 
     if (minDist <= attackRange) {
-      let actualTarget = targetPlayer;
-
-      let shieldingWarrior: { piece: DndPiece; r: number; c: number; seat: number } | null = null;
-      if (actualTarget.piece.classId !== 'brave') {
-        for (let wr = 0; wr < BOARD_SIZE; wr++) {
-          for (let wc = 0; wc < BOARD_SIZE; wc++) {
-            const wp = state.board[wr]?.[wc]?.piece;
-            if (wp && wp.type === 'player' && wp.classId === 'brave' && !warriorsBlocked.has(wp.id)) {
-              let wSeatIdx = -1;
-              if (wp.playerId) wSeatIdx = seats.indexOf(wp.playerId);
-              else if (wp.id.startsWith('npc-')) wSeatIdx = parseInt(wp.id.split('-')[1]!, 10);
-              
-              if (wSeatIdx !== -1 && state.seats[wSeatIdx]?.alive) {
-                const wDist = Math.abs(wr - actualTarget.r) + Math.abs(wc - actualTarget.c);
-                if (wDist <= 1) {
-                  warriorsBlocked.add(wp.id);
-                  shieldingWarrior = { piece: wp, r: wr, c: wc, seat: wSeatIdx };
-                  break;
-                }
-              }
-            }
-          }
-          if (shieldingWarrior) break;
-        }
-      }
-
-      const hitTarget = shieldingWarrior ? shieldingWarrior : actualTarget;
-
-      const isShaman = mon.piece.name.includes('薩滿') || mon.piece.name.includes('Shaman');
-      const attackBonus =
-        mon.piece.attackBonus ?? (mon.piece.id === 'boss-3' ? 5 : isShaman ? 2 : 1);
-      const dmgDice = mon.piece.dmgDice ?? (mon.piece.id === 'boss-3' ? 10 : 6);
-
-      const roll = Math.floor(rng() * 20) + 1;
-      const isHit = roll + attackBonus >= hitTarget.piece.ac;
-
-      if (isHit) {
-        const baseDmg = Math.floor(rng() * dmgDice) + 1;
-        let dmg = Math.round(baseDmg * 1.3);
-
-        // 難度乘數吃在傷害上（HP 與 AC 是生怪時就縮放好的）
-        dmg = Math.max(1, Math.round(dmg * DND_DIFFICULTY_MULTIPLIER[state.difficulty]));
-
-        // 盜賊被動【削弱】：這隻怪的輸出只剩六成
-        if (mon.piece.atkDebuffTurns && mon.piece.atkDebuffTurns > 0) {
-          dmg = Math.max(1, Math.round(dmg * DEBUFF_RATIO));
-        }
-
-        const playerSeat = state.seats[hitTarget.seat];
-        // 戰士被動【極限防禦】：這一輪受到的每一次傷害都被壓到上限以內
-        if (playerSeat?.damageCapTurns && playerSeat.damageCapTurns > 0) {
-          const cap = playerSeat.damageCap ?? 2;
-          if (dmg > cap) {
-            dmg = cap;
-            events.push({
-              t: 'dndMessage',
-              message: `🛡️ ${hitTarget.piece.name.split(' ')[0]} 的【極限防禦】擋下了大部分衝擊，只受到 ${cap} 點傷害！`,
-            } as any);
-          }
-        }
-
-        hitTarget.piece.hp = Math.max(0, hitTarget.piece.hp - dmg);
-        if (playerSeat) {
-          playerSeat.hp = hitTarget.piece.hp;
-        }
-
-        if (shieldingWarrior) {
-          events.push({
-            t: 'dndMessage',
-            message: `🛡️ ${shieldingWarrior.piece.name.split(' ')[0]} 施展【掩護】，挺身而出為 ${actualTarget.piece.name.split(' ')[0]} 承擔了這次傷害！`
-          } as any);
-        }
-
-        events.push({
-          t: 'dndAttack',
-          player: mon.piece.name,
-          target: hitTarget.piece.name,
-          roll,
-          hit: true,
-          damage: dmg,
-        });
-
-        if (hitTarget.piece.classId === 'tangerine' && hitTarget.piece.hp > 0) {
-          const dr = Math.sign(hitTarget.r - mon.r);
-          const dc = Math.sign(hitTarget.c - mon.c);
-
-          const retreatMoves = [
-            { r: hitTarget.r + dr * 2, c: hitTarget.c + dc * 2 },
-            { r: hitTarget.r + dc * 2, c: hitTarget.c + dr * 2 },
-            { r: hitTarget.r - dc * 2, c: hitTarget.c - dr * 2 },
-            { r: hitTarget.r + dr, c: hitTarget.c + dc },
-            { r: hitTarget.r - dc, c: hitTarget.c + dr },
-            { r: hitTarget.r + dc, c: hitTarget.c - dr },
-          ];
-
-          for (const rm of retreatMoves) {
-            if (rm.r >= 0 && rm.r < BOARD_SIZE && rm.c >= 0 && rm.c < BOARD_SIZE) {
-              const targetCell = state.board[rm.r]?.[rm.c];
-              if (targetCell && targetCell.piece === null) {
-                targetCell.piece = hitTarget.piece;
-                const srcCell = state.board[hitTarget.r]?.[hitTarget.c];
-                if (srcCell) srcCell.piece = null;
-                events.push({ t: 'dndMessage', message: `✨ ${hitTarget.piece.name.split(' ')[0]} 受擊後發動【閃現退避】，向後移動！` } as any);
-                hitTarget.r = rm.r;
-                hitTarget.c = rm.c;
-                break;
-              }
-            }
-          }
-        }
-
-        if (hitTarget.piece.hp <= 0) {
-          if (playerSeat) {
-            playerSeat.alive = false;
-          }
-          const playerCell = state.board[hitTarget.r]?.[hitTarget.c];
-          if (playerCell && playerCell.piece?.id === hitTarget.piece.id) {
-            playerCell.piece = null;
-          }
-        } else if (mon.piece.id === 'boss-3') {
-          events.push(...voidChiefPassive(state, hitTarget, rng));
-        }
-      } else {
-        events.push({
-          t: 'dndAttack',
-          player: mon.piece.name,
-          target: hitTarget.piece.name,
-          roll,
-          hit: false,
-          damage: 0,
-        });
-      }
-    } else {
+      events.push(...resolveMonsterAttack(seats, state, mon, targetPlayer, rng));
+    } else if (!netted) {
       // 哥布林盜賊靠 speed 一次衝 5 格，其餘怪物照舊 2 格
       const steps = mon.piece.speed ?? 2;
       for (let s = 0; s < steps; s++) {
@@ -1869,7 +2172,6 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
             mon.r = bestMove.r;
             mon.c = bestMove.c;
             events.push({ t: 'dndMove', player: mon.piece.name, dir: bestMove.dir });
-            events.push(...triggerRogueTrap(state, mon.piece, bestMove.r, bestMove.c));
           }
         } else {
           break;
@@ -1915,23 +2217,54 @@ export function checkDndGameOver(seats: Seats, state: DndState): { over: boolean
     }
   }
 
-  if (goblinCount === 0 && aliveHumans > 0) {
+  // 有魔王坐鎮時，隊伍可以全部是 NPC（單人魔王模式）——那一局照樣分得出勝負；
+  // 沒有魔王的話，隊伍裡沒有真人就等於沒有人能送出動作。
+  const partyPlayable = state.bossSeat !== null ? aliveCount > 0 : aliveHumans > 0;
+
+  if (goblinCount === 0 && partyPlayable) {
     if (state.level < 3) {
       return { over: false, won: false, ranking: [] };
     }
     return { over: true, won: true, ranking: rankDndSeats(seats, state) };
   }
 
-  // 全隊陣亡，或真人全滅只剩 NPC 隊友（沒有人能再送出動作）——都算冒險失敗
-  if (aliveCount === 0 || aliveHumans === 0) {
+  // 全隊陣亡（魔王獲勝），或沒有魔王、真人也全滅只剩 NPC 隊友（沒有人能再送出動作）
+  if (aliveCount === 0 || (aliveHumans === 0 && state.bossSeat === null)) {
     return { over: true, won: false, ranking: rankDndSeats(seats, state) };
   }
 
   return { over: false, won: false, ranking: [] };
 }
 
+/**
+ * 開局的第一次推進。`dealDnd` 把回合指到第一個活著的座位，但那個座位可能是 NPC ——
+ * 單人魔王模式下四個位置全是 NPC，沒人踢第一腳的話房間會停在 NPC 座位空轉。
+ * 回傳要寫進戰報的事件；正常情況（第一棒就是真人冒險者）回空陣列。
+ */
+export function openingDndTurn(
+  seats: Seats,
+  state: DndState,
+  rng: () => number = Math.random,
+): LogEvent[] {
+  const seatInfo = state.seats[state.turnSeat];
+  const humanHolds =
+    state.turnSeat < SEAT_COUNT && !!seats[state.turnSeat] && !seatInfo?.isNpc;
+  if (humanHolds) return [];
+
+  const events: LogEvent[] = [];
+  // 從座位環的尾巴進場，第一步就落在座位 0，而且這一輪還不該結算（大家都還沒動過）
+  advanceParty(seats, state, SEAT_COUNT - 1, events, rng, true);
+  return events;
+}
+
 export function autoActDnd(seats: Seats, state: DndState): DndApplyResult | null {
   const activeSeat = state.turnSeat;
+
+  // 魔王掛機：等同按下「結束回合」，剩下的怪由 AI 打完，房間不會卡在他身上
+  if (state.phase === 'boss') {
+    return finishBossTurn(seats, state, [], Math.random);
+  }
+
   const playerId = seats[activeSeat];
   if (!playerId) return null;
 
@@ -1957,9 +2290,27 @@ export function autoActDnd(seats: Seats, state: DndState): DndApplyResult | null
   return applyDndAction(seats, state, playerId, { kind: 'rest' });
 }
 
-export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: PlayerId): void {
+/**
+ * 有人離開這一局。回傳要寫進戰報的事件 —— 魔王中離時會代打完整整一輪怪物行動
+ * （攻擊、陣亡、火牆燒死怪、Boss／樓梯生成都在裡面），丟掉的話冒險者會看到血條無聲無息地掉。
+ */
+export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: PlayerId): LogEvent[] {
+  const events: LogEvent[] = [];
   const seatIndex = seats.indexOf(playerId);
-  if (seatIndex === -1) return;
+  if (seatIndex === -1) return events;
+
+  // 魔王中離：怪物退回全自動，如果剛好停在他的回合就替他把這一輪打完
+  if (state.bossSeat !== null && seatIndex === state.bossSeat) {
+    seats[seatIndex] = null;
+    state.bossSeat = null;
+    if (state.phase === 'boss') {
+      finishBossTurn(seats, state, events, Math.random);
+    }
+    state.phase = 'party';
+    state.monsterMoved.clear();
+    state.monsterActed.clear();
+    return events;
+  }
 
   if (state.seats[seatIndex]) {
     state.seats[seatIndex].alive = false;
@@ -1982,7 +2333,8 @@ export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: Pla
   const activePlayers = seats.filter((id): id is PlayerId => id !== null);
   if (activePlayers.length === 0) {
     state.over = true;
-    return;
+    state.won = false;
+    return events;
   }
 
   if (state.turnSeat === seatIndex) {
@@ -2000,14 +2352,17 @@ export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: Pla
 
     if (handOff === -1) {
       state.over = true;
+      state.won = false;
       state.ranking = rankDndSeats(seats, state);
-      return;
+      return events;
     }
 
     state.turnSeat = handOff;
     state.turnDeadline = Date.now() + TURN_MS;
     state.turnHasMoved = false;
   }
+
+  return events;
 }
 
 function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => number): LogEvent[] {
@@ -2254,9 +2609,11 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
         const nr = pr + d.dr;
         const nc = pc + d.dc;
         const targetCell = state.board[nr]?.[nc];
-        // NPC 隊友會走向樓梯但不會踏上去 —— 什麼時候下樓是真人玩家的決定，
-        // 不然一隻站在樓梯旁的 NPC 就會把整隊拖去下一層。
-        if (targetCell && targetCell.piece === null) {
+        // NPC 隊友會走向樓梯但不會踏上去 —— 什麼時候下樓是真人玩家的決定。
+        // 例外：隊伍裡沒有真人（單人魔王模式）時得由 NPC 自己下樓，不然會卡在這一層。
+        const npcMayDescend = targetIsStairs && !partyHasHuman(seats, state);
+        if (targetCell && (targetCell.piece === null
+            || (npcMayDescend && targetCell.piece.type === 'staircase'))) {
           const dist = Math.abs(nr - targetMon.r) + Math.abs(nc - targetMon.c);
           if (dist < bestDist) {
             bestDist = dist;
@@ -2298,8 +2655,11 @@ function backendApplyMove(
   const targetCell = state.board[bestMove.r]?.[bestMove.c];
   const sourceCell = state.board[pr]?.[pc];
   if (targetCell && sourceCell) {
-    // 第二道防線：只有真人操作的角色能踏上樓梯觸發換層
-    const destHadStaircase = targetCell.piece?.type === 'staircase' && !piece.id.startsWith('npc-');
+    // 第二道防線：只有真人操作的角色能踏上樓梯觸發換層，
+    // 除非這支隊伍根本沒有真人（單人魔王模式）。
+    const destHadStaircase =
+      targetCell.piece?.type === 'staircase' &&
+      (!piece.id.startsWith('npc-') || !partyHasHuman(seats, state));
     targetCell.piece = piece;
     sourceCell.piece = null;
     events.push({ t: 'dndMove', player: piece.name, dir: bestMove.dir });
