@@ -95,6 +95,8 @@ import {
   freeSeatOf,
   swapSeats,
   normalizeDndDifficulty,
+  normalizeDndNpcControl,
+  npcControllerOf,
   normalizeMonopolyOptions,
   pushChat,
   pushLog,
@@ -265,6 +267,7 @@ export class GameServer {
     socket.on('game:dnd', (payload, ack) => this.onDnd(socket, payload, ack));
     socket.on('room:dndDifficulty', (payload) => this.onDndDifficulty(socket, payload));
     socket.on('room:dndRole', (payload) => this.onDndRole(socket, payload));
+    socket.on('room:dndNpcControl', (payload) => this.onDndNpcControl(socket, payload));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -688,6 +691,18 @@ export class GameServer {
     this.broadcastRoom(room);
   }
 
+  /** NPC 隊友要不要由房主親自操作，也是房主的決定，只能在開局前改。 */
+  private onDndNpcControl(socket: GameSocket, payload: { control?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room || room.gameType !== 'dnd') return;
+    if (room.hostId !== session.playerId || statusOf(room) === 'playing') return;
+
+    room.dndNpcControl = normalizeDndNpcControl(payload?.control);
+    this.broadcastRoom(room);
+  }
+
   /** 難度是房主的決定，而且只能在開局前改。 */
   private onDndDifficulty(socket: GameSocket, payload: { difficulty?: unknown }): void {
     const session = this.sessions.get(socket.id);
@@ -780,7 +795,13 @@ export class GameServer {
         const characterIds = Object.fromEntries(
           players.map((player) => [player.playerId, player.characterId])
         );
-        const state = dealDnd(room.seats, characterIds, room.dndDifficulty, bossSeatOf(room));
+        const state = dealDnd(
+          room.seats,
+          characterIds,
+          room.dndDifficulty,
+          bossSeatOf(room),
+          npcControllerOf(room),
+        );
         room.game = { type: 'dnd', state };
         pushLog(room, { t: 'dndStart', players: seatedPlayers(room).length });
         // 第一棒可能是 NPC（單人魔王模式下整隊都是），先把隊伍跑到該輪到真人／魔王為止

@@ -21,6 +21,11 @@ export interface DndState {
   difficulty: DndDifficulty;
   /** 操控怪物的玩家座位（固定是 DND_BOSS_SEAT）；null 代表沒人當魔王，怪物全自動。 */
   bossSeat: number | null;
+  /**
+   * NPC 隊友（空位補上的角色）由誰操作；null 代表 AI 自動行動。
+   * 單人房設成自己就等於同時操作 4 個角色。
+   */
+  npcController: PlayerId | null;
   /** 這一局是不是打贏了。over 為 false 時沒有意義。 */
   won: boolean;
   /** 現在輪到冒險者還是魔王。沒有魔王時恆為 'party'。 */
@@ -432,6 +437,30 @@ function partyHasHuman(seats: Seats, state: DndState): boolean {
   return false;
 }
 
+/**
+ * 這個座位的角色現在站在哪。真人座位找 `p-<playerId>`，NPC 座位找 `npc-<seat>`；
+ * 角色被放逐離場時回 null。
+ */
+function findSeatPiece(
+  seats: Seats,
+  state: DndState,
+  seat: number,
+): { piece: DndPiece; r: number; c: number } | null {
+  const playerId = seats[seat] ?? null;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    const row = state.board[r];
+    if (!row) continue;
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = row[c]?.piece;
+      if (!piece || piece.type !== 'player') continue;
+      if (playerId ? piece.playerId === playerId : piece.id === `npc-${seat}`) {
+        return { piece, r, c };
+      }
+    }
+  }
+  return null;
+}
+
 /** 棋子對應的座位：真人看 playerId，NPC 隊友看 `npc-<seat>` 的編號。 */
 function seatIndexOfPiece(seats: Seats, piece: DndPiece): number {
   if (piece.playerId) return seats.indexOf(piece.playerId);
@@ -762,6 +791,7 @@ export function dealDnd(
   characterIds?: Record<PlayerId, DownstairsCharacterId>,
   difficulty: DndDifficulty = 'normal',
   bossSeat: number | null = null,
+  npcController: PlayerId | null = null,
   rng: () => number = Math.random,
 ): DndState {
   const board: DndCellView[][] = [];
@@ -896,6 +926,7 @@ export function dealDnd(
     finalPhase: false,
     difficulty,
     bossSeat,
+    npcController,
     won: false,
     phase: 'party',
     monsterMoved: new Set(),
@@ -1118,7 +1149,15 @@ export function applyDndAction(
   if (state.over) return { ok: false, error: 'GAME_NOT_RUNNING' };
 
   const activeSeat = state.turnSeat;
-  if (seats[activeSeat] !== playerId) return { ok: false, error: 'NOT_YOUR_TURN' };
+  // 座位的主人自己送，或是 NPC 座位由指定的代打者（房主）送，兩種都放行
+  const seatOwner = seats[activeSeat] ?? null;
+  const npcSeatByController =
+    seatOwner === null &&
+    state.seats[activeSeat]?.isNpc === true &&
+    state.npcController === playerId;
+  if (seatOwner !== playerId && !npcSeatByController) {
+    return { ok: false, error: 'NOT_YOUR_TURN' };
+  }
 
   if (
     action.kind === 'bossMove' ||
@@ -1131,23 +1170,10 @@ export function applyDndAction(
   // 魔王沒有棋子，冒險者的動作對他一律無效
   if (state.phase === 'boss') return { ok: false, error: 'NOT_BOSS_TURN' };
 
-  let pr = -1, pc = -1;
-  let playerPiece: DndPiece | null = null;
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    const row = state.board[r];
-    if (!row) continue;
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      const piece = row[c]?.piece;
-      if (piece && piece.type === 'player' && piece.playerId === playerId) {
-        pr = r;
-        pc = c;
-        playerPiece = piece;
-        break;
-      }
-    }
-  }
-
-  if (!playerPiece) return { ok: false, error: 'BAD_ACTION' };
+  const acting = findSeatPiece(seats, state, activeSeat);
+  if (!acting) return { ok: false, error: 'BAD_ACTION' };
+  let { r: pr, c: pc } = acting;
+  const playerPiece = acting.piece;
 
   const events: LogEvent[] = [];
 
@@ -1159,7 +1185,7 @@ export function applyDndAction(
 
     if (action.move) {
       if (state.turnHasMoved) return { ok: false, error: 'ALREADY_MOVED' };
-      const wanted = fearedTarget(seats, state, playerId, pr, pc, action.move.r, action.move.c);
+      const wanted = fearedTarget(state, activeSeat, pr, pc, action.move.r, action.move.c);
       const tr = wanted.r;
       const tc = wanted.c;
       if (wanted.feared) {
@@ -1192,10 +1218,10 @@ export function applyDndAction(
       pr = tr;
       pc = tc;
 
-      if (movementInterrupted(seats, state, playerId, postEvents)) {
+      if (movementInterrupted(state, activeSeat, postEvents)) {
         // 換層（棋盤重置）或踩到陷阱被放逐（角色離場）之後，pr/pc 與 targetId 全部失效，
         // 這回合的終結動作直接跳過，照常收尾交棒。
-        return finishDndTurn(seats, state, playerId, activeSeat, 'move', events, rng);
+        return finishDndTurn(seats, state, activeSeat, 'move', events, rng);
       }
     }
 
@@ -1228,7 +1254,7 @@ export function applyDndAction(
       if (dist > maxMove || dist === 0) return { ok: false, error: 'INVALID_CELL' };
     }
 
-    const wanted = fearedTarget(seats, state, playerId, pr, pc, tr, tc);
+    const wanted = fearedTarget(state, activeSeat, pr, pc, tr, tc);
     tr = wanted.r;
     tc = wanted.c;
     if (wanted.feared) {
@@ -1258,10 +1284,10 @@ export function applyDndAction(
 
     state.turnHasMoved = true;
 
-    if (movementInterrupted(seats, state, playerId, postEvents)) {
+    if (movementInterrupted(state, activeSeat, postEvents)) {
       // 角色已離場或棋盤已重置，這回合不可能再做任何事，直接收尾交棒 ——
       // 留著回合給一個不在棋盤上的人，autoActDnd 會永遠找不到棋子而空轉。
-      return finishDndTurn(seats, state, playerId, activeSeat, 'move', events, rng);
+      return finishDndTurn(seats, state, activeSeat, 'move', events, rng);
     }
 
     const moveOverCheck = checkDndGameOver(seats, state);
@@ -1303,7 +1329,7 @@ export function applyDndAction(
     const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
     if (dist > maxRange) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
 
-    const stats = CLASS_STATS[classId];
+    const stats = CLASS_STATS[classId as DownstairsCharacterId];
     const roll = Math.floor(rng() * 20) + 1;
     
     const isFirstRogueHit = classId === 'bubble' && !targetPiece.damagedByRogue;
@@ -1440,28 +1466,23 @@ export function applyDndAction(
 
     if (classId === 'star' && playerPiece.hp > 0) {
       playerPiece.hp = Math.min(playerPiece.maxHp, playerPiece.hp + 1);
-      const selfSeatIdx = seats.indexOf(playerId);
-      if (selfSeatIdx !== -1 && state.seats[selfSeatIdx]) {
-        state.seats[selfSeatIdx]!.hp = playerPiece.hp;
+      if (state.seats[activeSeat]) {
+        state.seats[activeSeat]!.hp = playerPiece.hp;
       }
       events.push({ t: 'dndMessage', message: `🙏 ${playerPiece.name.split(' ')[0]} 的信仰之力湧現，補充了自己 1 點 HP。` } as any);
     }
   } else if (kind === 'rest') {
     playerPiece.hp = Math.min(playerPiece.maxHp, playerPiece.hp + 1);
-    const seatIdx = seats.indexOf(playerId);
-    if (seatIdx !== -1 && state.seats[seatIdx]) {
-      state.seats[seatIdx]!.hp = playerPiece.hp;
+    if (state.seats[activeSeat]) {
+      state.seats[activeSeat]!.hp = playerPiece.hp;
     }
     events.push({ t: 'dndMessage', message: `🏕️ ${playerPiece.name.split(' ')[0]} 選擇原地休息，恢復了 1 點 HP。` } as any);
 
   } else if (kind === 'skill') {
     const classId = playerPiece.classId || 'brave';
 
-    const selfSeatForCooldown = seats.indexOf(playerId);
-    if (selfSeatForCooldown !== -1) {
-      const cd = state.seats[selfSeatForCooldown]?.skillCooldown;
-      if (cd && cd > 0) return { ok: false, error: 'SKILL_ON_COOLDOWN' };
-    }
+    const cd = state.seats[activeSeat]?.skillCooldown;
+    if (cd && cd > 0) return { ok: false, error: 'SKILL_ON_COOLDOWN' };
 
     if (classId === 'star') { 
       if (!targetId) return { ok: false, error: 'BAD_ACTION' };
@@ -1575,7 +1596,7 @@ export function applyDndAction(
     return { ok: false, error: 'BAD_ACTION' };
   }
 
-  return finishDndTurn(seats, state, playerId, activeSeat, kind, events, rng);
+  return finishDndTurn(seats, state, activeSeat, kind, events, rng);
 }
 
 /**
@@ -1583,16 +1604,16 @@ export function applyDndAction(
  * 玩家想往上走就會往下走。鏡射後的格子照樣要過邊界與佔用檢查。
  */
 function fearedTarget(
-  seats: Seats,
   state: DndState,
-  playerId: PlayerId,
+  seat: number,
   pr: number,
   pc: number,
   tr: number,
   tc: number,
 ): { r: number; c: number; feared: boolean } {
-  const seatIndex = seats.indexOf(playerId);
-  const fear = seatIndex === -1 ? 0 : (state.seats[seatIndex]?.fearTurns ?? 0);
+  // 一律看「正在行動的座位」，不能查送出動作的人 —— 代打 NPC 時那是操作者自己的座位，
+  // 會拿他的【恐懼】去鏡射 NPC 的移動（或反過來讓中了恐懼的 NPC 走得好好的）。
+  const fear = state.seats[seat]?.fearTurns ?? 0;
   if (!fear) return { r: tr, c: tc, feared: false };
   return { r: pr - (tr - pr), c: pc - (tc - pc), feared: true };
 }
@@ -1695,15 +1716,14 @@ function applyBossAction(
  * 換層（棋盤整個重置）或踩中陷阱被放逐（角色從棋盤上移除）都會讓後續動作失去依據。
  */
 function movementInterrupted(
-  seats: Seats,
   state: DndState,
-  playerId: PlayerId,
+  seat: number,
   moveEvents: LogEvent[],
 ): boolean {
   if (moveEvents.some((event) => event.t === 'dndLevelUp')) return true;
-  const seatIndex = seats.indexOf(playerId);
-  if (seatIndex === -1) return false;
-  const banished = state.seats[seatIndex]?.banishedTurns;
+  // 看行動中的座位而不是送出動作的人：代打 NPC 時，踩到陷阱被放逐的是 NPC，
+  // 查操作者自己的座位會回「沒事」，接著就會拿一顆已經離場的棋子繼續打完終結動作。
+  const banished = state.seats[seat]?.banishedTurns;
   return !!(banished && banished > 0);
 }
 
@@ -1719,14 +1739,15 @@ function movementInterrupted(
 function finishDndTurn(
   seats: Seats,
   state: DndState,
-  playerId: PlayerId,
   activeSeat: number,
   kind: DndAction['kind'] | undefined,
   events: LogEvent[],
   rng: () => number,
 ): DndApplyResult {
-  const selfSeatIdx = seats.indexOf(playerId);
-  const selfInfo = selfSeatIdx === -1 ? undefined : state.seats[selfSeatIdx];
+  // 冷卻要記在「剛行動的座位」上，不能查送出動作的人 —— 代打 NPC 時
+  // seats.indexOf(playerId) 指的是操作者自己的座位，會變成 NPC 的技能永遠沒有冷卻，
+  // 而操作者自己的冷卻卻被 NPC 的行動亂設亂扣。
+  const selfInfo = state.seats[activeSeat];
   if (selfInfo) {
     if (kind === 'skill') {
       selfInfo.skillCooldown = 1;
@@ -1811,14 +1832,15 @@ function advanceParty(
     if (!seatInfo || !seatInfo.alive) continue;
     if (seatInfo.banishedTurns && seatInfo.banishedTurns > 0) continue;
 
-    if (seatInfo.isNpc) {
+    if (seatInfo.isNpc && !state.npcController) {
       state.turnSeat = cursor;
       events.push(...runNpcTurn(seats, state, cursor, rng));
       if (settleGameOver()) break;
       continue;
     }
 
-    handOff = cursor; // 找到下一位真人玩家，交出回合
+    // 真人座位，或是交給房主代打的 NPC 座位
+    handOff = cursor;
     break;
   }
 
@@ -2257,7 +2279,11 @@ export function openingDndTurn(
   return events;
 }
 
-export function autoActDnd(seats: Seats, state: DndState): DndApplyResult | null {
+export function autoActDnd(
+  seats: Seats,
+  state: DndState,
+  rng: () => number = Math.random,
+): DndApplyResult | null {
   const activeSeat = state.turnSeat;
 
   // 魔王掛機：等同按下「結束回合」，剩下的怪由 AI 打完，房間不會卡在他身上
@@ -2266,25 +2292,24 @@ export function autoActDnd(seats: Seats, state: DndState): DndApplyResult | null
   }
 
   const playerId = seats[activeSeat];
+
+  // 停在 NPC 座位上（代打者掛機，或是他中途離開房間讓 npcController 被清掉）：
+  // 這一回合交回 AI，然後照常推進。這裡**不能**再要求 npcController 還在 ——
+  // 代打者剛離開時回合就正好卡在 NPC 座位上的話，下面會回 null，
+  // handlers 只會每 45 秒重掛一次計時器，房間永遠不會再往前走。
+  if (!playerId && state.seats[activeSeat]?.isNpc) {
+    const events: LogEvent[] = runNpcTurn(seats, state, activeSeat, rng);
+    return advanceParty(seats, state, activeSeat, events, rng, false);
+  }
+
   if (!playerId) return null;
 
-  let playerPiece: DndPiece | null = null;
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    const row = state.board[r];
-    if (!row) continue;
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      const piece = row[c]?.piece;
-      if (piece && piece.type === 'player' && piece.playerId === playerId) {
-        playerPiece = piece;
-        break;
-      }
-    }
-  }
+  const playerPiece = findSeatPiece(seats, state, activeSeat)?.piece ?? null;
 
   if (!playerPiece) {
     // 角色不在棋盤上（放逐中）。不能什麼都不做就回 null ——
     // handlers 會重新掛一個 45 秒計時器，房間會停在這個座位上永遠空轉。
-    return finishDndTurn(seats, state, playerId, activeSeat, 'rest', [], Math.random);
+    return finishDndTurn(seats, state, activeSeat, 'rest', [], Math.random);
   }
 
   return applyDndAction(seats, state, playerId, { kind: 'rest' });
@@ -2329,6 +2354,9 @@ export function removePlayerFromDnd(seats: Seats, state: DndState, playerId: Pla
   }
 
   seats[seatIndex] = null;
+
+  // 代打者走了，NPC 隊友退回 AI 自動行動
+  if (state.npcController === playerId) state.npcController = null;
 
   const activePlayers = seats.filter((id): id is PlayerId => id !== null);
   if (activePlayers.length === 0) {

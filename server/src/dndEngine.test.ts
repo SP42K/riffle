@@ -1465,6 +1465,122 @@ describe('D&D Game Engine', () => {
     expect(findPiece(state, (p) => p.id === 'm-frail')).toBeNull();
   });
 
+  // ---------------------------------------------------------------------------
+  // 房主代打 NPC 隊友（單人房＝一個人操作 4 個角色）
+  // ---------------------------------------------------------------------------
+
+  it('should hand NPC seats to the controller instead of running the AI', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1');
+    state.traps = [];
+
+    // 座位 0 行動完，回合應該交到座位 1（NPC）手上等 p1 下指令，而不是自動打完
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(result.ok).toBe(true);
+    expect(state.turnSeat).toBe(1);
+    expect(state.seats[1].isNpc).toBe(true);
+    // 這一輪還沒繞完，怪物也還沒動
+    expect(result.events.some((e) => e.t === 'dndMonsterTurn')).toBe(false);
+
+    // p1 可以直接送這個 NPC 座位的動作
+    const npcHpBefore = state.seats[1].hp;
+    const acted = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(acted.ok).toBe(true);
+    expect(state.seats[1].hp).toBeGreaterThanOrEqual(npcHpBefore);
+    expect(state.turnSeat).toBe(2);
+  });
+
+  it('should keep NPC seats on the AI when nobody is controlling them', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+
+    // 沒有代打者：一次動作就把三個 NPC 跑完，回合直接繞回自己
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(result.ok).toBe(true);
+    expect(state.turnSeat).toBe(0);
+    expect(result.events.some((e) => e.t === 'dndMonsterTurn')).toBe(true);
+  });
+
+  it('should reject NPC-seat actions from someone who is not the controller', () => {
+    const seats: Seats = ['p1', 'p2', null, null];
+    const state = dealDnd(seats, { p1: 'brave', p2: 'star' }, 'normal', null, 'p1');
+    state.traps = [];
+    state.turnSeat = 2; // NPC 座位
+
+    const outsider = applyDndAction(seats, state, 'p2', { kind: 'rest' });
+    expect(outsider.ok).toBe(false);
+    expect(outsider.error).toBe('NOT_YOUR_TURN');
+
+    const controller = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(controller.ok).toBe(true);
+  });
+
+  it('should fall back to the AI when the controller lets an NPC turn time out', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1');
+    state.traps = [];
+    state.turnSeat = 1;
+
+    const acted = autoActDnd(seats, state, () => 0.5);
+    expect(acted?.ok).toBe(true);
+    // 那一回合由 AI 代打，然後照常往下推進
+    expect(state.turnSeat).not.toBe(1);
+    expect(state.over).toBe(false);
+  });
+
+  it('should drop back to AI control when the controller leaves', () => {
+    const seats: Seats = ['p1', 'p2', null, null];
+    const state = dealDnd(seats, { p1: 'brave', p2: 'star' }, 'normal', null, 'p1');
+    state.traps = [];
+
+    removePlayerFromDnd(seats, state, 'p1');
+    expect(state.npcController).toBeNull();
+  });
+
+  it('should never hand the party to the boss player', () => {
+    // 雙人：一個當魔王、一個當冒險者。隊伍的操作權必須落在冒險者身上
+    const seats: Seats = ['hero', null, null, null, 'boss'];
+    const state = dealDnd(seats, { hero: 'brave' }, 'normal', 4, 'hero');
+    state.traps = [];
+    state.turnSeat = 1; // NPC 座位
+
+    const byBoss = applyDndAction(seats, state, 'boss', { kind: 'rest' });
+    expect(byBoss.ok).toBe(false);
+    expect(byBoss.error).toBe('NOT_YOUR_TURN');
+
+    const byHero = applyDndAction(seats, state, 'hero', { kind: 'rest' }, () => 0.5);
+    expect(byHero.ok).toBe(true);
+  });
+
+  it('should charge the skill cooldown to the seat that acted, not to the controller', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1');
+    state.traps = [];
+    state.turnSeat = 1; // NPC 座位，由 p1 代打
+    state.seats[0].skillCooldown = 1; // p1 自己剛用過技能
+
+    const acted = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(acted.ok).toBe(true);
+    // 代打 NPC 的行動不能去動操作者自己的冷卻
+    expect(state.seats[0].skillCooldown).toBe(1);
+  });
+
+  it('should keep advancing an NPC seat after the controller has left', () => {
+    const seats: Seats = ['p1', 'p2', null, null];
+    const state = dealDnd(seats, { p1: 'brave', p2: 'star' }, 'normal', null, 'p1');
+    state.traps = [];
+    state.turnSeat = 3; // 回合正好停在 NPC 座位上
+
+    removePlayerFromDnd(seats, state, 'p1');
+    expect(state.npcController).toBeNull();
+
+    // 代打者走了，這個座位不能再等人輸入 —— autoActDnd 回 null 的話房間會每 45 秒空轉一次
+    const acted = autoActDnd(seats, state, () => 0.5);
+    expect(acted).not.toBeNull();
+    expect(state.over || state.turnSeat === 1).toBe(true);
+  });
+
   it('should support a solo boss run where the whole party is NPC', () => {
     // 只有魔王一個真人，四個冒險者位全部是 NPC
     const seats: Seats = [null, null, null, null, 'boss'];

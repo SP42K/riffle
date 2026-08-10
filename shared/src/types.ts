@@ -487,6 +487,8 @@ export interface RoomView {
   monopolyOptions: MonopolyOptions | null;
   /** 只有龍與地下城房有值。 */
   dndDifficulty: DndDifficulty | null;
+  /** 只有龍與地下城房有值：NPC 隊友由 AI 還是房主操作。 */
+  dndNpcControl: DndNpcControl | null;
   hostId: PlayerId;
   maxPlayers: number;
   status: RoomStatus;
@@ -541,6 +543,8 @@ export interface ClientToServerEvents {
   'room:dndDifficulty': (p: { difficulty: DndDifficulty }) => void;
   /** 龍與地下城：開局前選要當冒險者還是魔王。 */
   'room:dndRole': (p: { role: DndRole }) => void;
+  /** 龍與地下城：房主在開局前決定 NPC 隊友要不要自己手動操作。 */
+  'room:dndNpcControl': (p: { control: DndNpcControl }) => void;
   'game:start': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 大老二專用。 */
   'game:play': (p: { cardIds: string[] }, ack: Ack<null>) => void;
@@ -611,6 +615,19 @@ export type DndDifficulty = 'easy' | 'normal' | 'hard' | 'hell';
  * 這樣引擎裡「隊伍就是座位 0~3」的假設一行都不用改。
  */
 export type DndRole = 'hero' | 'boss';
+
+/**
+ * 空位補上的 NPC 隊友由誰操作：AI 自動行動，或是交給房主手動指揮。
+ * 開局前決定，整局固定。
+ */
+export type DndNpcControl = 'auto' | 'host';
+
+export const DND_NPC_CONTROLS: readonly DndNpcControl[] = ['auto', 'host'];
+
+export const DND_NPC_CONTROL_LABEL: Record<DndNpcControl, string> = {
+  auto: 'AI 自動',
+  host: '真人手動',
+};
 
 export const DND_BOSS_SEAT = 4;
 
@@ -708,6 +725,13 @@ export interface DndGameView {
   won: boolean | null;
   /** 現在是冒險者的回合還是魔王的怪物回合 */
   phase: 'party' | 'boss';
+  /**
+   * 現在輪到第幾個座位。turnPlayerId 對「房主代打的 NPC 座位」是 null，
+   * 前端要靠這個才知道正在操作誰。
+   */
+  turnSeat: number;
+  /** NPC 隊友由誰操作；null 代表 AI 自動行動。 */
+  npcControllerId: PlayerId | null;
   /** 這一輪已經行動完的怪物（攻擊過／被自動結算），魔王端據此把牠們畫成已用過 */
   actedMonsterIds: string[];
   /** 這一輪已經移動過的怪物，還可以攻擊一次 */
