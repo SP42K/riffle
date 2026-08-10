@@ -1024,7 +1024,7 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
-private onDnd(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
+  private onDnd(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
     const context = this.gameContext(socket, ack);
     if (!context) return;
     const { room, game, playerId } = context;
@@ -1050,6 +1050,10 @@ private onDnd(socket: GameSocket, payload: { action?: unknown }, ack: unknown): 
 
     const result = applyDndAction(room.seats, game.state, playerId, action);
     if (!result.ok) {
+      // turnCombo 是「先走再打」：移動已經寫進 state 之後，終結招式才可能因為
+      // SKILL_ON_COOLDOWN／TARGET_NOT_FOUND 這類理由被擋下來。這時候不重推快照的話，
+      // 客戶端會停在移動前的棋盤，跟伺服器一路歪到下一次有人成功行動為止。
+      this.broadcastRoom(room);
       return reply(ack, {
         ok: false,
         error: { code: result.error, message: DND_ERROR_MESSAGE[result.error] },

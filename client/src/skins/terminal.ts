@@ -246,6 +246,8 @@ function formatLog(event: LogEvent): string {
       return `level ${event.level} loaded — party healed 50%`;
     case 'dndTrap':
       return `trap ${event.player} (-${event.damage} HP)`;
+    case 'dndMessage':
+      return event.message;
   }
 }
 
@@ -515,6 +517,7 @@ const TEXT: TextTable = {
   'dndHint.waitOthers': 'waiting on other adventurers',
   'dndHint.yourTurn': 'your turn to act',
   'dndHint.spectating': 'read-only',
+  'dnd.logTitle': 'tail -f dungeon.log',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -572,6 +575,12 @@ const ERRORS: Skin['errors'] = {
   CELL_REVEALED: 'this block is already scanned',
   CELL_FLAGGED: 'block is flagged — unflag first',
   CANNOT_FLAG_REVEALED: 'cannot flag a scanned block',
+  INVALID_CHORD: 'flag count mismatch — nothing to expand',
+  CELL_OCCUPIED: 'cell already occupied',
+  TARGET_OUT_OF_RANGE: 'target out of range',
+  TARGET_NOT_FOUND: 'no such target',
+  ALREADY_MOVED: 'already moved this turn — pick an action',
+  SKILL_ON_COOLDOWN: 'still on cooldown',
 };
 
 /** 偽裝成終端機：等寬字、深色、牌變成短代號。 */

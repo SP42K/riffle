@@ -244,6 +244,10 @@ function formatLog(event: LogEvent): string {
       return `✨【樓梯】隊伍成功爬上了地下城第 ${event.level} 層！所有隊員恢復 50% 最大生命值！`;
     case 'dndTrap':
       return `⚠️【陷阱】${event.player} 踩到了隱藏陷阱！受到了 ${event.damage} 點傷害！`;
+    // 引擎大部分的地下城敘述都走 dndMessage；漏掉這個 case 的話 formatLog 會回
+    // undefined，戰報整排變空白
+    case 'dndMessage':
+      return event.message;
   }
 }
 

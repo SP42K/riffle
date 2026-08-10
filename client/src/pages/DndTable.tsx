@@ -23,7 +23,7 @@ const DND_CLASSES: Array<{ id: DownstairsCharacterId; name: string; hp: number; 
 ];
 
 export function DndRoom({ room }: { room: RoomView }) {
-  const { run } = useGame();
+  const { run, roomMessages } = useGame();
   const { skin, t } = useSkin();
 
   const game = room.game?.type === 'dnd' ? room.game : null;
@@ -189,7 +189,9 @@ export function DndRoom({ room }: { room: RoomView }) {
   const sendChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
-    socket.emit('room:chat', { message: chatInput });
+    // 伺服器讀的是 payload.text，送 message 的話 cleanText 拿到 undefined 就直接 return，
+    // 聊天會安靜地整個失效
+    socket.emit('room:chat', { text: chatInput });
     setChatInput('');
   };
 
@@ -348,9 +350,9 @@ export function DndRoom({ room }: { room: RoomView }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', background: 'rgba(0,0,0,0.2)', padding: '0.8rem 1.2rem', borderRadius: '8px', border: '1px solid var(--line)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <h2 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--gold)' }}>{room.name} 的房間</h2>
-          <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>房號 #{room.code}</span>
+          <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{t('room.code', { id: room.id })}</span>
         </div>
-        <button className="btn" onClick={() => socket.emit('room:leave', {})}>離開房間</button>
+        <button className="btn" onClick={() => run(() => emitWithAck('room:leave', {}))}>{t('room.leave')}</button>
       </div>
 
       {/* 主體雙欄排版：左側 (地圖/狀態) / 右側 (聊天室 + 操作鍵盤) */}
@@ -561,11 +563,11 @@ export function DndRoom({ room }: { room: RoomView }) {
           
           {/* 1. 正常的房間聊天室 */}
           <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', background: 'var(--panel)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)' }}>
-            <h4 style={{ margin: 0, color: 'var(--gold)', fontSize: '0.95rem' }}>房間聊天</h4>
+            <h4 style={{ margin: 0, color: 'var(--gold)', fontSize: '0.95rem' }}>{t('room.chatTitle')}</h4>
             <div style={{ height: '180px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', padding: '0.5rem', borderRadius: '4px', fontSize: '0.85rem', color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div>{room.name} 建立了房間</div>
-              {room.chats?.map((c, i) => (
-                <div key={i}><strong>{c.sender}:</strong> {c.message}</div>
+              {/* 聊天紀錄走 room:chat 事件、存在 GameProvider 裡 —— RoomView 上沒有 chats 這個欄位 */}
+              {roomMessages.map((message) => (
+                <div key={message.id}><strong>{message.nickname}:</strong> {message.text}</div>
               ))}
             </div>
             <form onSubmit={sendChat} style={{ display: 'flex', gap: '0.5rem' }}>
@@ -628,18 +630,17 @@ export function DndRoom({ room }: { room: RoomView }) {
           lineHeight: '1.5',
           boxSizing: 'border-box'
         }}>
-          <div style={{ color: 'var(--gold)', fontWeight: 'bold', marginBottom: '4px', fontSize: '0.9rem' }}>📜 即時戰報紀錄</div>
-          {room.log.map((logItem, idx) => {
-            let text = '';
-            if (logItem.t === 'dndMessage') text = logItem.message;
-            else if (logItem.t === 'dndAttack') text = `${logItem.player} 攻擊 ${logItem.target} (D20: ${logItem.roll}) — ${logItem.hit ? `命中！造成 ${logItem.damage} 傷害` : '未命中'}`;
-            else if (logItem.t === 'dndMove') text = `${logItem.player} 移動了`;
-            else if (logItem.t === 'dndLevelUp') text = `🎉 進入地下城第 ${logItem.level} 層！`;
-            else if (logItem.t === 'dndTrap') text = `💥 ${logItem.player} 觸發陷阱！`;
-            else text = JSON.stringify(logItem);
-
-            return <div key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '2px' }}>{text}</div>;
-          })}
+          <div style={{ color: 'var(--gold)', fontWeight: 'bold', marginBottom: '4px', fontSize: '0.9rem' }}>{t('dnd.logTitle')}</div>
+          {/*
+            戰報一律交給外觀的 formatLog。自己寫一份 if-chain 的話，沒列到的事件
+            （dndStart／dndMonsterTurn／dndOver／timeoutDnd…）會直接吐 JSON 到畫面上，
+            而且句子寫死中文，三個外觀全部失效。
+          */}
+          {room.log.map((logItem, idx) => (
+            <div key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '2px' }}>
+              {skin.formatLog(logItem)}
+            </div>
+          ))}
         </div>
       )}
 

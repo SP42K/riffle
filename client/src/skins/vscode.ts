@@ -250,6 +250,8 @@ function formatLog(event: LogEvent): string {
       return `[LEVEL] transitioned to dungeon floor ${event.level} (party healed by 50% max HP)`;
     case 'dndTrap':
       return `[TRAP] ${event.player} triggered a hidden trap and suffered ${event.damage} dmg`;
+    case 'dndMessage':
+      return event.message;
   }
 }
 
@@ -519,6 +521,7 @@ const TEXT: TextTable = {
   'dndHint.waitOthers': 'Waiting for other developers...',
   'dndHint.yourTurn': 'Your turn to execute actions',
   'dndHint.spectating': 'Read-only mode',
+  'dnd.logTitle': 'OUTPUT — dungeon',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -575,6 +578,12 @@ const ERRORS: Skin['errors'] = {
   CELL_REVEALED: 'This block has already been scanned',
   CELL_FLAGGED: 'Breakmarked! Remove the breakpoint first',
   CANNOT_FLAG_REVEALED: 'Cannot place breakpoint on a scanned block',
+  INVALID_CHORD: 'Breakpoint count does not match — cannot expand',
+  CELL_OCCUPIED: 'That block is already taken',
+  TARGET_OUT_OF_RANGE: 'Target is out of scope',
+  TARGET_NOT_FOUND: 'No such target',
+  ALREADY_MOVED: 'Already relocated this pass — finish with an action',
+  SKILL_ON_COOLDOWN: 'Still on cooldown this pass',
 };
 
 /** 偽裝成編輯器：牌變成檔案、出牌變成 commit、戰報變成輸出面板。 */

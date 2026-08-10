@@ -267,6 +267,7 @@ export const CASINO_TEXT = {
   'dndHint.waitOthers': '等待其他冒險者行動',
   'dndHint.yourTurn': '輪到你的回合，請選擇移動或攻擊',
   'dndHint.spectating': '觀戰中',
+  'dnd.logTitle': '📜 即時戰報紀錄',
 } as const;
 
 export type TextKey = keyof typeof CASINO_TEXT;

@@ -67,7 +67,9 @@ const ALL_CLASSES: DownstairsCharacterId[] = ['brave', 'bubble', 'tangerine', 's
 
 function spawnTraps(state: DndState, count: number, rng: () => number) {
   state.traps = [];
-  const corners = ['0,0', '0,7', '7,0', '7,7'];
+  // 隊伍的出生格（棋盤是 16x16，不是 8x8）。生怪／擺人之後才會呼叫這裡，
+  // 所以被佔用的格子本來就會被跳過，這份清單是換層時的第二道保險。
+  const corners = ['15,6', '15,7', '15,8', '15,9'];
   let trapsSpawned = 0;
   let attempts = 0;
   
@@ -839,7 +841,18 @@ export function dealDnd(
     }
   });
 
-  const turnSeat = nextActiveDndSeat(seats, -1, stateSeats);
+  // 開局的回合一定要落在真人座位上。座位有可能開天窗（開局前坐 0 號的人離開，
+  // removeMember 是把 seats[0] 設成 null 而不是往前壓），這時 nextActiveDndSeat 只看
+  // stateSeats.alive 會照樣回 0 —— 那是 NPC 座位，沒有人送得出動作、autoActDnd 又回 null，
+  // 房間會卡在 45 秒空轉的計時器上永遠開不了局。
+  let turnSeat = SEAT_COUNT;
+  for (let seat = 0; seat < SEAT_COUNT; seat++) {
+    if (seats[seat] && stateSeats[seat]?.alive) {
+      turnSeat = seat;
+      break;
+    }
+  }
+  if (turnSeat === SEAT_COUNT) turnSeat = nextActiveDndSeat(seats, -1, stateSeats);
 
   const state: DndState = {
     board,
@@ -1117,6 +1130,10 @@ export function applyDndAction(
     }
 
     if (!targetPiece) return { ok: false, error: 'TARGET_NOT_FOUND' };
+    // 只能打怪。少了這道檢查，客戶端送一個隊友或樓梯的 id 過來就會真的扣血：
+    // 隊友的棋子被打到 0 會從棋盤上被清掉，但 state.seats 的 hp/alive 完全沒同步，
+    // 那位玩家從此送不出任何動作，checkDndGameOver 也永遠當他還活著、判不出結束。
+    if (targetPiece.type !== 'goblin') return { ok: false, error: 'TARGET_NOT_FOUND' };
 
     const classId = playerPiece.classId || 'brave';
     const maxRange = classId === 'tangerine' ? 3 : 1;

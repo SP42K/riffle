@@ -699,5 +699,9 @@ export interface DndAction {
   r?: number;
   c?: number;
   move?: { r: number; c: number } | null;
-  action?: any;
+  /**
+   * turnCombo 的終結招式。刻意不寫成 `any` —— 這個 union 就是「送錯動作會在呼叫端
+   * 編譯不過」的唯一保障，開一個 any 進來等於兩端都失去檢查。
+   */
+  action?: DndAction | null;
 }
