@@ -91,18 +91,23 @@ export function DndRoom({ room }: { room: RoomView }) {
     return attacks.length > 0 ? (attacks[attacks.length - 1] as any) : null;
   }, [room.log]);
 
-  /** 現在由我操作的棋子：平常是自己的角色，代打 NPC 時是那個 NPC。 */
+  /**
+   * 現在由我操作的棋子：平常是自己的角色，代打 NPC 時**只能**是那個 NPC。
+   * 代打時千萬不能退回自己的角色 —— 棋盤是逐格掃的，自己的棋子通常排在
+   * NPC 前面，先比 playerId 的話會拿到自己的位置，操作面板就會用錯座標，
+   * 移動送出去必定被伺服器判成超出範圍。
+   */
   const myPosition = useMemo(() => {
     if (!game) return null;
-    const npcId = `npc-${game.turnSeat}`;
+    const npcId = npcSeatIsMine ? `npc-${game.turnSeat}` : null;
     for (let r = 0; r < game.board.length; r++) {
       const row = game.board[r];
       if (!row) continue;
       for (let c = 0; c < row.length; c++) {
         const piece = row[c]?.piece;
         if (!piece || piece.type !== 'player') continue;
-        if (piece.playerId === me.playerId) return { r, c, piece };
-        if (npcSeatIsMine && piece.id === npcId) return { r, c, piece };
+        const mine = npcId ? piece.id === npcId : piece.playerId === me.playerId;
+        if (mine) return { r, c, piece };
       }
     }
     return null;
@@ -308,7 +313,8 @@ export function DndRoom({ room }: { room: RoomView }) {
       else if (piece.classId === 'tangerine') icon = '🧙';
       else if (piece.classId === 'star') icon = '⛪';
       
-      const isMe = piece.playerId === me.playerId;
+      // 殘影要畫在「現在操作的角色」身上，代打 NPC 時就是那個 NPC
+      const isMe = myPosition ? piece.id === myPosition.piece.id : piece.playerId === me.playerId;
       const isOriginalGhost = isMe && pendingMove && (pendingMove.r !== myPosition?.r || pendingMove.c !== myPosition?.c);
 
       return (
