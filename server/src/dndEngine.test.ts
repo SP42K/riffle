@@ -38,6 +38,19 @@ function countPieces(state, predicate) {
   return n;
 }
 
+/** 讀某個座位角色目前的 AC（真人看 playerId，NPC 看 npc-<seat>）。 */
+function findSeatAc(state, seats, seat) {
+  const wanted = seats[seat];
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r][c].piece;
+      if (!piece || piece.type !== 'player') continue;
+      if (wanted ? piece.playerId === wanted : piece.id === `npc-${seat}`) return piece.ac;
+    }
+  }
+  return null;
+}
+
 function findPiece(state, predicate) {
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
@@ -1671,13 +1684,72 @@ describe('D&D Game Engine', () => {
     expect(equippedCount(state)).toBe(0);
   });
 
-  it('should add the common stat bonus when equipment lands', () => {
-    const { state } = finishEscortWith(8); // 全隊都拿到
+  it('should add the common bonus once, only to the character who got the equipment', () => {
+    // 4 件裝備＝4 個不同角色各拿一件，不是同一個人疊 4 次
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal');
+    state.traps = [];
+    descendTo(state, seats, 3);
+    state.traps = [];
+    clearGoblins(state);
+
+    // 發裝備前先記下每個座位的基準值
+    const before = [0, 1, 2, 3].map((seat) => ({
+      maxHp: state.seats[seat].maxHp,
+      ac: findSeatAc(state, seats, seat),
+    }));
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = 7; // 下一個獲救後是 8 → 全隊都拿到
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.villagersRescued).toBe(8);
+
     for (const seat of [0, 1, 2, 3]) {
       const info = state.seats[seat];
+      // 每個人剛好一件
       expect(info.equipment).toBeDefined();
-      // 一般難度是 +2：HP 上限跟著漲
-      expect(info.maxHp).toBeGreaterThan(16);
+      // 一般難度 +2，而且只加一次
+      expect(info.maxHp).toBe(before[seat].maxHp + 2);
+      expect(findSeatAc(state, seats, seat)).toBe(before[seat].ac + 2);
+    }
+  });
+
+  it('should leave characters without equipment completely untouched', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal');
+    state.traps = [];
+    descendTo(state, seats, 3);
+    state.traps = [];
+    clearGoblins(state);
+
+    const before = [0, 1, 2, 3].map((seat) => ({
+      maxHp: state.seats[seat].maxHp,
+      ac: findSeatAc(state, seats, seat),
+    }));
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = 4; // 下一個獲救後是 5 → 只發 1 件
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    const equipped = [0, 1, 2, 3].filter((seat) => state.seats[seat].equipment);
+    expect(equipped).toHaveLength(1);
+
+    for (const seat of [0, 1, 2, 3]) {
+      const gain = state.seats[seat].equipment ? 2 : 0;
+      expect(state.seats[seat].maxHp).toBe(before[seat].maxHp + gain);
+      expect(findSeatAc(state, seats, seat)).toBe(before[seat].ac + gain);
     }
   });
 
