@@ -664,11 +664,14 @@ export const DND_EQUIPMENT_SPEC: Record<
     healSelfOnAttack: number;
     /** 盜賊：命中骰乘上這個比例當作追加傷害，未命中也算 */
     diceRatio: number;
+    /** 盜賊：【撒網】多綁幾輪、每輪多扣幾點 */
+    netBonusTurns: number;
+    netBonusDamage: number;
   }
 > = {
-  normal: { stat: 2, reflect: 0.2, fireWallSize: 2, fireWallDamage: 1, healMain: 5, healSplash: 1, healSelfOnAttack: 2, diceRatio: 0.3 },
-  hard: { stat: 4, reflect: 0.4, fireWallSize: 3, fireWallDamage: 2, healMain: 6, healSplash: 2, healSelfOnAttack: 3, diceRatio: 0.6 },
-  hell: { stat: 6, reflect: 0.6, fireWallSize: 4, fireWallDamage: 3, healMain: 7, healSplash: 3, healSelfOnAttack: 4, diceRatio: 0.9 },
+  normal: { stat: 2, reflect: 0.2, fireWallSize: 2, fireWallDamage: 1, healMain: 5, healSplash: 1, healSelfOnAttack: 2, diceRatio: 0.3, netBonusTurns: 1, netBonusDamage: 1 },
+  hard: { stat: 4, reflect: 0.4, fireWallSize: 3, fireWallDamage: 2, healMain: 6, healSplash: 2, healSelfOnAttack: 3, diceRatio: 0.6, netBonusTurns: 2, netBonusDamage: 2 },
+  hell: { stat: 6, reflect: 0.6, fireWallSize: 4, fireWallDamage: 3, healMain: 7, healSplash: 3, healSelfOnAttack: 4, diceRatio: 0.9, netBonusTurns: 3, netBonusDamage: 3 },
 };
 
 export const DND_BOSS_SEAT = 4;
@@ -701,8 +704,10 @@ export interface DndPiece {
   damagedByRogue?: boolean;
   /** 被戰士被動【暈眩】命中時，剩餘無法行動的回合數 */
   stunnedTurns?: number;
-  /** 被盜賊【撒網】纏住後，剩餘無法移動且每回合扣 1 HP 的回合數 */
+  /** 被盜賊【撒網】纏住後，剩餘無法移動且每回合持續受傷的回合數 */
   trappedTurns?: number;
+  /** 這張網每回合扣幾點 HP（跟著撒網的人的裝備走），沒填是 1 */
+  netDamage?: number;
   /** 怪物一回合能走幾步，沒填是 2（哥布林盜賊是 5） */
   speed?: number;
   /** 怪物的攻擊距離（曼哈頓），沒填是 1（哥布林法師是 3） */

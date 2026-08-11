@@ -1820,6 +1820,50 @@ describe('D&D Game Engine', () => {
     }
   });
 
+  it('should let the dice dagger strengthen the net as well', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'bubble', tier: 'hard' }; // 多綁 2 輪、持續傷害 +2
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    state.board[8][9].piece = {
+      id: 'm-net', type: 'goblin', name: 'Goblin Net', hp: 40, maxHp: 40, ac: 11,
+    };
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-net' }, () => 0.01);
+    expect(cast.ok).toBe(true);
+
+    const netted = findPiece(state, (p) => p.id === 'm-net');
+    // 基礎 3 輪 + 2 = 5，同一次動作的回合結算已經吃掉一輪 → 剩 4
+    expect(netted.piece.trappedTurns).toBe(4);
+    // 每輪扣 1 + 2 = 3 點
+    expect(netted.piece.netDamage).toBe(3);
+    expect(netted.piece.hp).toBe(37);
+  });
+
+  it('should keep the net at its base strength without the dagger', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    state.board[8][9].piece = {
+      id: 'm-net', type: 'goblin', name: 'Goblin Net', hp: 40, maxHp: 40, ac: 11,
+    };
+
+    applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-net' }, () => 0.01);
+    const netted = findPiece(state, (p) => p.id === 'm-net');
+    expect(netted.piece.trappedTurns).toBe(2); // 3 - 1
+    expect(netted.piece.hp).toBe(39);          // 每輪 1 點
+  });
+
   it('should make the dice dagger bite even on a miss', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'bubble' });

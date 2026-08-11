@@ -95,7 +95,7 @@ const MAX_ROUND_LAPS = 12;
 
 export const CLASS_STATS: Record<DownstairsCharacterId, { name: string; hp: number; ac: number; attackBonus: number; dmgDice: number; dmgFlat: number; description: string }> = {
   brave: { name: 'Warrior (戰士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【反射】：受擊時把 1/3 傷害彈回攻擊者！ (移動2格)' },
-  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合（牠仍能攻擊；虛空酋長靠瞬移不受影響）(移動5格)' },
+  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 4, description: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合、每回合扣 1 HP（牠仍能攻擊；虛空酋長靠瞬移不受影響）(移動5格)' },
   tangerine: { name: 'Mage (法師)', hp: 16, ac: 10, attackBonus: 3, dmgDice: 10, dmgFlat: 2, description: '遠程爆發，高傷害 (移動1格)' },
   star: { name: 'Cleric (牧師)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '神聖判官，攻擊時治癒隊友 (移動1格)' },
 };
@@ -1604,10 +1604,11 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
       if (!piece.trappedTurns || piece.trappedTurns <= 0) continue;
       if (piece.invulnerable) continue;
 
-      piece.hp = Math.max(0, piece.hp - 1);
+      const netDmg = piece.netDamage ?? 1;
+      piece.hp = Math.max(0, piece.hp - netDmg);
       events.push({
         t: 'dndMessage',
-        message: `🕸️ ${piece.name} 被網子纏住，原地掙扎並受到 1 點傷害！`,
+        message: `🕸️ ${piece.name} 被網子纏住，原地掙扎並受到 ${netDmg} 點傷害！`,
       } as any);
       if (piece.hp <= 0) {
         state.board[r]![c]!.piece = null;
@@ -2211,14 +2212,20 @@ export function applyDndAction(
       const dist = Math.abs(pr - netted.r) + Math.abs(pc - netted.c);
       if (dist > ROGUE_NET_RANGE) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
 
-      netted.piece.trappedTurns = ROGUE_NET_TURNS;
+      // 【骰子匕首】讓網子綁得更久、燒得更痛
+      const daggerNet = equipmentOf(state, activeSeat);
+      const netTurns = ROGUE_NET_TURNS + (daggerNet?.netBonusTurns ?? 0);
+      const netDamage = 1 + (daggerNet?.netBonusDamage ?? 0);
+      netted.piece.trappedTurns = netTurns;
+      netted.piece.netDamage = netDamage;
+
       // 虛空酋長靠瞬移，網子綁不住牠的位置（isRestrained 的例外），戰報別謊報「被釘在原地」
       const rogueName = playerPiece.name.split(' ')[0];
       events.push({
         t: 'dndMessage',
         message: isRestrained(netted.piece)
-          ? `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，接下來 ${ROGUE_NET_TURNS} 回合牠被釘在原地並持續受傷！`
-          : `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，但牠一個瞬移就掙開了 —— 接下來 ${ROGUE_NET_TURNS} 回合只會持續受傷！`,
+          ? `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，接下來 ${netTurns} 回合牠被釘在原地，每回合扣 ${netDamage} 點 HP！`
+          : `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，但牠一個瞬移就掙開了 —— 接下來 ${netTurns} 回合每回合仍會扣 ${netDamage} 點 HP！`,
       } as any);
 
     } else if (classId === 'brave') {
