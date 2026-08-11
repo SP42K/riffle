@@ -28,6 +28,11 @@ export interface DndState {
   npcController: PlayerId | null;
   /** 這一局是不是打贏了。over 為 false 時沒有意義。 */
   won: boolean;
+  /** 進行到第幾輪。護送關的伏兵與補兵都靠它。 */
+  roundCount: number;
+  /** 護送關：已經獲救 / 半路陣亡的村民數。 */
+  villagersRescued: number;
+  villagersLost: number;
   /** 現在輪到冒險者還是魔王。沒有魔王時恆為 'party'。 */
   phase: 'party' | 'boss';
   /** 這一輪已經用掉「移動」的怪物 id。 */
@@ -195,6 +200,144 @@ function findPieceById(state: DndState, id: string): { piece: DndPiece; r: numbe
   return null;
 }
 
+/** 護送關開場：在最底列的空格排出 10 個村民。素質比照牧師。 */
+function spawnVillagers(state: DndState): void {
+  const bottom = BOARD_SIZE - 1;
+  let placed = 0;
+  for (let c = 0; c < BOARD_SIZE && placed < VILLAGER_COUNT; c++) {
+    const cell = state.board[bottom]?.[c];
+    if (!cell || cell.piece !== null) continue;
+    cell.piece = {
+      id: `v-${placed}`,
+      type: 'villager',
+      name: `村民 ${placed + 1}`,
+      hp: 20,
+      maxHp: 20,
+      ac: 12,
+    };
+    placed++;
+  }
+}
+
+/**
+ * 村民每輪往上跑一格。正上方被佔住就試左上／右上，都不行就原地不動。
+ * 從第 0 列再往上就是跑出地圖 ＝ 獲救。
+ *
+ * 由上往下處理：走在前面的先讓開，後面的才跟得上，不然一路都會卡住。
+ */
+function moveVillagers(state: DndState): LogEvent[] {
+  const events: LogEvent[] = [];
+
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const cell = state.board[r]?.[c];
+      const piece = cell?.piece;
+      if (!piece || piece.type !== 'villager') continue;
+
+      if (r === 0) {
+        cell!.piece = null;
+        state.villagersRescued++;
+        events.push({ t: 'dndMessage', message: `🏃 ${piece.name} 逃出了地下城！（已獲救 ${state.villagersRescued} 人）` } as any);
+        continue;
+      }
+
+      const tries = [{ r: r - 1, c }, { r: r - 1, c: c - 1 }, { r: r - 1, c: c + 1 }];
+      for (const next of tries) {
+        if (!inBounds(next.r, next.c)) continue;
+        const target = state.board[next.r]?.[next.c];
+        if (!target || target.piece !== null) continue;
+        target.piece = piece;
+        cell!.piece = null;
+        break;
+      }
+    }
+  }
+
+  return events;
+}
+
+/** 場上還剩幾個村民。 */
+function villagersOnBoard(state: DndState): number {
+  let n = 0;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (state.board[r]?.[c]?.piece?.type === 'villager') n++;
+    }
+  }
+  return n;
+}
+
+/** 護送關每輪的加派：第 2 輪伏兵、之後每 3 輪從最底列補一隻盜賊。 */
+function escortReinforcements(state: DndState, rng: () => number): LogEvent[] {
+  const events: LogEvent[] = [];
+
+  if (state.roundCount === ESCORT_AMBUSH_ROUND) {
+    const ambush = [
+      { r: 3, c: 3 }, { r: 3, c: 12 }, { r: 8, c: 3 },
+      { r: 8, c: 12 }, { r: 5, c: 7 }, { r: 5, c: 8 },
+    ];
+    ambush.forEach((spot, idx) => {
+      placeNear(state, spot.r, spot.c, spawnMonster(state, {
+        id: `m-ambush-${idx}`, type: 'goblin', name: `Goblin ${String.fromCharCode(65 + idx)}`,
+        hp: 16, maxHp: 16, ac: 11,
+      }));
+    });
+    [{ r: 7, c: 2 }, { r: 7, c: 13 }, { r: 9, c: 7 }].forEach((spot, idx) => {
+      placeNear(state, spot.r, spot.c, spawnMonster(state, makeGoblin(`m-ambush-rogue-${idx}`, GOBLIN_ROGUE)));
+    });
+    events.push({ t: 'dndMessage', message: '⚔️ 伏兵殺出！哥布林從四面八方湧向村民！' } as any);
+    return events;
+  }
+
+  if (state.roundCount > ESCORT_AMBUSH_ROUND && state.roundCount % ESCORT_REINFORCE_EVERY === 0) {
+    const bottom = BOARD_SIZE - 1;
+    const rogue = spawnMonster(state, makeGoblin(`m-chase-${state.roundCount}`, GOBLIN_ROGUE));
+    const start = Math.floor(rng() * BOARD_SIZE);
+    for (let i = 0; i < BOARD_SIZE; i++) {
+      const c = (start + i) % BOARD_SIZE;
+      const cell = state.board[bottom]?.[c];
+      if (cell && cell.piece === null) {
+        cell.piece = rogue;
+        events.push({ t: 'dndMessage', message: '🥷 又一隻哥布林盜賊從後方追了上來！' } as any);
+        break;
+      }
+    }
+  }
+
+  return events;
+}
+
+/**
+ * 護送關的結算：場上村民歸零就分勝負。
+ * 救到門檻就生樓梯往下一層，沒救到就整局失敗。
+ */
+function resolveEscortLevel(seats: Seats, state: DndState, events: LogEvent[]): void {
+  if (state.level !== ESCORT_LEVEL || state.over) return;
+  if (villagersOnBoard(state) > 0) return;
+
+  if (state.villagersRescued >= VILLAGER_RESCUE_TARGET) {
+    const stairCell = findEmptyCellNearCenter(state);
+    if (stairCell) {
+      stairCell.piece = {
+        id: 'staircase', type: 'staircase', name: '樓梯 (Stairs)', hp: 0, maxHp: 0, ac: 0,
+      };
+    }
+    events.push({
+      t: 'dndMessage',
+      message: `🎉 護送任務成功！${state.villagersRescued} 位村民平安逃出，通往深處的樓梯出現了！`,
+    } as any);
+  } else {
+    events.push({
+      t: 'dndMessage',
+      message: `💀 只有 ${state.villagersRescued} 位村民逃出來，村子沒能保住…`,
+    } as any);
+    state.over = true;
+    state.won = false;
+    state.ranking = rankDndSeats(seats, state);
+    events.push({ t: 'dndOver', won: false });
+  }
+}
+
 /** 從 (r,c) 一圈一圈往外找空格擺棋子，找不到就退回場中央。 */
 function placeNear(state: DndState, r: number, c: number, piece: DndPiece): boolean {
   for (let radius = 1; radius <= 4; radius++) {
@@ -252,6 +395,19 @@ function checkBossFinalPhase(state: DndState, rng: () => number): LogEvent[] {
 
 const DEBUFF_TURNS = 2;
 const DEBUFF_RATIO = 0.6;
+
+/** 地城總層數。護送關是第 3 層，虛空酋長挪到第 4 層。 */
+const MAX_LEVEL = 4;
+
+/** 護送關（B3）的設定。 */
+const ESCORT_LEVEL = 3;
+const VILLAGER_COUNT = 10;
+/** 救到這個數字（含）就過關，跟裝備獎勵的階梯對齊。 */
+const VILLAGER_RESCUE_TARGET = 5;
+/** 第幾輪出現伏兵。 */
+const ESCORT_AMBUSH_ROUND = 2;
+/** 每幾輪從最底列補一隻哥布林盜賊。 */
+const ESCORT_REINFORCE_EVERY = 3;
 
 /** 盜賊【撒網】的射程與拘束回合數。 */
 const ROGUE_NET_RANGE = 5;
@@ -552,6 +708,9 @@ function findEmptyCellNearCenter(state: DndState): DndCellView | null {
 }
 
 export function checkAndSpawnBossOrStaircase(seats: Seats, state: DndState, events: LogEvent[], rng: () => number) {
+  // 護送關的結束條件是村民，不是清怪 —— 清光伏兵不會生 Boss 也不會生樓梯
+  if (state.level === ESCORT_LEVEL) return;
+
   let goblinCount = 0;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
@@ -578,7 +737,7 @@ export function checkAndSpawnBossOrStaircase(seats: Seats, state: DndState, even
         bossCell.piece = spawnMonster(state, { id: 'boss-2', type: 'goblin', name: 'Goblin High Shaman (大薩滿)', hp: 50, maxHp: 50, ac: 13 });
         events.push({ t: 'dndMessage', message: '⚠️ 詭異的法陣亮起，Goblin High Shaman (大薩滿) 親自下場戰鬥！' } as any);
       }
-    } else if (state.level === 3) {
+    } else if (state.level === 4) {
       const bossCell = findEmptyCellNearCenter(state);
       if (bossCell) {
         const boss = spawnMonster(state, { id: 'boss-3', type: 'goblin', name: 'Void Chief (虛空酋長)', hp: 80, maxHp: 80, ac: 15 });
@@ -589,7 +748,7 @@ export function checkAndSpawnBossOrStaircase(seats: Seats, state: DndState, even
     return;
   }
   
-  if (state.level >= 3) return;
+  if (state.level >= MAX_LEVEL) return;
 
   let hasStair = false;
   for (let r = 0; r < BOARD_SIZE; r++) {
@@ -687,7 +846,7 @@ function transitionToNextLevel(
       { r: 5, c: 7, name: 'Goblin E', hp: 16, ac: 11 },
       { r: 5, c: 8, name: 'Goblin F', hp: 16, ac: 11 },
     ];
-  } else if (state.level === 3) {
+  } else if (state.level === 4) {
     monsterSpawns = [
       { r: 2, c: 2, name: 'Elite Goblin A', hp: 20, ac: 12 },
       { r: 2, c: 13, name: 'Elite Goblin B', hp: 20, ac: 12 },
@@ -714,14 +873,20 @@ function transitionToNextLevel(
     }
   });
 
-  // B2 起加派哥布林盜賊（一次衝 5 格），B3 再疊上哥布林法師（隔 3 格放法術）
-  if (state.level >= 2) {
+  // 護送關的怪物是第 2 輪才以伏兵的形式出現，這裡不先鋪
+  if (state.level === ESCORT_LEVEL) {
+    spawnVillagers(state);
+    state.roundCount = 0;
+  }
+
+  // B2 起加派哥布林盜賊（一次衝 5 格），B4 再疊上哥布林法師（隔 3 格放法術）
+  if (state.level >= 2 && state.level !== ESCORT_LEVEL) {
     const rogueSpots = [{ r: 7, c: 2 }, { r: 7, c: 13 }, { r: 9, c: 7 }];
     rogueSpots.forEach((spot, idx) => {
       placeNear(state, spot.r, spot.c, spawnMonster(state, makeGoblin(`m-rogue-${idx}`, GOBLIN_ROGUE)));
     });
   }
-  if (state.level >= 3) {
+  if (state.level >= 4) {
     const mageSpots = [{ r: 2, c: 7 }, { r: 2, c: 8 }, { r: 5, c: 12 }];
     mageSpots.forEach((spot, idx) => {
       placeNear(state, spot.r, spot.c, spawnMonster(state, makeGoblin(`m-mage-${idx}`, GOBLIN_MAGE)));
@@ -928,6 +1093,9 @@ export function dealDnd(
     bossSeat,
     npcController,
     won: false,
+    roundCount: 0,
+    villagersRescued: 0,
+    villagersLost: 0,
     phase: 'party',
     monsterMoved: new Set(),
     monsterActed: new Set(),
@@ -953,6 +1121,11 @@ export function nextActiveDndSeat(seats: Seats, currentSeat: number, stateSeats:
  * 跟後半拆開的理由是中間那段「怪物行動」可能由魔王玩家接管，要能停在中間等他輸入。
  */
 function beginRound(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
+  state.roundCount++;
+  if (state.level === ESCORT_LEVEL) {
+    events.push(...escortReinforcements(state, rng));
+  }
+
   for (let idx = 0; idx < 4; idx++) {
     const seatInfo = state.seats[idx];
     if (seatInfo && seatInfo.alive && seatInfo.banishedTurns && seatInfo.banishedTurns > 0) {
@@ -1031,6 +1204,11 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
 
 /** 一輪的後半：減益倒數、玩家身上的增益倒數、補一次 Boss／樓梯判定。 */
 function endRound(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
+  if (state.level === ESCORT_LEVEL) {
+    events.push(...moveVillagers(state));
+    resolveEscortLevel(seats, state, events);
+  }
+
   // 減益要撐過怪物回合才遞減，這樣【削弱】才會真的作用在牠那次攻擊上
   tickMonsterDebuffs(state);
 
@@ -1979,6 +2157,10 @@ function resolveMonsterAttack(
         if (playerSeat) {
           playerSeat.alive = false;
         }
+        if (hitTarget.piece.type === 'villager') {
+          state.villagersLost++;
+          events.push({ t: 'dndMessage', message: `☠️ ${hitTarget.piece.name} 倒下了…` } as any);
+        }
         const playerCell = state.board[hitTarget.r]?.[hitTarget.c];
         if (playerCell && playerCell.piece?.id === hitTarget.piece.id) {
           playerCell.piece = null;
@@ -2133,6 +2315,15 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
       if (!row) continue;
       for (let c = 0; c < BOARD_SIZE; c++) {
         const piece = row[c]?.piece;
+        // 村民也是目標 —— 不然護送關的村民會一路無傷走到頂，這關就沒有張力
+        if (piece && piece.type === 'villager') {
+          const dist = Math.abs(mon.r - r) + Math.abs(mon.c - c);
+          if (dist < minDist) {
+            minDist = dist;
+            targetPlayer = { piece, r, c, seat: -1 };
+          }
+          continue;
+        }
         if (piece && piece.type === 'player') {
           let seat = -1;
           if (piece.playerId) {
@@ -2244,7 +2435,8 @@ export function checkDndGameOver(seats: Seats, state: DndState): { over: boolean
   const partyPlayable = state.bossSeat !== null ? aliveCount > 0 : aliveHumans > 0;
 
   if (goblinCount === 0 && partyPlayable) {
-    if (state.level < 3) {
+    // 護送關要救村民，清光伏兵不算過關
+    if (state.level < MAX_LEVEL || state.level === ESCORT_LEVEL) {
       return { over: false, won: false, ranking: [] };
     }
     return { over: true, won: true, ranking: rankDndSeats(seats, state) };

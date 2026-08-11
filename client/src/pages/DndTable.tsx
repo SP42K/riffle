@@ -323,6 +323,13 @@ export function DndRoom({ room }: { room: RoomView }) {
           <span className="token-label">{label}</span>
         </div>
       );
+    } else if (piece.type === 'villager') {
+      return (
+        <div className="dnd-token" title={`${piece.name} HP ${piece.hp}/${piece.maxHp}`}>
+          <span className="token-icon">🧑‍🌾</span>
+          <span className="token-label" style={{ color: '#2ecc71', fontSize: '0.65rem' }}>村民</span>
+        </div>
+      );
     } else if (piece.type === 'staircase') {
       return (
         <div className="dnd-token staircase-token" style={{ animation: 'pulse 1.5s infinite' }}>
@@ -531,7 +538,7 @@ export function DndRoom({ room }: { room: RoomView }) {
           {playing && game && (
             <div style={{ width: '100%', maxWidth: '900px' }}>
               <h3 style={{ textAlign: 'center', margin: '0 0 1rem 0', color: 'var(--gold)', letterSpacing: '2px' }}>
-                🏰 地下城第 {game.level} 層 / 共 3 層
+                🏰 地下城第 {game.level} 層 / 共 4 層
                 <span style={{ marginLeft: '0.8rem', fontSize: '0.8rem', color: 'var(--muted)', letterSpacing: 'normal' }}>
                   {DND_DIFFICULTY_LABEL[game.difficulty]}模式 · 怪物強度 {Math.round(DND_DIFFICULTY_MULTIPLIER[game.difficulty] * 100)}%
                   {game.bossPlayerId && (
@@ -541,10 +548,24 @@ export function DndRoom({ room }: { room: RoomView }) {
                   )}
                 </span>
               </h3>
+              {game.level === 3 && (
+                <div style={{ display: 'flex', gap: '0.8rem', justifyContent: 'center', margin: '0 0 0.8rem 0', flexWrap: 'wrap' }}>
+                  <span style={{ background: 'rgba(46, 204, 113, 0.15)', border: '1px solid #2ecc71', color: '#2ecc71', borderRadius: '999px', padding: '0.25rem 0.9rem', fontSize: '0.85rem' }}>
+                    🏃 已獲救 {game.villagersRescued} / 需要 5
+                  </span>
+                  <span style={{ background: 'rgba(231, 76, 60, 0.12)', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: '999px', padding: '0.25rem 0.9rem', fontSize: '0.85rem' }}>
+                    ☠️ 陣亡 {game.villagersLost}
+                  </span>
+                  <span style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--line)', color: 'var(--muted)', borderRadius: '999px', padding: '0.25rem 0.9rem', fontSize: '0.85rem' }}>
+                    🧑‍🌾 逃亡中 {10 - game.villagersRescued - game.villagersLost} · 第 {game.roundCount} 輪
+                  </span>
+                </div>
+              )}
               <div style={{ textAlign: 'left', margin: '0 auto', width: '100%', fontSize: '0.9rem', color: 'var(--muted)', background: 'rgba(0,0,0,0.4)', padding: '1rem', borderRadius: '8px', borderLeft: '3px solid var(--gold)', lineHeight: '1.4' }}>
                 {game.level === 1 && "📖 【B1 貪婪地窖】: 你們跟隨微光聖物的指引來到失落的法師塔。底層已被哥布林佔據，請清除牠們並找尋通往深處的樓梯。"}
                 {game.level === 2 && "📖 【B2 薩滿祭壇】: 這裡瀰漫著詭異的魔法氣息。哥布林薩滿正在進行儀式試圖召喚虛空魔物 —— 而且有 3 隻哥布林盜賊在暗處游走，牠們一次能衝刺 5 格。阻止他們！"}
-                {game.level === 3 && "📖 【B3 酋長王座】: 抵達高塔基石。除了精銳哥布林與盜賊，還有 3 名哥布林法師能隔 3 格轟擊你們。被虛空力量腐化的哥布林酋長就在前方 —— 牠的攻擊會放逐、召喚或降下恐懼，重傷時更會把上兩層的 Boss 一起召回！"}
+                {game.level === 3 && "📖 【B3 逃亡通道】: 哥布林把整村的人抓來當祭品。10 位村民正拼命往上方的出口跑，第二輪就會有伏兵殺出、之後每 3 輪還有追兵從後方追上來。擋住他們，至少讓 5 位村民活著離開！"}
+                {game.level === 4 && "📖 【B4 酋長王座】: 抵達高塔基石。除了精銳哥布林與盜賊，還有 3 名哥布林法師能隔 3 格轟擊你們。被虛空力量腐化的哥布林酋長就在前方 —— 牠的攻擊會放逐、召喚或降下恐懼，重傷時更會把上兩層的 Boss 一起召回！"}
               </div>
             </div>
           )}

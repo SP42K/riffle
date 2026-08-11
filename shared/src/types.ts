@@ -649,7 +649,7 @@ export const DND_DIFFICULTY_MULTIPLIER: Record<DndDifficulty, number> = {
 
 export interface DndPiece {
   id: string;
-  type: 'player' | 'goblin' | 'staircase' | 'trap';
+  type: 'player' | 'goblin' | 'staircase' | 'trap' | 'villager';
   playerId?: PlayerId;
   name: string;
   hp: number;
@@ -736,6 +736,12 @@ export interface DndGameView {
   actedMonsterIds: string[];
   /** 這一輪已經移動過的怪物，還可以攻擊一次 */
   movedMonsterIds: string[];
+  /** 已經跑到地圖頂端獲救的村民數（護送關用） */
+  villagersRescued: number;
+  /** 半路陣亡的村民數（護送關用） */
+  villagersLost: number;
+  /** 這一局進行到第幾輪 */
+  roundCount: number;
 }
 
 export interface DndAction {

@@ -170,8 +170,8 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats);
     state.traps = [];
     
-    // Set level to 3 to satisfy victory condition
-    state.level = 3;
+    // 最終層現在是 B4（B3 改成護送關）
+    state.level = 4;
 
     // Clear all goblins and boss
     for (let r = 0; r < BOARD_SIZE; r++) {
@@ -766,7 +766,7 @@ describe('D&D Game Engine', () => {
     }
   }
 
-  it('should add three high-speed Goblin Rogues on B2 and add Goblin Mages on top of them on B3', () => {
+  it('should add three high-speed Goblin Rogues on B2 and add Goblin Mages on top of them on B4', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
 
@@ -777,9 +777,15 @@ describe('D&D Game Engine', () => {
     const rogue = findPiece(state, (p) => p.id.startsWith('m-rogue-'));
     expect(rogue.piece.speed).toBe(5);
 
+    // B3 是護送關：沒有常規怪物編成，改成 10 個村民
     descendTo(state, seats, 3);
     expect(state.level).toBe(3);
-    // B3 疊加 B2 的盜賊，再加上 3 名法師
+    expect(countPieces(state, (p) => p.type === 'villager')).toBe(10);
+    expect(countPieces(state, (p) => p.id.startsWith('m-mage-'))).toBe(0);
+
+    descendTo(state, seats, 4);
+    expect(state.level).toBe(4);
+    // B4 疊加 B2 的盜賊，再加上 3 名法師
     expect(countPieces(state, (p) => p.id.startsWith('m-rogue-'))).toBe(3);
     expect(countPieces(state, (p) => p.id.startsWith('m-mage-'))).toBe(3);
     const mage = findPiece(state, (p) => p.id.startsWith('m-mage-'));
@@ -1466,6 +1472,163 @@ describe('D&D Game Engine', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // B3 護送關：拯救村民
+  // ---------------------------------------------------------------------------
+
+  /** 把隊伍直接送進 B3 護送關。 */
+  function enterEscort() {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    descendTo(state, seats, 3);
+    state.traps = [];
+    return { seats, state };
+  }
+
+  it('should line up ten villagers at the bottom when B3 starts', () => {
+    const { state } = enterEscort();
+    expect(state.level).toBe(3);
+    expect(countPieces(state, (p) => p.type === 'villager')).toBe(10);
+    // 全部站在最底列
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[BOARD_SIZE - 1][c].piece;
+      if (piece) expect(['villager', 'player']).toContain(piece.type);
+    }
+    // 護送關開場沒有怪，伏兵第 2 輪才來
+    expect(countPieces(state, (p) => p.type === 'goblin')).toBe(0);
+  });
+
+  it('should walk villagers one cell up each round and rescue them at the top', () => {
+    const { seats, state } = enterEscort();
+
+    const rowOf = (id) => {
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          if (state.board[r][c].piece?.id === id) return r;
+        }
+      }
+      return null;
+    };
+
+    const before = rowOf('v-0');
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(rowOf('v-0')).toBe(before - 1);
+
+    // 直接把一個村民擺到頂列，下一輪就該獲救
+    const at = rowOf('v-1');
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (state.board[at][c].piece?.id === 'v-1') {
+        state.board[at][c].piece = null;
+        state.board[0][c].piece = { id: 'v-1', type: 'villager', name: '村民 2', hp: 20, maxHp: 20, ac: 12 };
+        break;
+      }
+    }
+    const rescuedBefore = state.villagersRescued;
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.villagersRescued).toBe(rescuedBefore + 1);
+    expect(rowOf('v-1')).toBeNull();
+  });
+
+  it('should spring the ambush on round two and send chasers every three rounds', () => {
+    const { seats, state } = enterEscort();
+
+    // 追兵生出來之後可能馬上被隊伍砍掉，所以數的是「登場事件」而不是場上活著的數量
+    let chasers = 0;
+    let ambushes = 0;
+    const advanceTo = (round) => {
+      let guard = 0;
+      while (state.roundCount < round && guard++ < 20) {
+        const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+        if (!res.ok) break;
+        for (const e of res.events) {
+          if (e.t !== 'dndMessage') continue;
+          if (e.message.includes('追了上來')) chasers++;
+          if (e.message.includes('伏兵殺出')) ambushes++;
+        }
+      }
+    };
+
+    advanceTo(1);
+    expect(ambushes).toBe(0);
+
+    advanceTo(2);
+    expect(ambushes).toBe(1);
+    expect(countPieces(state, (p) => p.id.startsWith('m-ambush'))).toBe(9);
+
+    advanceTo(3);
+    expect(chasers).toBe(1);
+
+    // 第 4、5 輪不補，第 6 輪再補一隻
+    advanceTo(5);
+    expect(chasers).toBe(1);
+    advanceTo(6);
+    expect(chasers).toBe(2);
+  });
+
+  it('should clear B3 and open the stairs once enough villagers get out', () => {
+    const { seats, state } = enterEscort();
+
+    // 只留一個村民在頂列，其餘算成已經獲救
+    let kept = false;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type !== 'villager') continue;
+        state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = 4;
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+    kept = true;
+    expect(kept).toBe(true);
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    expect(state.villagersRescued).toBe(5);
+    expect(state.over).toBe(false);
+    expect(findPiece(state, (p) => p.type === 'staircase')).not.toBeNull();
+  });
+
+  it('should fail the run when fewer than five villagers make it out', () => {
+    const { seats, state } = enterEscort();
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = 3;
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    expect(state.villagersRescued).toBe(4); // 還是低於門檻
+    expect(state.over).toBe(true);
+    expect(state.won).toBe(false);
+    expect(result.events.some((e) => e.t === 'dndOver' && e.won === false)).toBe(true);
+  });
+
+  it('should let monsters hunt villagers, not just the party', () => {
+    const { seats, state } = enterEscort();
+
+    // 清掉其他村民，只留一個孤零零的，旁邊擺一隻必中的怪
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.board[5][5].piece = { id: 'v-bait', type: 'villager', name: '村民 誘餌', hp: 20, maxHp: 20, ac: 11 };
+    state.board[5][6].piece = {
+      id: 'm-hunter', type: 'goblin', name: 'Goblin Hunter', hp: 20, maxHp: 20, ac: 11,
+      attackBonus: 40, dmgDice: 6,
+    };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
+    expect(result.events.some(
+      (e) => e.t === 'dndAttack' && e.player === 'Goblin Hunter' && e.target.includes('村民'),
+    )).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
   // 房主代打 NPC 隊友（單人房＝一個人操作 4 個角色）
   // ---------------------------------------------------------------------------
 
@@ -1580,10 +1743,10 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'brave' });
     state.traps = [];
     clearGoblins(state);
-    state.level = 3;
+    state.level = 4;
     state.bossSpawned = true;
 
-    // 清空 + 三樓 = 勝利
+    // 清空 + 最終層 = 勝利
     const win = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
     expect(win.ok).toBe(true);
     expect(state.over).toBe(true);
