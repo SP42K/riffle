@@ -1632,6 +1632,73 @@ describe('D&D Game Engine', () => {
   // 房主代打 NPC 隊友（單人房＝一個人操作 4 個角色）
   // ---------------------------------------------------------------------------
 
+  it('should put the skill cooldown on the acting seat, not on the controller', () => {
+    // 手動代打時，用 NPC 牧師補血不該把冷卻算到操作者自己的角色上
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1');
+    state.traps = [];
+    clearGoblins(state);
+
+    // 找出牧師 NPC 的座位，把回合直接交給它
+    let clericSeat = -1;
+    for (let seat = 1; seat < 4; seat++) {
+      const piece = findPiece(state, (p) => p.id === `npc-${seat}`);
+      if (piece?.piece.classId === 'star') clericSeat = seat;
+    }
+    expect(clericSeat).toBeGreaterThan(0);
+
+    // 讓牧師跟一個受傷的隊友站在一起
+    const cleric = findPiece(state, (p) => p.id === `npc-${clericSeat}`);
+    state.board[cleric.r][cleric.c].piece = null;
+    state.board[8][6].piece = cleric.piece;
+    const mate = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[mate.r][mate.c].piece = null;
+    state.board[8][7].piece = mate.piece;
+    mate.piece.hp = 5;
+    state.seats[0].hp = 5;
+
+    state.turnSeat = clericSeat;
+    const healed = applyDndAction(seats, state, 'p1', {
+      kind: 'skill', targetId: mate.piece.id,
+    }, () => 0.5);
+    expect(healed.ok).toBe(true);
+
+    // 冷卻記在牧師身上，操作者自己的角色不受影響
+    expect(state.seats[clericSeat].skillCooldown).toBe(1);
+    expect(state.seats[0].skillCooldown ?? 0).toBe(0);
+  });
+
+  it('should clear a skill cooldown after one of that character own turns', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'star' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[8][6].piece = me.piece;
+    me.piece.hp = 5;
+    state.seats[0].hp = 5;
+
+    // 第一次施放
+    const first = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: me.piece.id }, () => 0.5);
+    expect(first.ok).toBe(true);
+    expect(state.seats[0].skillCooldown).toBe(1);
+
+    // 下一個自己的回合還在冷卻
+    const blocked = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: me.piece.id }, () => 0.5);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toBe('SKILL_ON_COOLDOWN');
+
+    // 做一個別的動作把冷卻走完
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.seats[0].skillCooldown).toBe(0);
+
+    // 再下一個回合就能用了 —— 總共只跳過一個自己的回合
+    const again = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: me.piece.id }, () => 0.5);
+    expect(again.ok).toBe(true);
+  });
+
   it('should hand NPC seats to the controller instead of running the AI', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1');

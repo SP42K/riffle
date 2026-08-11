@@ -1924,8 +1924,11 @@ function finishDndTurn(
   events: LogEvent[],
   rng: () => number,
 ): DndApplyResult {
-  const selfSeatIdx = seats.indexOf(playerId);
-  const selfInfo = selfSeatIdx === -1 ? undefined : state.seats[selfSeatIdx];
+  // 冷卻要記在「剛行動的那個座位」，不能用 seats.indexOf(playerId) ——
+  // 代打 NPC 時 playerId 是操作者，會把 NPC 的冷卻算到操作者自己頭上：
+  // 用 NPC 牧師補一次血，被鎖住技能的卻是你自己的角色，而且之後每次替別人
+  // 行動又會亂扣，看起來就像冷卻莫名其妙拖到兩三回合。
+  const selfInfo = state.seats[activeSeat];
   if (selfInfo) {
     if (kind === 'skill') {
       selfInfo.skillCooldown = 1;
