@@ -351,6 +351,16 @@ function resolveEscortLevel(seats: Seats, state: DndState, events: LogEvent[], r
 // B5 哥布林邪神
 // ---------------------------------------------------------------------------
 
+/** 從 (r,c) 的上下左右找一個空格；沒有就回 null。 */
+function freeCellNextTo(state: DndState, r: number, c: number): { r: number; c: number } | null {
+  const adj = [{ r: r - 1, c }, { r: r + 1, c }, { r, c: c - 1 }, { r, c: c + 1 }];
+  for (const pos of adj) {
+    if (!inBounds(pos.r, pos.c)) continue;
+    if (state.board[pos.r]?.[pos.c]?.piece === null) return pos;
+  }
+  return null;
+}
+
 /** 場上的雜兵數（邪神本體與分身不算）。 */
 function countMinions(state: DndState): number {
   let n = 0;
@@ -2229,40 +2239,69 @@ export function applyDndAction(
       } as any);
 
     } else if (classId === 'brave') {
-      if (!targetId) return { ok: false, error: 'BAD_ACTION' };
-      let tr = -1, tc = -1, targetMonster: DndPiece | null = null;
-      for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-          const p = state.board[r]?.[c]?.piece;
-          if (p && p.id === targetId && p.type === 'goblin') {
-            tr = r; tc = c; targetMonster = p;
+      const shield = equipmentOf(state, activeSeat);
+
+      if (shield) {
+        // 【反射盾】把鎖鏈從單體改成範圍：把 chainRange 內的怪全部拖到身邊，
+        // 由近到遠拉，身旁沒位置就停手。
+        const haul: Array<{ piece: DndPiece; r: number; c: number; dist: number }> = [];
+        for (let r = 0; r < BOARD_SIZE; r++) {
+          for (let c = 0; c < BOARD_SIZE; c++) {
+            const piece = state.board[r]?.[c]?.piece;
+            if (!piece || piece.type !== 'goblin') continue;
+            const dist = Math.abs(pr - r) + Math.abs(pc - c);
+            if (dist > 0 && dist <= shield.chainRange) haul.push({ piece, r, c, dist });
           }
         }
-      }
-      if (!targetMonster) return { ok: false, error: 'TARGET_NOT_FOUND' };
+        haul.sort((a, b) => a.dist - b.dist);
 
-      const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
-      if (dist > 3) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
+        const pulled: string[] = [];
+        for (const mon of haul) {
+          const spot = freeCellNextTo(state, pr, pc);
+          if (!spot) break;
+          const from = state.board[mon.r]?.[mon.c];
+          const to = state.board[spot.r]?.[spot.c];
+          if (!from || !to) continue;
+          to.piece = mon.piece;
+          from.piece = null;
+          pulled.push(mon.piece.name);
+        }
 
-      const adj = [
-        { r: pr - 1, c: pc }, { r: pr + 1, c: pc },
-        { r: pr, c: pc - 1 }, { r: pr, c: pc + 1 }
-      ];
-      const openCells = adj.filter((pos) => {
-        if (pos.r < 0 || pos.r >= BOARD_SIZE || pos.c < 0 || pos.c >= BOARD_SIZE) return false;
-        return state.board[pos.r]?.[pos.c]?.piece === null;
-      });
-      const pullCell = openCells[0] ?? null;
-
-      if (!pullCell) {
-        events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 施放【鎖鏈】，但周圍沒有空間可以將怪物拉過來！` } as any);
+        if (pulled.length === 0) {
+          events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 揮出【鎖鏈】，但範圍內沒有怪物、或身旁已經沒有空間了！` } as any);
+        } else {
+          events.push({
+            t: 'dndMessage',
+            message: `⛓️ ${playerPiece.name.split(' ')[0]} 的【反射盾】共鳴，鎖鏈把 ${pulled.length} 隻怪物一起拖到了身邊！（${pulled.join('、')}）`,
+          } as any);
+        }
       } else {
-        const oldMonsterCell = state.board[tr]?.[tc];
-        const newMonsterCell = state.board[pullCell.r]?.[pullCell.c];
-        if (oldMonsterCell && newMonsterCell) {
-          newMonsterCell.piece = targetMonster;
-          oldMonsterCell.piece = null;
-          events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 揮出【鎖鏈】，將 ${targetMonster.name} 強行拉到身旁！` } as any);
+        if (!targetId) return { ok: false, error: 'BAD_ACTION' };
+        let tr = -1, tc = -1, targetMonster: DndPiece | null = null;
+        for (let r = 0; r < BOARD_SIZE; r++) {
+          for (let c = 0; c < BOARD_SIZE; c++) {
+            const p = state.board[r]?.[c]?.piece;
+            if (p && p.id === targetId && p.type === 'goblin') {
+              tr = r; tc = c; targetMonster = p;
+            }
+          }
+        }
+        if (!targetMonster) return { ok: false, error: 'TARGET_NOT_FOUND' };
+
+        const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
+        if (dist > 3) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
+
+        const pullCell = freeCellNextTo(state, pr, pc);
+        if (!pullCell) {
+          events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 施放【鎖鏈】，但周圍沒有空間可以將怪物拉過來！` } as any);
+        } else {
+          const oldMonsterCell = state.board[tr]?.[tc];
+          const newMonsterCell = state.board[pullCell.r]?.[pullCell.c];
+          if (oldMonsterCell && newMonsterCell) {
+            newMonsterCell.piece = targetMonster;
+            oldMonsterCell.piece = null;
+            events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 揮出【鎖鏈】，將 ${targetMonster.name} 強行拉到身旁！` } as any);
+          }
         }
       }
 

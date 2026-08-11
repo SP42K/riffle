@@ -655,6 +655,8 @@ export const DND_EQUIPMENT_SPEC: Record<
     stat: number;
     /** 戰士：額外反射比例，疊加在基礎的 1/3 上 */
     reflect: number;
+    /** 戰士：【鎖鏈】改成把這個範圍內的怪物全部拉到身邊 */
+    chainRange: number;
     /** 法師：火牆邊長與額外傷害 */
     fireWallSize: number;
     fireWallDamage: number;
@@ -669,9 +671,9 @@ export const DND_EQUIPMENT_SPEC: Record<
     netBonusDamage: number;
   }
 > = {
-  normal: { stat: 2, reflect: 0.2, fireWallSize: 2, fireWallDamage: 1, healMain: 5, healSplash: 1, healSelfOnAttack: 2, diceRatio: 0.3, netBonusTurns: 1, netBonusDamage: 1 },
-  hard: { stat: 4, reflect: 0.4, fireWallSize: 3, fireWallDamage: 2, healMain: 6, healSplash: 2, healSelfOnAttack: 3, diceRatio: 0.6, netBonusTurns: 2, netBonusDamage: 2 },
-  hell: { stat: 6, reflect: 0.6, fireWallSize: 4, fireWallDamage: 3, healMain: 7, healSplash: 3, healSelfOnAttack: 4, diceRatio: 0.9, netBonusTurns: 3, netBonusDamage: 3 },
+  normal: { stat: 2, reflect: 0.2, chainRange: 2, fireWallSize: 2, fireWallDamage: 1, healMain: 5, healSplash: 1, healSelfOnAttack: 2, diceRatio: 0.3, netBonusTurns: 1, netBonusDamage: 1 },
+  hard: { stat: 4, reflect: 0.4, chainRange: 3, fireWallSize: 3, fireWallDamage: 2, healMain: 6, healSplash: 2, healSelfOnAttack: 3, diceRatio: 0.6, netBonusTurns: 2, netBonusDamage: 2 },
+  hell: { stat: 6, reflect: 0.6, chainRange: 4, fireWallSize: 4, fireWallDamage: 3, healMain: 7, healSplash: 3, healSelfOnAttack: 4, diceRatio: 0.9, netBonusTurns: 3, netBonusDamage: 3 },
 };
 
 export const DND_BOSS_SEAT = 4;

@@ -1776,6 +1776,56 @@ describe('D&D Game Engine', () => {
     expect(findPiece(state, (p) => p.id === 'm-hit').piece.hp).toBe(60 - expected);
   });
 
+  it('should turn the chain into an area pull once the shield is equipped', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'brave', tier: 'hard' }; // 範圍 3
+
+    const warrior = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[warrior.r][warrior.c].piece = null;
+    state.board[8][6].piece = warrior.piece;
+
+    // 範圍內三隻、範圍外一隻
+    state.board[8][8].piece = { id: 'm-a', type: 'goblin', name: 'A', hp: 20, maxHp: 20, ac: 30 };
+    state.board[6][6].piece = { id: 'm-b', type: 'goblin', name: 'B', hp: 20, maxHp: 20, ac: 30 };
+    state.board[8][3].piece = { id: 'm-c', type: 'goblin', name: 'C', hp: 20, maxHp: 20, ac: 30 };
+    state.board[8][12].piece = { id: 'm-far', type: 'goblin', name: 'Far', hp: 20, maxHp: 20, ac: 30 };
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-a' }, () => 0.01);
+    expect(cast.ok).toBe(true);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('一起拖到了身邊'))).toBe(true);
+
+    // 三隻都被拖到戰士旁邊（怪物回合會再自己動，所以在施放當下就檢查距離）
+    const pulledNear = ['m-a', 'm-b', 'm-c'].filter((id) => {
+      const mon = findPiece(state, (p) => p.id === id);
+      return mon !== null;
+    });
+    expect(pulledNear).toHaveLength(3);
+    // 範圍外那隻沒被動到
+    const far = findPiece(state, (p) => p.id === 'm-far');
+    expect(far).not.toBeNull();
+  });
+
+  it('should keep the chain single-target without the shield', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const warrior = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[warrior.r][warrior.c].piece = null;
+    state.board[8][6].piece = warrior.piece;
+    state.board[8][8].piece = { id: 'm-a', type: 'goblin', name: 'A', hp: 20, maxHp: 20, ac: 30 };
+    state.board[6][6].piece = { id: 'm-b', type: 'goblin', name: 'B', hp: 20, maxHp: 20, ac: 30 };
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-a' }, () => 0.01);
+    expect(cast.ok).toBe(true);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('強行拉到身旁'))).toBe(true);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('一起拖到了身邊'))).toBe(false);
+  });
+
   it('should grow the fire wall into a square and burn harder', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'tangerine' });
