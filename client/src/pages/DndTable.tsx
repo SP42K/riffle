@@ -1,6 +1,8 @@
 import { useMemo, useState, useEffect } from 'react';
 import {
   DND_DIFFICULTIES,
+  DND_EQUIPMENT_SPEC,
+  DND_EQUIPMENT_NAME,
   DND_NPC_CONTROLS,
   DND_NPC_CONTROL_LABEL,
   DND_DIFFICULTY_LABEL,
@@ -18,8 +20,8 @@ import { useGame } from '../state/GameProvider';
 import { useSkin } from '../state/skinContext';
 
 const DND_CLASSES: Array<{ id: DownstairsCharacterId; name: string; hp: number; ac: number; desc: string }> = [
-  { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁。【反射】：受擊時把 1/3 的傷害彈回攻擊者（常駐）。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
-  { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12, desc: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合，期間牠無法移動、每回合扣 1 HP，但仍能攻擊打得到的目標；虛空酋長靠瞬間移動，只會被扣血、位置綁不住。【弱點打擊】：命中時各1/2機率把目標的 AC 或傷害降到六成（2回合）。 (移動5格)' },
+  { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁（拿到【反射盾】後改成把 2/3/4 格內的怪物全部拖過來）。【反射】：受擊時把 1/3 的傷害彈回攻擊者（常駐）。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
+  { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12, desc: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合，期間牠無法移動、每回合扣 1 HP，但仍能攻擊打得到的目標；虛空酋長靠瞬間移動，只會被扣血、位置綁不住。【弱點打擊】：命中時各1/2機率把目標的 AC 或傷害降到六成（2回合）。拿到【骰子匕首】後，撒網會多綁 1/2/3 輪、每輪多扣 1/2/3 點。 (移動5格)' },
   { id: 'tangerine', name: '法師 (Mage) 🧙', hp: 16, ac: 10, desc: '遠程爆發。【火牆】：對3格內的地面拉出一道3格火牆，站在裡面的怪物每回合燒3點HP，持續2回合。 (移動1格)' },
   { id: 'star', name: '牧師 (Cleric) ⛪', hp: 20, ac: 12, desc: '神聖判官，攻擊時治癒隊友。【神聖治癒】：補3格內隊友4點HP；由NPC操作時會優先搶救血量低於70%的隊友。 (移動1格)' },
 ];
@@ -169,7 +171,7 @@ export function DndRoom({ room }: { room: RoomView }) {
         }
       } else if (bossMode === 'attack') {
         const range = selectedMonster.piece.range ?? (selectedMonster.piece.id === 'boss-3' ? 2 : 1);
-        if (clicked?.type === 'player' && dist <= range) {
+        if ((clicked?.type === 'player' || clicked?.type === 'villager') && dist <= range) {
           bossCommand({ kind: 'bossAttack', monsterId: selectedMonster.piece.id, targetId: clicked.id });
         }
       }
@@ -225,7 +227,9 @@ export function DndRoom({ room }: { room: RoomView }) {
           executeTurn({ kind: 'skill', r, c });
         }
       } else if (classId === 'brave') {
-        if (cell.piece && cell.piece.type === 'goblin' && dist <= 3) {
+        const equip = mySeat >= 0 ? game.seats[mySeat]?.equipment : undefined;
+        const reach = equip ? DND_EQUIPMENT_SPEC[equip.tier].chainRange : 3;
+        if (cell.piece && cell.piece.type === 'goblin' && dist <= reach) {
           executeTurn({ kind: 'skill', targetId: cell.piece.id });
         }
       } else {
@@ -288,7 +292,9 @@ export function DndRoom({ room }: { room: RoomView }) {
       return (
         <div className="dnd-token" style={{ opacity: 0.9 }}>
           <span className="token-icon" style={{ fontSize: '1.2rem' }}>🔥</span>
-          <span className="token-label" style={{ color: '#e67e22', fontSize: '0.65rem' }}>火牆 {fireWall.turns}</span>
+          <span className="token-label" style={{ color: fireWall.hostile ? 'var(--red)' : '#e67e22', fontSize: '0.65rem' }}>
+            {fireWall.hostile ? '邪火' : '火牆'} {fireWall.turns}
+          </span>
         </div>
       );
     }
@@ -325,6 +331,13 @@ export function DndRoom({ room }: { room: RoomView }) {
           <span className="token-label">{label}</span>
         </div>
       );
+    } else if (piece.type === 'villager') {
+      return (
+        <div className="dnd-token" title={`${piece.name} HP ${piece.hp}/${piece.maxHp}`}>
+          <span className="token-icon">🧑‍🌾</span>
+          <span className="token-label" style={{ color: '#2ecc71', fontSize: '0.65rem' }}>村民</span>
+        </div>
+      );
     } else if (piece.type === 'staircase') {
       return (
         <div className="dnd-token staircase-token" style={{ animation: 'pulse 1.5s infinite' }}>
@@ -338,6 +351,8 @@ export function DndRoom({ room }: { room: RoomView }) {
       else if (piece.name.includes('酋長') || piece.name.includes('Chief')) icon = '👑';
       else if (piece.name.includes('盜賊') || piece.name.includes('Rogue')) icon = '🥷';
       else if (piece.name.includes('法師') || piece.name.includes('Mage')) icon = '🧿';
+      if (piece.id === 'boss-5') icon = '🕯️';
+      else if (piece.copyClass) icon = '🪞';
       const acted = !!game?.actedMonsterIds.includes(piece.id);
       const picked = selectedMonsterId === piece.id;
       return (
@@ -351,9 +366,10 @@ export function DndRoom({ room }: { room: RoomView }) {
         >
           <span className="token-icon">{icon}</span>
           <span className="token-label">{piece.name.split(' ')[0]}</span>
-          {(piece.stunnedTurns || piece.trappedTurns || piece.acDebuffTurns || piece.atkDebuffTurns) ? (
+          {(piece.invulnerable || piece.stunnedTurns || piece.trappedTurns || piece.acDebuffTurns || piece.atkDebuffTurns) ? (
             <span className="token-label" style={{ color: 'var(--gold)', fontSize: '0.6rem' }}>
-              {piece.stunnedTurns ? '💫暈眩'
+              {piece.invulnerable ? '🛡️無敵'
+                : piece.stunnedTurns ? '💫暈眩'
                 : piece.trappedTurns ? '🪤受困'
                 : piece.acDebuffTurns ? '🗡️破甲'
                 : '🩸削弱'}
@@ -533,7 +549,7 @@ export function DndRoom({ room }: { room: RoomView }) {
           {playing && game && (
             <div style={{ width: '100%', maxWidth: '900px' }}>
               <h3 style={{ textAlign: 'center', margin: '0 0 1rem 0', color: 'var(--gold)', letterSpacing: '2px' }}>
-                🏰 地下城第 {game.level} 層 / 共 3 層
+                🏰 地下城第 {game.level} 層 / 共 5 層
                 <span style={{ marginLeft: '0.8rem', fontSize: '0.8rem', color: 'var(--muted)', letterSpacing: 'normal' }}>
                   {DND_DIFFICULTY_LABEL[game.difficulty]}模式 · 怪物強度 {Math.round(DND_DIFFICULTY_MULTIPLIER[game.difficulty] * 100)}%
                   {game.bossPlayerId && (
@@ -543,10 +559,25 @@ export function DndRoom({ room }: { room: RoomView }) {
                   )}
                 </span>
               </h3>
+              {game.level === 3 && (
+                <div style={{ display: 'flex', gap: '0.8rem', justifyContent: 'center', margin: '0 0 0.8rem 0', flexWrap: 'wrap' }}>
+                  <span style={{ background: 'rgba(46, 204, 113, 0.15)', border: '1px solid #2ecc71', color: '#2ecc71', borderRadius: '999px', padding: '0.25rem 0.9rem', fontSize: '0.85rem' }}>
+                    🏃 已獲救 {game.villagersRescued} / 需要 5
+                  </span>
+                  <span style={{ background: 'rgba(231, 76, 60, 0.12)', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: '999px', padding: '0.25rem 0.9rem', fontSize: '0.85rem' }}>
+                    ☠️ 陣亡 {game.villagersLost}
+                  </span>
+                  <span style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--line)', color: 'var(--muted)', borderRadius: '999px', padding: '0.25rem 0.9rem', fontSize: '0.85rem' }}>
+                    🧑‍🌾 逃亡中 {10 - game.villagersRescued - game.villagersLost} · 第 {game.roundCount} 輪
+                  </span>
+                </div>
+              )}
               <div style={{ textAlign: 'left', margin: '0 auto', width: '100%', fontSize: '0.9rem', color: 'var(--muted)', background: 'rgba(0,0,0,0.4)', padding: '1rem', borderRadius: '8px', borderLeft: '3px solid var(--gold)', lineHeight: '1.4' }}>
                 {game.level === 1 && "📖 【B1 貪婪地窖】: 你們跟隨微光聖物的指引來到失落的法師塔。底層已被哥布林佔據，請清除牠們並找尋通往深處的樓梯。"}
                 {game.level === 2 && "📖 【B2 薩滿祭壇】: 這裡瀰漫著詭異的魔法氣息。哥布林薩滿正在進行儀式試圖召喚虛空魔物 —— 而且有 3 隻哥布林盜賊在暗處游走，牠們一次能衝刺 5 格。阻止他們！"}
-                {game.level === 3 && "📖 【B3 酋長王座】: 抵達高塔基石。除了精銳哥布林與盜賊，還有 3 名哥布林法師能隔 3 格轟擊你們。被虛空力量腐化的哥布林酋長就在前方 —— 牠的攻擊會放逐、召喚或降下恐懼，重傷時更會把上兩層的 Boss 一起召回！"}
+                {game.level === 3 && "📖 【B3 逃亡通道】: 哥布林把整村的人抓來當祭品。10 位村民正拼命往上方的出口跑，第二輪就會有伏兵殺出、之後每 3 輪還有追兵從後方追上來。擋住他們，至少讓 5 位村民活著離開！"}
+                {game.level === 5 && "📖 【B5 邪神祭壇】: 守著祭壇的是一整批邪神信徒。清掉四分之三之後，哥布林邪神才會睜眼 —— 它照著你們的模樣捏出分身，分身會用你們自己的招式。有分身護體時本體刀槍不入，打碎所有分身才有 2 回合的空窗可以真的傷到它。當它掉到半血，護體會消失、改成在分身之間流竄奪舍：看血量，找出哪一個才是本體。"}
+                {game.level === 4 && "📖 【B4 酋長王座】: 抵達高塔基石。除了精銳哥布林與盜賊，還有 3 名哥布林法師能隔 3 格轟擊你們。被虛空力量腐化的哥布林酋長就在前方 —— 牠的攻擊會放逐、召喚或降下恐懼，重傷時更會把上兩層的 Boss 一起召回！"}
               </div>
             </div>
           )}
@@ -587,12 +618,21 @@ export function DndRoom({ room }: { room: RoomView }) {
                         <div className="party-member-header">
                           <span className="party-member-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             P{seatIndex + 1}. {displayName}
+                            {seatInfo.equipment && (
+                              <span title={`${DND_EQUIPMENT_NAME[seatInfo.equipment.kind]}（${seatInfo.equipment.tier}）`} style={{ color: 'var(--gold)', marginLeft: '4px' }}>
+                                ⚔️{DND_EQUIPMENT_NAME[seatInfo.equipment.kind]}
+                              </span>
+                            )}
                           </span>
                           <span className={`party-member-status ${!alive ? 'dead' : seatInfo.banishedTurns ? 'banished' : 'alive'}`} style={seatInfo.banishedTurns ? { color: 'var(--gold)' } : {}}>
                             {!alive
                               ? t('dnd.dead')
                               : seatInfo.banishedTurns
                                 ? `放逐 (${seatInfo.banishedTurns})`
+                                : seatInfo.stunnedTurns
+                                  ? `💫 暈眩 (${seatInfo.stunnedTurns})`
+                                  : seatInfo.restrainedTurns
+                                    ? `🕸️ 被纏住 (${seatInfo.restrainedTurns})`
                                 : seatInfo.fearTurns
                                   ? `😱 恐懼 (${seatInfo.fearTurns})`
                                   : seatInfo.damageCapTurns
@@ -676,7 +716,11 @@ export function DndRoom({ room }: { room: RoomView }) {
                         const isMoveable = distFromOriginal > 0 && distFromOriginal <= moveRange
                           && !!landingCell && (!landingCell.piece || landingCell.piece.type === 'staircase');
                         const isAttackable = myPosition && dist <= attackRange && cell.piece?.type === 'goblin';
-                        const skillRange = classId === 'bubble' ? 5 : 3;
+                        const myEquip = mySeat >= 0 ? game.seats[mySeat]?.equipment : undefined;
+                        const chainRange = myEquip && classId === 'brave'
+                          ? DND_EQUIPMENT_SPEC[myEquip.tier].chainRange
+                          : 3;
+                        const skillRange = classId === 'bubble' ? 5 : classId === 'brave' ? chainRange : 3;
                         const isSkillable = myPosition && dist <= skillRange && (
                           classId === 'star' ? cell.piece?.type === 'player'
                           : classId === 'tangerine' ? true // 火牆是對地技，任何格子都能點
@@ -696,7 +740,7 @@ export function DndRoom({ room }: { room: RoomView }) {
                             const range = selectedMonster.piece.range ?? (selectedMonster.piece.id === 'boss-3' ? 2 : 1);
                             if (bossMode === 'move' && !selectedHasMoved && bossDist > 0 && bossDist <= speed && !cell.piece) {
                               borderClass = 'can-move';
-                            } else if (bossMode === 'attack' && bossDist <= range && cell.piece?.type === 'player') {
+                            } else if (bossMode === 'attack' && bossDist <= range && (cell.piece?.type === 'player' || cell.piece?.type === 'villager')) {
                               borderClass = 'can-attack';
                             }
                           }

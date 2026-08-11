@@ -38,6 +38,19 @@ function countPieces(state, predicate) {
   return n;
 }
 
+/** 讀某個座位角色目前的 AC（真人看 playerId，NPC 看 npc-<seat>）。 */
+function findSeatAc(state, seats, seat) {
+  const wanted = seats[seat];
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r][c].piece;
+      if (!piece || piece.type !== 'player') continue;
+      if (wanted ? piece.playerId === wanted : piece.id === `npc-${seat}`) return piece.ac;
+    }
+  }
+  return null;
+}
+
 function findPiece(state, predicate) {
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
@@ -170,8 +183,8 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats);
     state.traps = [];
     
-    // Set level to 3 to satisfy victory condition
-    state.level = 3;
+    // 最終層是 B5（B3 護送關、B4 酋長、B5 邪神）
+    state.level = 5;
 
     // Clear all goblins and boss
     for (let r = 0; r < BOARD_SIZE; r++) {
@@ -766,7 +779,7 @@ describe('D&D Game Engine', () => {
     }
   }
 
-  it('should add three high-speed Goblin Rogues on B2 and add Goblin Mages on top of them on B3', () => {
+  it('should add three high-speed Goblin Rogues on B2 and add Goblin Mages on top of them on B4', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
 
@@ -777,9 +790,15 @@ describe('D&D Game Engine', () => {
     const rogue = findPiece(state, (p) => p.id.startsWith('m-rogue-'));
     expect(rogue.piece.speed).toBe(5);
 
+    // B3 是護送關：沒有常規怪物編成，改成 10 個村民
     descendTo(state, seats, 3);
     expect(state.level).toBe(3);
-    // B3 疊加 B2 的盜賊，再加上 3 名法師
+    expect(countPieces(state, (p) => p.type === 'villager')).toBe(10);
+    expect(countPieces(state, (p) => p.id.startsWith('m-mage-'))).toBe(0);
+
+    descendTo(state, seats, 4);
+    expect(state.level).toBe(4);
+    // B4 疊加 B2 的盜賊，再加上 3 名法師
     expect(countPieces(state, (p) => p.id.startsWith('m-rogue-'))).toBe(3);
     expect(countPieces(state, (p) => p.id.startsWith('m-mage-'))).toBe(3);
     const mage = findPiece(state, (p) => p.id.startsWith('m-mage-'));
@@ -1279,6 +1298,22 @@ describe('D&D Game Engine', () => {
     expect(findPiece(state, (p) => p.id === 'm-boss-test').c).toBe(at.c);
   });
 
+  it('should let the boss attack villagers, not only the party', () => {
+    const { seats, state } = bossTable();
+    state.board[8][11].piece = {
+      id: 'v-boss-test', type: 'villager', name: '村民 誘餌', hp: 20, maxHp: 20, ac: 5,
+    };
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5); // 把回合交給魔王
+
+    // 只認 player 的話，護送關碰上魔王模式就是白送 —— 怪物全歸魔王指揮，
+    // AI 的村民索敵不會跑，而他一個村民都打不到。
+    const hit = applyDndAction(seats, state, 'boss', {
+      kind: 'bossAttack', monsterId: 'm-boss-test', targetId: 'v-boss-test',
+    }, () => 0.9);
+    expect(hit.ok).toBe(true);
+    expect(findPiece(state, (p) => p.id === 'v-boss-test').piece.hp).toBeLessThan(20);
+  });
+
   it('should not let the boss move a monster after it has attacked', () => {
     const { seats, state } = bossTable();
     const pawn = findPiece(state, (p) => p.id === 'm-boss-test');
@@ -1466,8 +1501,764 @@ describe('D&D Game Engine', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // B3 護送關：拯救村民
+  // ---------------------------------------------------------------------------
+
+  /** 把隊伍直接送進 B3 護送關。 */
+  function enterEscort() {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    descendTo(state, seats, 3);
+    state.traps = [];
+    return { seats, state };
+  }
+
+  it('should line up ten villagers at the bottom when B3 starts', () => {
+    const { state } = enterEscort();
+    expect(state.level).toBe(3);
+    expect(countPieces(state, (p) => p.type === 'villager')).toBe(10);
+    // 全部站在最底列
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[BOARD_SIZE - 1][c].piece;
+      if (piece) expect(['villager', 'player']).toContain(piece.type);
+    }
+    // 護送關開場沒有怪，伏兵第 2 輪才來
+    expect(countPieces(state, (p) => p.type === 'goblin')).toBe(0);
+  });
+
+  it('should walk villagers one cell up each round and rescue them at the top', () => {
+    const { seats, state } = enterEscort();
+
+    const rowOf = (id) => {
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          if (state.board[r][c].piece?.id === id) return r;
+        }
+      }
+      return null;
+    };
+
+    const before = rowOf('v-0');
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(rowOf('v-0')).toBe(before - 1);
+
+    // 直接把一個村民擺到頂列，下一輪就該獲救
+    const at = rowOf('v-1');
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (state.board[at][c].piece?.id === 'v-1') {
+        state.board[at][c].piece = null;
+        state.board[0][c].piece = { id: 'v-1', type: 'villager', name: '村民 2', hp: 20, maxHp: 20, ac: 12 };
+        break;
+      }
+    }
+    const rescuedBefore = state.villagersRescued;
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.villagersRescued).toBe(rescuedBefore + 1);
+    expect(rowOf('v-1')).toBeNull();
+  });
+
+  it('should spring the ambush on round two and send chasers every three rounds', () => {
+    const { seats, state } = enterEscort();
+
+    // 追兵生出來之後可能馬上被隊伍砍掉，所以數的是「登場事件」而不是場上活著的數量
+    let chasers = 0;
+    let ambushes = 0;
+    const advanceTo = (round) => {
+      let guard = 0;
+      while (state.roundCount < round && guard++ < 20) {
+        const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+        if (!res.ok) break;
+        for (const e of res.events) {
+          if (e.t !== 'dndMessage') continue;
+          if (e.message.includes('追了上來')) chasers++;
+          if (e.message.includes('伏兵殺出')) ambushes++;
+        }
+      }
+    };
+
+    advanceTo(1);
+    expect(ambushes).toBe(0);
+
+    advanceTo(2);
+    expect(ambushes).toBe(1);
+    expect(countPieces(state, (p) => p.id.startsWith('m-ambush'))).toBe(9);
+
+    advanceTo(3);
+    expect(chasers).toBe(1);
+
+    // 第 4、5 輪不補，第 6 輪再補一隻
+    advanceTo(5);
+    expect(chasers).toBe(1);
+    advanceTo(6);
+    expect(chasers).toBe(2);
+  });
+
+  it('should clear B3 and open the stairs once enough villagers get out', () => {
+    const { seats, state } = enterEscort();
+
+    // 只留一個村民在頂列，其餘算成已經獲救
+    let kept = false;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type !== 'villager') continue;
+        state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = 4;
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+    kept = true;
+    expect(kept).toBe(true);
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    expect(state.villagersRescued).toBe(5);
+    expect(state.over).toBe(false);
+    expect(findPiece(state, (p) => p.type === 'staircase')).not.toBeNull();
+  });
+
+  it('should fail the run when fewer than five villagers make it out', () => {
+    const { seats, state } = enterEscort();
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = 3;
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    expect(state.villagersRescued).toBe(4); // 還是低於門檻
+    expect(state.over).toBe(true);
+    expect(state.won).toBe(false);
+    expect(result.events.some((e) => e.t === 'dndOver' && e.won === false)).toBe(true);
+  });
+
+  it('should let monsters hunt villagers, not just the party', () => {
+    const { seats, state } = enterEscort();
+
+    // 清掉其他村民，只留一個孤零零的，旁邊擺一隻必中的怪
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.board[5][5].piece = { id: 'v-bait', type: 'villager', name: '村民 誘餌', hp: 20, maxHp: 20, ac: 11 };
+    state.board[5][6].piece = {
+      id: 'm-hunter', type: 'goblin', name: 'Goblin Hunter', hp: 20, maxHp: 20, ac: 11,
+      attackBonus: 40, dmgDice: 6,
+    };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
+    expect(result.events.some(
+      (e) => e.t === 'dndAttack' && e.player === 'Goblin Hunter' && e.target.includes('村民'),
+    )).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 護送關的獎勵裝備
+  // ---------------------------------------------------------------------------
+
+  /** 把場面直接推到「村民只剩一個、其餘算獲救」的狀態，跑完就會結算發裝備。 */
+  function finishEscortWith(rescued, difficulty = 'normal') {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, difficulty);
+    state.traps = [];
+    descendTo(state, seats, 3);
+    state.traps = [];
+    clearGoblins(state);
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = rescued - 1;
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    return { seats, state, result };
+  }
+
+  const equippedCount = (state) =>
+    [0, 1, 2, 3].filter((seat) => state.seats[seat]?.equipment).length;
+
+  it('should hand out equipment on the 5/6/7/8 rescue ladder', () => {
+    expect(equippedCount(finishEscortWith(5).state)).toBe(1);
+    expect(equippedCount(finishEscortWith(6).state)).toBe(2);
+    expect(equippedCount(finishEscortWith(7).state)).toBe(3);
+    expect(equippedCount(finishEscortWith(8).state)).toBe(4);
+    // 超過 8 人也就是全隊都有，不會超發
+    expect(equippedCount(finishEscortWith(10).state)).toBe(4);
+  });
+
+  it('should not hand out equipment on easy', () => {
+    const { state } = finishEscortWith(10, 'easy');
+    expect(state.villagersRescued).toBe(10);
+    expect(equippedCount(state)).toBe(0);
+  });
+
+  it('should add the common bonus once, only to the character who got the equipment', () => {
+    // 4 件裝備＝4 個不同角色各拿一件，不是同一個人疊 4 次
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal');
+    state.traps = [];
+    descendTo(state, seats, 3);
+    state.traps = [];
+    clearGoblins(state);
+
+    // 發裝備前先記下每個座位的基準值
+    const before = [0, 1, 2, 3].map((seat) => ({
+      maxHp: state.seats[seat].maxHp,
+      ac: findSeatAc(state, seats, seat),
+    }));
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = 7; // 下一個獲救後是 8 → 全隊都拿到
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.villagersRescued).toBe(8);
+
+    for (const seat of [0, 1, 2, 3]) {
+      const info = state.seats[seat];
+      // 每個人剛好一件
+      expect(info.equipment).toBeDefined();
+      // 一般難度 +2，而且只加一次
+      expect(info.maxHp).toBe(before[seat].maxHp + 2);
+      expect(findSeatAc(state, seats, seat)).toBe(before[seat].ac + 2);
+    }
+  });
+
+  it('should leave characters without equipment completely untouched', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal');
+    state.traps = [];
+    descendTo(state, seats, 3);
+    state.traps = [];
+    clearGoblins(state);
+
+    const before = [0, 1, 2, 3].map((seat) => ({
+      maxHp: state.seats[seat].maxHp,
+      ac: findSeatAc(state, seats, seat),
+    }));
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = 4; // 下一個獲救後是 5 → 只發 1 件
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    const equipped = [0, 1, 2, 3].filter((seat) => state.seats[seat].equipment);
+    expect(equipped).toHaveLength(1);
+
+    for (const seat of [0, 1, 2, 3]) {
+      const gain = state.seats[seat].equipment ? 2 : 0;
+      expect(state.seats[seat].maxHp).toBe(before[seat].maxHp + gain);
+      expect(findSeatAc(state, seats, seat)).toBe(before[seat].ac + gain);
+    }
+  });
+
+  it('should stack the reflect shield on top of the base one third', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'brave', tier: 'hell' }; // 反射 +60% → 共 93%
+
+    const warrior = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[warrior.r][warrior.c].piece = null;
+    state.board[8][6].piece = warrior.piece;
+    state.board[8][7].piece = {
+      id: 'm-hit', type: 'goblin', name: 'Goblin Hit', hp: 60, maxHp: 60, ac: 40,
+      attackBonus: 40, dmgDice: 6,
+    };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
+    const hit = result.events.find((e) => e.t === 'dndAttack' && e.player === 'Goblin Hit' && e.hit);
+    expect(hit).toBeDefined();
+
+    const expected = Math.round(hit.damage * (1 / 3 + 0.6));
+    expect(findPiece(state, (p) => p.id === 'm-hit').piece.hp).toBe(60 - expected);
+  });
+
+  it('should turn the chain into an area pull once the shield is equipped', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'brave', tier: 'hard' }; // 範圍 3
+
+    const warrior = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[warrior.r][warrior.c].piece = null;
+    state.board[8][6].piece = warrior.piece;
+
+    // 範圍內三隻、範圍外一隻
+    state.board[8][8].piece = { id: 'm-a', type: 'goblin', name: 'A', hp: 20, maxHp: 20, ac: 30 };
+    state.board[6][6].piece = { id: 'm-b', type: 'goblin', name: 'B', hp: 20, maxHp: 20, ac: 30 };
+    state.board[8][3].piece = { id: 'm-c', type: 'goblin', name: 'C', hp: 20, maxHp: 20, ac: 30 };
+    state.board[8][12].piece = { id: 'm-far', type: 'goblin', name: 'Far', hp: 20, maxHp: 20, ac: 30 };
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-a' }, () => 0.01);
+    expect(cast.ok).toBe(true);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('一起拖到了身邊'))).toBe(true);
+
+    // 三隻都被拖到戰士旁邊（怪物回合會再自己動，所以在施放當下就檢查距離）
+    const pulledNear = ['m-a', 'm-b', 'm-c'].filter((id) => {
+      const mon = findPiece(state, (p) => p.id === id);
+      return mon !== null;
+    });
+    expect(pulledNear).toHaveLength(3);
+    // 範圍外那隻沒被動到
+    const far = findPiece(state, (p) => p.id === 'm-far');
+    expect(far).not.toBeNull();
+  });
+
+  it('should keep the chain single-target without the shield', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const warrior = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[warrior.r][warrior.c].piece = null;
+    state.board[8][6].piece = warrior.piece;
+    state.board[8][8].piece = { id: 'm-a', type: 'goblin', name: 'A', hp: 20, maxHp: 20, ac: 30 };
+    state.board[6][6].piece = { id: 'm-b', type: 'goblin', name: 'B', hp: 20, maxHp: 20, ac: 30 };
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-a' }, () => 0.01);
+    expect(cast.ok).toBe(true);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('強行拉到身旁'))).toBe(true);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('一起拖到了身邊'))).toBe(false);
+  });
+
+  it('should grow the fire wall into a square and burn harder', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'tangerine' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'tangerine', tier: 'hard' }; // 3x3、傷害 +2
+
+    const mage = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[mage.r][mage.c].piece = null;
+    state.board[8][6].piece = mage.piece;
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', r: 6, c: 6 }, () => 0.01);
+    expect(cast.ok).toBe(true);
+    expect(state.fireWalls).toHaveLength(9); // 3x3
+    expect(state.fireWalls[0].dmg).toBe(5);  // 基礎 3 + 2
+  });
+
+  it('should let the staff heal the whole party', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'star' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'star', tier: 'hell' }; // 主治療 7、其他人 +3
+
+    const cleric = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[cleric.r][cleric.c].piece = null;
+    state.board[8][6].piece = cleric.piece;
+    cleric.piece.hp = 1;
+    state.seats[0].hp = 1;
+    for (const seat of [1, 2, 3]) {
+      state.seats[seat].hp = 1;
+      const npc = findPiece(state, (p) => p.id === `npc-${seat}`);
+      if (npc) npc.piece.hp = 1;
+    }
+
+    const healed = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: cleric.piece.id }, () => 0.5);
+    expect(healed.ok).toBe(true);
+    expect(state.seats[0].hp).toBe(8); // 1 + 7
+    // 其他隊員也被光芒掃到
+    for (const seat of [1, 2, 3]) {
+      expect(state.seats[seat].hp).toBeGreaterThan(1);
+    }
+  });
+
+  it('should let the dice dagger strengthen the net as well', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'bubble', tier: 'hard' }; // 多綁 2 輪、持續傷害 +2
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    state.board[8][9].piece = {
+      id: 'm-net', type: 'goblin', name: 'Goblin Net', hp: 40, maxHp: 40, ac: 11,
+    };
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-net' }, () => 0.01);
+    expect(cast.ok).toBe(true);
+
+    const netted = findPiece(state, (p) => p.id === 'm-net');
+    // 基礎 3 輪 + 2 = 5，同一次動作的回合結算已經吃掉一輪 → 剩 4
+    expect(netted.piece.trappedTurns).toBe(4);
+    // 每輪扣 1 + 2 = 3 點
+    expect(netted.piece.netDamage).toBe(3);
+    expect(netted.piece.hp).toBe(37);
+  });
+
+  it('should keep the net at its base strength without the dagger', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    state.board[8][9].piece = {
+      id: 'm-net', type: 'goblin', name: 'Goblin Net', hp: 40, maxHp: 40, ac: 11,
+    };
+
+    applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-net' }, () => 0.01);
+    const netted = findPiece(state, (p) => p.id === 'm-net');
+    expect(netted.piece.trappedTurns).toBe(2); // 3 - 1
+    expect(netted.piece.hp).toBe(39);          // 每輪 1 點
+  });
+
+  it('should make the dice dagger bite even on a miss', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'bubble', tier: 'hell' }; // 命中骰 x0.9
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    // AC 高到一定揮空；damagedByRogue 先設起來，避開「盜賊第一擊必中」
+    state.board[8][7].piece = {
+      id: 'm-tough', type: 'goblin', name: 'Goblin Tough', hp: 60, maxHp: 60, ac: 99,
+      damagedByRogue: true,
+    };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-tough' }, () => 0.9);
+    expect(result.ok).toBe(true);
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('揮空'))).toBe(true);
+    // d20 = 19 → round(19 * 0.9) = 17
+    expect(findPiece(state, (p) => p.id === 'm-tough').piece.hp).toBe(60 - 17);
+  });
+
+  // ---------------------------------------------------------------------------
+  // B5 哥布林邪神
+  // ---------------------------------------------------------------------------
+
+  /** 把場面直接布置成「邪神 + 分身」，方便驗證機制。 */
+  function evilGodTable() {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    state.level = 5;
+    clearGoblins(state);
+
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[8][6].piece = me.piece;
+    state.seats[0].hp = 999;
+    me.piece.hp = 999;
+    me.piece.maxHp = 999;
+    // 王貼著人打，被動又只有三選一 —— AC 拉高讓牠平常打不中，這些案例才只驗
+    // 分身機制本身。要驗被動的案例自己把 attackBonus 調到 40 去強制命中。
+    me.piece.ac = 40;
+
+    state.board[8][7].piece = {
+      id: 'boss-5', type: 'goblin', name: 'Goblin Evil God (哥布林邪神)',
+      hp: 120, maxHp: 120, ac: 5, attackBonus: 5, dmgDice: 10,
+    };
+    return { seats, state };
+  }
+
+  it('should start B5 with zealots only and hold the god back until three quarters are down', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    descendTo(state, seats, 5);
+    expect(state.level).toBe(5);
+
+    // 開場只有雜兵（信徒 + 盜賊 + 法師），邪神還沒現身
+    expect(countPieces(state, (p) => p.name.includes('Zealot'))).toBe(12);
+    expect(state.godMinionTotal).toBeGreaterThanOrEqual(12);
+    expect(findPiece(state, (p) => p.id === 'boss-5')).toBeNull();
+
+    const total = state.godMinionTotal;
+    const quarter = Math.floor(total / 4);
+
+    /** 把場上雜兵殺到只剩 keep 隻，然後跑一次生成判定。 */
+    const killDownTo = (keep) => {
+      let alive = countPieces(state, (p) => p.type === 'goblin' && !p.id.startsWith('boss-5'));
+      for (let r = 0; r < BOARD_SIZE && alive > keep; r++) {
+        for (let c = 0; c < BOARD_SIZE && alive > keep; c++) {
+          const piece = state.board[r][c].piece;
+          if (piece?.type === 'goblin' && !piece.id.startsWith('boss-5')) {
+            state.board[r][c].piece = null;
+            alive--;
+          }
+        }
+      }
+      checkAndSpawnBossOrStaircase(seats, state, [], () => 0.5);
+    };
+
+    // 還剩超過 1/4 → 邪神不出來
+    killDownTo(quarter + 1);
+    expect(findPiece(state, (p) => p.id === 'boss-5')).toBeNull();
+
+    // 剛好剩 1/4 ＝ 清掉 3/4 → 邪神帶著兩個分身現身
+    killDownTo(quarter);
+    expect(findPiece(state, (p) => p.id === 'boss-5')).not.toBeNull();
+    expect(countPieces(state, (p) => p.id.startsWith('boss-5-copy'))).toBe(2);
+  });
+
+  it('should shield the evil god while any copy is alive', () => {
+    const { seats, state } = evilGodTable();
+    state.board[8][8].piece = {
+      id: 'boss-5-copy-x', type: 'goblin', name: '邪神分身（戰士）',
+      hp: 24, maxHp: 24, ac: 5, copyClass: 'brave',
+    };
+
+    // 先跑一輪讓維護邏輯把免疫掛上
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(findPiece(state, (p) => p.id === 'boss-5').piece.invulnerable).toBe(true);
+
+    const blocked = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'boss-5' }, () => 0.9);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toBe('TARGET_INVULNERABLE');
+  });
+
+  it('should open a two round window once every copy is down', () => {
+    const { seats, state } = evilGodTable();
+
+    // 一開始沒有分身 → 第一輪結算會開啟空窗
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.godWindow).toBe(2);
+    expect(findPiece(state, (p) => p.id === 'boss-5').piece.invulnerable).toBe(false);
+
+    // 空窗期間打得到
+    const hit = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'boss-5' }, () => 0.9);
+    expect(hit.ok).toBe(true);
+    expect(state.godWindow).toBe(1);
+
+    // 空窗結束就補回分身
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.godWindow).toBe(0);
+    expect(countPieces(state, (p) => p.id.startsWith('boss-5-copy'))).toBe(2);
+  });
+
+  it('should drop the shield and start body-hopping below half HP', () => {
+    const { seats, state } = evilGodTable();
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    boss.piece.hp = 50; // < 120 的一半
+    state.board[8][8].piece = {
+      id: 'boss-5-copy-x', type: 'goblin', name: '邪神分身（戰士）',
+      hp: 24, maxHp: 24, ac: 5, copyClass: 'brave',
+    };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    expect(state.godPhase2).toBe(true);
+    // 奪舍階段沒有護體，打得到
+    const after = findPiece(state, (p) => p.id === 'boss-5');
+    expect(after.piece.invulnerable).toBe(false);
+    // 身體換過去了：本體不再站在原本那一格
+    expect(`${after.r},${after.c}`).not.toBe('8,7');
+    // 血量跟著身分走 —— 這就是玩家用來認人的線索。
+    // （同一輪 NPC 隊友會打到它，所以只驗「還是本體等級的血量」而不是精確值）
+    expect(after.piece.hp).toBeLessThanOrEqual(50);
+    expect(after.piece.hp).toBeGreaterThan(24); // 不是分身那種小血量
+    expect(after.piece.maxHp).toBe(120);
+  });
+
+  it('should displace a hero into a copy position, not swap with the boss', () => {
+    const { seats, state } = evilGodTable();
+    // 分身放遠一點，才看得出人真的被扯過去
+    state.board[2][2].piece = {
+      id: 'boss-5-copy-far', type: 'goblin', name: '邪神分身（法師）',
+      hp: 16, maxHp: 16, ac: 5, copyClass: 'tangerine',
+    };
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    boss.piece.attackBonus = 40; // 必中
+    // rng 0.01 → 命中骰低、被動骰 floor(0.01*3)=0 → 錯位
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.01);
+
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('對調了位置'))).toBe(true);
+
+    // 玩家被丟到分身站的位置、分身被換到玩家原本的格子。
+    // （分身在王出手前會自己先移動，所以不寫死座標，只驗「兩者確實對調」）
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    expect(`${me.r},${me.c}`).not.toBe('8,6');
+    expect(`${findPiece(state, (p) => p.id === 'boss-5-copy-far').r},${findPiece(state, (p) => p.id === 'boss-5-copy-far').c}`).toBe('8,6');
+  });
+
+  it('should skip displacement when there is no copy to swap with', () => {
+    const { seats, state } = evilGodTable();
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    boss.piece.attackBonus = 40;
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.01);
+    expect(result.events.some(
+      (e) => e.t === 'dndMessage' && e.message.includes('沒有分身可以替換'),
+    )).toBe(true);
+  });
+
+  it('should let a copied mage burn the party with a hostile wall', () => {
+    const { seats, state } = evilGodTable();
+    state.roundCount = 1; // 下一輪是偶數，分身才會放技能
+    state.board[8][8].piece = {
+      id: 'boss-5-copy-m', type: 'goblin', name: '邪神分身（法師）',
+      hp: 16, maxHp: 16, ac: 5, copyClass: 'tangerine', range: 3,
+    };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('燃起了火牆'))).toBe(true);
+    expect(state.fireWalls.some((w) => w.hostile)).toBe(true);
+  });
+
+  it('should let a copied rogue pin a hero in place', () => {
+    const { seats, state } = evilGodTable();
+    state.roundCount = 1;
+    state.board[8][8].piece = {
+      id: 'boss-5-copy-r', type: 'goblin', name: '邪神分身（盜賊）',
+      hp: 18, maxHp: 18, ac: 5, copyClass: 'bubble',
+    };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.seats[0].restrainedTurns).toBeGreaterThan(0);
+
+    // 被纏住就不能移動 —— 組合技與單獨的移動是兩條入口，兩條都要擋
+    const combo = applyDndAction(seats, state, 'p1', {
+      kind: 'turnCombo', move: { r: 7, c: 6 }, action: { kind: 'rest' },
+    }, () => 0.5);
+    expect(combo.ok).toBe(false);
+    expect(combo.error).toBe('PLAYER_RESTRAINED');
+
+    const plain = applyDndAction(seats, state, 'p1', { kind: 'moveTo', r: 7, c: 6 }, () => 0.5);
+    expect(plain.ok).toBe(false);
+    expect(plain.error).toBe('PLAYER_RESTRAINED');
+  });
+
+  it('should keep the stun alive long enough to cost the hero a turn', () => {
+    const { seats, state } = evilGodTable();
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    boss.piece.attackBonus = 40; // 必中
+    // rng 0.4 → 被動骰 floor(0.4*3)=1 → 震懾
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.4);
+
+    // 倒數放在 endRound 的話這裡已經被扣回 0，暈眩等於完全沒發生
+    expect(state.seats[0].stunnedTurns).toBe(1);
+  });
+
+  it('should clear the hostile flag when the party mage recasts over an evil wall', () => {
+    const { seats, state } = evilGodTable();
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    me.piece.classId = 'tangerine';
+    state.fireWalls = [{ r: 6, c: 6, turns: 2, dmg: 3, hostile: true }];
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', r: 6, c: 6 }, () => 0.5);
+    expect(cast.ok).toBe(true);
+    // 沒有重設 hostile 的話，法師自己放的牆會反過來燒隊伍
+    expect(state.fireWalls.find((w) => w.r === 6 && w.c === 6)?.hostile).toBe(false);
+  });
+
+  it('should bounce damage back from a copied warrior', () => {
+    const { seats, state } = evilGodTable();
+    state.board[8][5].piece = {
+      id: 'boss-5-copy-w', type: 'goblin', name: '邪神分身（戰士）',
+      hp: 60, maxHp: 60, ac: 1, copyClass: 'brave',
+    };
+    // 先把本體移走，免得護體擋住這次攻擊
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    state.board[boss.r][boss.c].piece = null;
+
+    const before = state.seats[0].hp;
+    const result = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'boss-5-copy-w' }, () => 0.9);
+    expect(result.ok).toBe(true);
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('彈了回來'))).toBe(true);
+    expect(state.seats[0].hp).toBeLessThan(before);
+  });
+
+  // ---------------------------------------------------------------------------
   // 房主代打 NPC 隊友（單人房＝一個人操作 4 個角色）
   // ---------------------------------------------------------------------------
+
+  it('should put the skill cooldown on the acting seat, not on the controller', () => {
+    // 手動代打時，用 NPC 牧師補血不該把冷卻算到操作者自己的角色上
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1');
+    state.traps = [];
+    clearGoblins(state);
+
+    // 找出牧師 NPC 的座位，把回合直接交給它
+    let clericSeat = -1;
+    for (let seat = 1; seat < 4; seat++) {
+      const piece = findPiece(state, (p) => p.id === `npc-${seat}`);
+      if (piece?.piece.classId === 'star') clericSeat = seat;
+    }
+    expect(clericSeat).toBeGreaterThan(0);
+
+    // 讓牧師跟一個受傷的隊友站在一起
+    const cleric = findPiece(state, (p) => p.id === `npc-${clericSeat}`);
+    state.board[cleric.r][cleric.c].piece = null;
+    state.board[8][6].piece = cleric.piece;
+    const mate = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[mate.r][mate.c].piece = null;
+    state.board[8][7].piece = mate.piece;
+    mate.piece.hp = 5;
+    state.seats[0].hp = 5;
+
+    state.turnSeat = clericSeat;
+    const healed = applyDndAction(seats, state, 'p1', {
+      kind: 'skill', targetId: mate.piece.id,
+    }, () => 0.5);
+    expect(healed.ok).toBe(true);
+
+    // 冷卻記在牧師身上，操作者自己的角色不受影響
+    expect(state.seats[clericSeat].skillCooldown).toBe(1);
+    expect(state.seats[0].skillCooldown ?? 0).toBe(0);
+  });
+
+  it('should clear a skill cooldown after one of that character own turns', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'star' });
+    state.traps = [];
+    clearGoblins(state);
+
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[8][6].piece = me.piece;
+    me.piece.hp = 5;
+    state.seats[0].hp = 5;
+
+    // 第一次施放
+    const first = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: me.piece.id }, () => 0.5);
+    expect(first.ok).toBe(true);
+    expect(state.seats[0].skillCooldown).toBe(1);
+
+    // 下一個自己的回合還在冷卻
+    const blocked = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: me.piece.id }, () => 0.5);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toBe('SKILL_ON_COOLDOWN');
+
+    // 做一個別的動作把冷卻走完
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.seats[0].skillCooldown).toBe(0);
+
+    // 再下一個回合就能用了 —— 總共只跳過一個自己的回合
+    const again = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: me.piece.id }, () => 0.5);
+    expect(again.ok).toBe(true);
+  });
 
   it('should hand NPC seats to the controller instead of running the AI', () => {
     const seats: Seats = ['p1', null, null, null];
@@ -1608,10 +2399,10 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'brave' });
     state.traps = [];
     clearGoblins(state);
-    state.level = 3;
+    state.level = 5;
     state.bossSpawned = true;
 
-    // 清空 + 三樓 = 勝利
+    // 清空 + 最終層 = 勝利
     const win = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
     expect(win.ok).toBe(true);
     expect(state.over).toBe(true);

@@ -629,6 +629,53 @@ export const DND_NPC_CONTROL_LABEL: Record<DndNpcControl, string> = {
   host: '真人手動',
 };
 
+/**
+ * 護送關的獎勵裝備。每個職業一件，數值分三級 —— 簡單難度不發裝備，
+ * 所以 tier 只會是 normal / hard / hell。
+ */
+export interface DndEquipment {
+  kind: DownstairsCharacterId;
+  tier: Exclude<DndDifficulty, 'easy'>;
+}
+
+export const DND_EQUIPMENT_NAME: Record<DownstairsCharacterId, string> = {
+  brave: '反射盾',
+  tangerine: '魔法珠',
+  star: '法杖',
+  bubble: '骰子匕首',
+};
+
+/**
+ * 三級裝備的數值。
+ * `stat` 是共通的 防禦／HP／命中 加值，其餘欄位各職業自己用。
+ */
+export const DND_EQUIPMENT_SPEC: Record<
+  Exclude<DndDifficulty, 'easy'>,
+  {
+    stat: number;
+    /** 戰士：額外反射比例，疊加在基礎的 1/3 上 */
+    reflect: number;
+    /** 戰士：【鎖鏈】改成把這個範圍內的怪物全部拉到身邊 */
+    chainRange: number;
+    /** 法師：火牆邊長與額外傷害 */
+    fireWallSize: number;
+    fireWallDamage: number;
+    /** 牧師：主治療量、「除目標外每人」的治療量，以及攻擊命中後回復自身的量 */
+    healMain: number;
+    healSplash: number;
+    healSelfOnAttack: number;
+    /** 盜賊：命中骰乘上這個比例當作追加傷害，未命中也算 */
+    diceRatio: number;
+    /** 盜賊：【撒網】多綁幾輪、每輪多扣幾點 */
+    netBonusTurns: number;
+    netBonusDamage: number;
+  }
+> = {
+  normal: { stat: 2, reflect: 0.2, chainRange: 2, fireWallSize: 2, fireWallDamage: 1, healMain: 5, healSplash: 1, healSelfOnAttack: 2, diceRatio: 0.3, netBonusTurns: 1, netBonusDamage: 1 },
+  hard: { stat: 4, reflect: 0.4, chainRange: 3, fireWallSize: 3, fireWallDamage: 2, healMain: 6, healSplash: 2, healSelfOnAttack: 3, diceRatio: 0.6, netBonusTurns: 2, netBonusDamage: 2 },
+  hell: { stat: 6, reflect: 0.6, chainRange: 4, fireWallSize: 4, fireWallDamage: 3, healMain: 7, healSplash: 3, healSelfOnAttack: 4, diceRatio: 0.9, netBonusTurns: 3, netBonusDamage: 3 },
+};
+
 export const DND_BOSS_SEAT = 4;
 
 export const DND_DIFFICULTIES: readonly DndDifficulty[] = ['easy', 'normal', 'hard', 'hell'];
@@ -649,7 +696,7 @@ export const DND_DIFFICULTY_MULTIPLIER: Record<DndDifficulty, number> = {
 
 export interface DndPiece {
   id: string;
-  type: 'player' | 'goblin' | 'staircase' | 'trap';
+  type: 'player' | 'goblin' | 'staircase' | 'trap' | 'villager';
   playerId?: PlayerId;
   name: string;
   hp: number;
@@ -659,8 +706,10 @@ export interface DndPiece {
   damagedByRogue?: boolean;
   /** 被戰士被動【暈眩】命中時，剩餘無法行動的回合數 */
   stunnedTurns?: number;
-  /** 被盜賊【撒網】纏住後，剩餘無法移動且每回合扣 1 HP 的回合數 */
+  /** 被盜賊【撒網】纏住後，剩餘無法移動且每回合持續受傷的回合數 */
   trappedTurns?: number;
+  /** 這張網每回合扣幾點 HP（跟著撒網的人的裝備走），沒填是 1 */
+  netDamage?: number;
   /** 怪物一回合能走幾步，沒填是 2（哥布林盜賊是 5） */
   speed?: number;
   /** 怪物的攻擊距離（曼哈頓），沒填是 1（哥布林法師是 3） */
@@ -675,6 +724,10 @@ export interface DndPiece {
   acDebuffTurns?: number;
   /** 【削弱】：剩餘幾回合造成的傷害只有原本的 60% */
   atkDebuffTurns?: number;
+  /** 邪神分身複製的職業 —— 分身會用這個職業的技能 */
+  copyClass?: DownstairsCharacterId;
+  /** 這隻怪目前免疫傷害（邪神有分身護體時） */
+  invulnerable?: boolean;
 }
 
 export interface DndCellView {
@@ -702,6 +755,12 @@ export interface DndSeatInfo {
   damageCapTurns?: number;
   /** 【極限防禦】的傷害上限值 */
   damageCap?: number;
+  /** 被邪神分身（盜賊）撒網纏住，剩餘幾回合不能移動 */
+  restrainedTurns?: number;
+  /** 被邪神打暈，剩餘幾回合不能行動 */
+  stunnedTurns?: number;
+  /** 護送關拿到的裝備；沒拿到就是 undefined */
+  equipment?: DndEquipment;
 }
 
 export interface DndGameView {
@@ -713,8 +772,11 @@ export interface DndGameView {
   seats: Record<number, DndSeatInfo>;
   ranking: PlayerId[];
   level: number;
-  /** 法師【火牆】燒著的格子，turns 是還會燒幾回合 */
-  fireWalls: Array<{ r: number; c: number; turns: number }>;
+  /**
+   * 火牆。turns 是還會燒幾回合、dmg 是每回合燒多少；
+   * hostile 為 true 代表這是敵方（邪神分身）鋪的，燒的是冒險者而不是怪物。
+   */
+  fireWalls: Array<{ r: number; c: number; turns: number; dmg: number; hostile?: boolean }>;
   /** 這一局的難度，開局時定案 */
   difficulty: DndDifficulty;
   /** 目前輪到的這位玩家，本回合是否已經移動過（決定前端要顯示「移動」還是只剩「攻擊/技能/休息」） */
@@ -736,6 +798,12 @@ export interface DndGameView {
   actedMonsterIds: string[];
   /** 這一輪已經移動過的怪物，還可以攻擊一次 */
   movedMonsterIds: string[];
+  /** 已經跑到地圖頂端獲救的村民數（護送關用） */
+  villagersRescued: number;
+  /** 半路陣亡的村民數（護送關用） */
+  villagersLost: number;
+  /** 這一局進行到第幾輪 */
+  roundCount: number;
 }
 
 export interface DndAction {
