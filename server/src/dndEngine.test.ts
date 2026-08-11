@@ -1869,6 +1869,46 @@ describe('D&D Game Engine', () => {
     return { seats, state };
   }
 
+  it('should start B5 with zealots only and hold the god back until three quarters are down', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    descendTo(state, seats, 5);
+    expect(state.level).toBe(5);
+
+    // 開場只有雜兵（信徒 + 盜賊 + 法師），邪神還沒現身
+    expect(countPieces(state, (p) => p.name.includes('Zealot'))).toBe(12);
+    expect(state.godMinionTotal).toBeGreaterThanOrEqual(12);
+    expect(findPiece(state, (p) => p.id === 'boss-5')).toBeNull();
+
+    const total = state.godMinionTotal;
+    const quarter = Math.floor(total / 4);
+
+    /** 把場上雜兵殺到只剩 keep 隻，然後跑一次生成判定。 */
+    const killDownTo = (keep) => {
+      let alive = countPieces(state, (p) => p.type === 'goblin' && !p.id.startsWith('boss-5'));
+      for (let r = 0; r < BOARD_SIZE && alive > keep; r++) {
+        for (let c = 0; c < BOARD_SIZE && alive > keep; c++) {
+          const piece = state.board[r][c].piece;
+          if (piece?.type === 'goblin' && !piece.id.startsWith('boss-5')) {
+            state.board[r][c].piece = null;
+            alive--;
+          }
+        }
+      }
+      checkAndSpawnBossOrStaircase(seats, state, [], () => 0.5);
+    };
+
+    // 還剩超過 1/4 → 邪神不出來
+    killDownTo(quarter + 1);
+    expect(findPiece(state, (p) => p.id === 'boss-5')).toBeNull();
+
+    // 剛好剩 1/4 ＝ 清掉 3/4 → 邪神帶著兩個分身現身
+    killDownTo(quarter);
+    expect(findPiece(state, (p) => p.id === 'boss-5')).not.toBeNull();
+    expect(countPieces(state, (p) => p.id.startsWith('boss-5-copy'))).toBe(2);
+  });
+
   it('should shield the evil god while any copy is alive', () => {
     const { seats, state } = evilGodTable();
     state.board[8][8].piece = {
@@ -1926,6 +1966,38 @@ describe('D&D Game Engine', () => {
     expect(after.piece.hp).toBeLessThanOrEqual(50);
     expect(after.piece.hp).toBeGreaterThan(24); // 不是分身那種小血量
     expect(after.piece.maxHp).toBe(120);
+  });
+
+  it('should displace a hero into a copy position, not swap with the boss', () => {
+    const { seats, state } = evilGodTable();
+    // 分身放遠一點，才看得出人真的被扯過去
+    state.board[2][2].piece = {
+      id: 'boss-5-copy-far', type: 'goblin', name: '邪神分身（法師）',
+      hp: 16, maxHp: 16, ac: 5, copyClass: 'tangerine',
+    };
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    boss.piece.attackBonus = 40; // 必中
+    // rng 0.01 → 命中骰低、被動骰 floor(0.01*3)=0 → 錯位
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.01);
+
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('對調了位置'))).toBe(true);
+
+    // 玩家被丟到分身站的位置、分身被換到玩家原本的格子。
+    // （分身在王出手前會自己先移動，所以不寫死座標，只驗「兩者確實對調」）
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    expect(`${me.r},${me.c}`).not.toBe('8,6');
+    expect(`${findPiece(state, (p) => p.id === 'boss-5-copy-far').r},${findPiece(state, (p) => p.id === 'boss-5-copy-far').c}`).toBe('8,6');
+  });
+
+  it('should skip displacement when there is no copy to swap with', () => {
+    const { seats, state } = evilGodTable();
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    boss.piece.attackBonus = 40;
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.01);
+    expect(result.events.some(
+      (e) => e.t === 'dndMessage' && e.message.includes('沒有分身可以替換'),
+    )).toBe(true);
   });
 
   it('should let a copied mage burn the party with a hostile wall', () => {

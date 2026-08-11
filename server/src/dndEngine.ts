@@ -37,6 +37,8 @@ export interface DndState {
   godWindow: number;
   /** B5 邪神：是否已經進入奪舍階段（過半血）。 */
   godPhase2: boolean;
+  /** B5 開場的信徒總數，用來判斷「清掉 3/4 了沒」。 */
+  godMinionTotal: number;
   /** 現在輪到冒險者還是魔王。沒有魔王時恆為 'party'。 */
   phase: 'party' | 'boss';
   /** 這一輪已經用掉「移動」的怪物 id。 */
@@ -349,6 +351,18 @@ function resolveEscortLevel(seats: Seats, state: DndState, events: LogEvent[], r
 // B5 哥布林邪神
 // ---------------------------------------------------------------------------
 
+/** 場上的雜兵數（邪神本體與分身不算）。 */
+function countMinions(state: DndState): number {
+  let n = 0;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r]?.[c]?.piece;
+      if (piece?.type === 'goblin' && !piece.id.startsWith('boss-5')) n++;
+    }
+  }
+  return n;
+}
+
 /** 場上同時存在的分身數。 */
 const GOD_COPY_COUNT = 2;
 /** 分身被清空之後，邪神有幾輪不能召喚（也就是可以被打的空窗）。 */
@@ -481,15 +495,26 @@ function evilGodPassive(
   const roll = Math.floor(rng() * 3);
 
   if (roll === 0) {
-    const bossCell = state.board[mon.r]?.[mon.c];
+    // 錯位是把人扯到「某個分身」的位置上 —— 跟本體交換沒有意義，
+    // 它本來就貼著你打，換完還是面對面。
+    const copies = godCopies(state);
+    if (copies.length === 0) {
+      events.push({ t: 'dndMessage', message: '🌀 邪神想扭曲空間，但場上沒有分身可以替換。' } as any);
+      return events;
+    }
+
+    const swapWith = copies[Math.floor(rng() * copies.length)]!;
+    const copyCell = state.board[swapWith.r]?.[swapWith.c];
     const victimCell = state.board[victim.r]?.[victim.c];
-    if (bossCell && victimCell) {
-      bossCell.piece = victim.piece;
-      victimCell.piece = mon.piece;
-      const br = mon.r, bc = mon.c;
-      mon.r = victim.r; mon.c = victim.c;
-      victim.r = br; victim.c = bc;
-      events.push({ t: 'dndMessage', message: `🌀 邪神扭曲了空間，把 ${who} 跟自己對調了位置！` } as any);
+    if (copyCell && victimCell) {
+      copyCell.piece = victim.piece;
+      victimCell.piece = swapWith.piece;
+      victim.r = swapWith.r;
+      victim.c = swapWith.c;
+      events.push({
+        t: 'dndMessage',
+        message: `🌀 邪神扭曲了空間，把 ${who} 跟 ${swapWith.piece.name} 對調了位置！`,
+      } as any);
     }
     return events;
   }
@@ -1080,6 +1105,23 @@ export function checkAndSpawnBossOrStaircase(seats: Seats, state: DndState, even
   // 護送關的結束條件是村民，不是清怪 —— 清光伏兵不會生 Boss 也不會生樓梯
   if (state.level === ESCORT_LEVEL) return;
 
+  // B5：信徒被清掉 3/4 之後邪神才現身，不必等到全部清光
+  if (state.level === 5 && !state.bossSpawned && state.godMinionTotal > 0) {
+    if (countMinions(state) > Math.floor(state.godMinionTotal / 4)) return;
+
+    state.bossSpawned = true;
+    const bossCell = findEmptyCellNearCenter(state);
+    if (bossCell) {
+      bossCell.piece = spawnMonster(state, {
+        id: 'boss-5', type: 'goblin', name: 'Goblin Evil God (哥布林邪神)',
+        hp: 120, maxHp: 120, ac: 16, attackBonus: 5, dmgDice: 10,
+      });
+      events.push({ t: 'dndMessage', message: '🕯️ 剩下的信徒跪伏在地 —— 哥布林邪神睜開了眼睛，開始照著你們的模樣捏出分身…' } as any);
+      events.push(...summonGodCopies(seats, state, rng));
+    }
+    return;
+  }
+
   let goblinCount = 0;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
@@ -1112,16 +1154,6 @@ export function checkAndSpawnBossOrStaircase(seats: Seats, state: DndState, even
         const boss = spawnMonster(state, { id: 'boss-3', type: 'goblin', name: 'Void Chief (虛空酋長)', hp: 80, maxHp: 80, ac: 15 });
         bossCell.piece = boss;
         events.push({ t: 'dndMessage', message: '👑 終極魔王 Void Chief (虛空酋長) 降臨王座！' } as any);
-      }
-    } else if (state.level === 5) {
-      const bossCell = findEmptyCellNearCenter(state);
-      if (bossCell) {
-        bossCell.piece = spawnMonster(state, {
-          id: 'boss-5', type: 'goblin', name: 'Goblin Evil God (哥布林邪神)',
-          hp: 120, maxHp: 120, ac: 16, attackBonus: 5, dmgDice: 10,
-        });
-        events.push({ t: 'dndMessage', message: '🕯️ 哥布林邪神睜開了眼睛 —— 它開始照著你們的模樣捏出分身…' } as any);
-        events.push(...summonGodCopies(seats, state, rng));
       }
     }
     return;
@@ -1225,6 +1257,22 @@ function transitionToNextLevel(
       { r: 5, c: 7, name: 'Goblin E', hp: 16, ac: 11 },
       { r: 5, c: 8, name: 'Goblin F', hp: 16, ac: 11 },
     ];
+  } else if (state.level === 5) {
+    // 邪神的信徒：比 B4 的精銳再硬一階，開場只有他們，邪神還沒現身
+    monsterSpawns = [
+      { r: 2, c: 2, name: 'Goblin Zealot A', hp: 26, ac: 14 },
+      { r: 2, c: 7, name: 'Goblin Zealot B', hp: 26, ac: 14 },
+      { r: 2, c: 13, name: 'Goblin Zealot C', hp: 26, ac: 14 },
+      { r: 5, c: 4, name: 'Goblin Zealot D', hp: 26, ac: 14 },
+      { r: 5, c: 11, name: 'Goblin Zealot E', hp: 26, ac: 14 },
+      { r: 7, c: 7, name: 'Goblin Zealot F', hp: 26, ac: 14 },
+      { r: 7, c: 8, name: 'Goblin Zealot G', hp: 26, ac: 14 },
+      { r: 9, c: 3, name: 'Goblin Zealot H', hp: 26, ac: 14 },
+      { r: 9, c: 12, name: 'Goblin Zealot I', hp: 26, ac: 14 },
+      { r: 4, c: 8, name: 'Goblin Zealot J', hp: 26, ac: 14 },
+      { r: 6, c: 2, name: 'Goblin Zealot K', hp: 26, ac: 14 },
+      { r: 6, c: 13, name: 'Goblin Zealot L', hp: 26, ac: 14 },
+    ];
   } else if (state.level === 4) {
     monsterSpawns = [
       { r: 2, c: 2, name: 'Elite Goblin A', hp: 20, ac: 12 },
@@ -1271,6 +1319,10 @@ function transitionToNextLevel(
       placeNear(state, spot.r, spot.c, spawnMonster(state, makeGoblin(`m-mage-${idx}`, GOBLIN_MAGE)));
     });
   }
+
+  // 全部雜兵都鋪好之後才記總數 —— 信徒、盜賊、法師都算，
+  // 「清掉 3/4 邪神才現身」是以整批守衛為準
+  state.godMinionTotal = state.level === 5 ? countMinions(state) : 0;
 
   spawnTraps(state, 8, rng);
   state.fireWalls = [];
@@ -1477,6 +1529,7 @@ export function dealDnd(
     villagersLost: 0,
     godWindow: 0,
     godPhase2: false,
+    godMinionTotal: 0,
     phase: 'party',
     monsterMoved: new Set(),
     monsterActed: new Set(),
@@ -2666,6 +2719,14 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
   }
 
   monsters.forEach((mon) => {
+    // 位置是迴圈開始前一次掃出來的，但這一輪中間有很多事會搬動棋子
+    // （邪神的錯位／彈飛、戰士的擊退與鎖鏈、奪舍…）。動手前先照 id 重新定位，
+    // 不然會拿著過期的座標去寫棋盤，把站在那一格的人直接覆蓋掉。
+    const located = findPieceById(state, mon.piece.id);
+    if (!located) return; // 已經死了或被移出棋盤
+    mon.r = located.r;
+    mon.c = located.c;
+
     // 被網住的怪只是被釘在原地：照樣會攻擊、薩滿照樣會治療與召喚，只是不能移動。
     // 持續傷害與倒數已經在 beginRound 結算過了。
     const netted = isRestrained(mon.piece);
