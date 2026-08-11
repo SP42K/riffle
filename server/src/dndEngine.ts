@@ -12,7 +12,7 @@ export interface DndState {
   level: number;
   traps: Array<{ r: number; c: number; triggered: boolean }>;
   /** 法師【火牆】燒著的格子，turns 是還會燒幾回合 */
-  fireWalls: Array<{ r: number; c: number; turns: number; dmg: number }>;
+  fireWalls: Array<{ r: number; c: number; turns: number; dmg: number; hostile?: boolean }>;
   bossSpawned: boolean;
   turnHasMoved: boolean;
   /** B3 的虛空酋長是否已經在 1/4 血時召回一、二樓的 Boss（只會發動一次） */
@@ -33,6 +33,10 @@ export interface DndState {
   /** 護送關：已經獲救 / 半路陣亡的村民數。 */
   villagersRescued: number;
   villagersLost: number;
+  /** B5 邪神：分身被清空後的空窗，>0 代表這幾輪不能再召喚，本體可以被打。 */
+  godWindow: number;
+  /** B5 邪神：是否已經進入奪舍階段（過半血）。 */
+  godPhase2: boolean;
   /** 現在輪到冒險者還是魔王。沒有魔王時恆為 'party'。 */
   phase: 'party' | 'boss';
   /** 這一輪已經用掉「移動」的怪物 id。 */
@@ -55,7 +59,8 @@ export type DndError =
   | 'MONSTER_NOT_FOUND'
   | 'MONSTER_ALREADY_ACTED'
   | 'MONSTER_ALREADY_MOVED'
-  | 'MONSTER_RESTRAINED';
+  | 'MONSTER_RESTRAINED'
+  | 'TARGET_INVULNERABLE';
 
 export const DND_ERROR_MESSAGE: Record<DndError, string> = {
   GAME_NOT_RUNNING: '遊戲尚未開始或已結束',
@@ -72,6 +77,7 @@ export const DND_ERROR_MESSAGE: Record<DndError, string> = {
   MONSTER_ALREADY_ACTED: '這隻怪物這一輪已經行動過了',
   MONSTER_ALREADY_MOVED: '這隻怪物這一輪已經移動過了，只能選擇攻擊',
   MONSTER_RESTRAINED: '這隻怪物被網子纏住，這幾回合不能移動，但還可以攻擊',
+  TARGET_INVULNERABLE: '邪神有分身護體，先把分身清掉才打得到它',
 };
 
 export const BOARD_SIZE = 16;
@@ -339,6 +345,275 @@ function resolveEscortLevel(seats: Seats, state: DndState, events: LogEvent[], r
   }
 }
 
+// ---------------------------------------------------------------------------
+// B5 哥布林邪神
+// ---------------------------------------------------------------------------
+
+/** 場上同時存在的分身數。 */
+const GOD_COPY_COUNT = 2;
+/** 分身被清空之後，邪神有幾輪不能召喚（也就是可以被打的空窗）。 */
+const GOD_WINDOW_ROUNDS = 2;
+/** 血量掉到這個比例以下進入奪舍階段。 */
+const GOD_PHASE2_RATIO = 0.5;
+
+function godCopies(state: DndState): Array<{ piece: DndPiece; r: number; c: number }> {
+  const found: Array<{ piece: DndPiece; r: number; c: number }> = [];
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r]?.[c]?.piece;
+      if (piece?.id.startsWith('boss-5-copy')) found.push({ piece, r, c });
+    }
+  }
+  return found;
+}
+
+/**
+ * 照著冒險者的模樣捏出分身：血量、防禦、職業都照抄（含裝備加成後的數值），
+ * 所以隊伍越強、分身越難打。分身會用被複製職業的技能。
+ */
+function summonGodCopies(seats: Seats, state: DndState, rng: () => number): LogEvent[] {
+  const events: LogEvent[] = [];
+  const boss = findPieceById(state, 'boss-5');
+  if (!boss) return events;
+
+  const living: DndPiece[] = [];
+  for (let seat = 0; seat < SEAT_COUNT; seat++) {
+    if (!state.seats[seat]?.alive) continue;
+    const piece = findSeatPiece(seats, state, seat)?.piece;
+    if (piece) living.push(piece);
+  }
+  if (living.length === 0) return events;
+
+  const missing = GOD_COPY_COUNT - godCopies(state).length;
+  for (let i = 0; i < missing; i++) {
+    const model = living[Math.floor(rng() * living.length)]!;
+    const classId = (model.classId ?? 'brave') as DownstairsCharacterId;
+    const copy: DndPiece = {
+      id: `boss-5-copy-${state.roundCount}-${i}-${Math.floor(rng() * 10000)}`,
+      type: 'goblin',
+      name: `邪神分身（${CLASS_STATS[classId].name.split(' ')[1] ?? classId}）`,
+      hp: model.maxHp,
+      maxHp: model.maxHp,
+      ac: model.ac,
+      copyClass: classId,
+      attackBonus: CLASS_STATS[classId].attackBonus,
+      dmgDice: CLASS_STATS[classId].dmgDice,
+      range: classId === 'tangerine' ? 3 : 1,
+      speed: classId === 'bubble' ? 5 : classId === 'brave' ? 2 : 1,
+    };
+    if (placeNear(state, boss.r, boss.c, copy)) {
+      events.push({ t: 'dndMessage', message: `🪞 邪神捏出了一個${copy.name}！` } as any);
+    }
+  }
+  return events;
+}
+
+/**
+ * 邪神的每輪維護：免疫開關、空窗倒數、補分身，以及過半血之後的奪舍。
+ * 免疫直接寫在棋子上，攻擊結算讀那個旗標就好。
+ */
+function updateEvilGod(seats: Seats, state: DndState, rng: () => number): LogEvent[] {
+  const events: LogEvent[] = [];
+  const boss = findPieceById(state, 'boss-5');
+  if (!boss) return events;
+
+  const phase2 = boss.piece.hp <= boss.piece.maxHp * GOD_PHASE2_RATIO;
+  if (phase2 && !state.godPhase2) {
+    state.godPhase2 = true;
+    events.push({
+      t: 'dndMessage',
+      message: '🌀 邪神的軀殼裂開了 —— 它開始在分身之間流竄！護體消失，但你們得先認出哪一個才是本體（看血量）。',
+    } as any);
+  }
+
+  // 分身清空後開一段空窗，期間不能召喚
+  if (godCopies(state).length === 0) {
+    if (state.godWindow > 0) {
+      state.godWindow--;
+      if (state.godWindow === 0) {
+        events.push(...summonGodCopies(seats, state, rng));
+      } else {
+        events.push({ t: 'dndMessage', message: `💢 邪神還捏不出新的分身 —— 還有 ${state.godWindow} 輪！` } as any);
+      }
+    } else {
+      state.godWindow = GOD_WINDOW_ROUNDS;
+      events.push({
+        t: 'dndMessage',
+        message: `💥 分身全被打碎了！邪神接下來 ${GOD_WINDOW_ROUNDS} 輪捏不出新的 —— 趁現在！`,
+      } as any);
+    }
+  }
+
+  // 奪舍：把本體的身分（連同血量）搬到某個分身的位置上。
+  // 血量跟著走，血條就是「哪一個才是本體」的線索。
+  if (phase2) {
+    const copies = godCopies(state);
+    if (copies.length > 0) {
+      const target = copies[Math.floor(rng() * copies.length)]!;
+      const bossCell = state.board[boss.r]?.[boss.c];
+      const copyCell = state.board[target.r]?.[target.c];
+      if (bossCell && copyCell) {
+        bossCell.piece = target.piece;
+        copyCell.piece = boss.piece;
+        events.push({ t: 'dndMessage', message: '🌀 邪神奪舍了！它換了一具身體 —— 看血量找出本體！' } as any);
+      }
+    }
+  }
+
+  // 免疫只在前半場成立；奪舍階段本體是打得到的
+  boss.piece.invulnerable = !phase2 && godCopies(state).length > 0;
+
+  return events;
+}
+
+/**
+ * 邪神本體的攻擊被動：命中時三選一，各 1/3。
+ * 【錯位】與目標交換位置／【震懾】暈眩一回合／【彈飛】把目標往後推 3 格。
+ */
+function evilGodPassive(
+  state: DndState,
+  mon: { piece: DndPiece; r: number; c: number },
+  victim: { piece: DndPiece; r: number; c: number; seat: number },
+  rng: () => number,
+): LogEvent[] {
+  const events: LogEvent[] = [];
+  const who = victim.piece.name.split(' ')[0];
+  const roll = Math.floor(rng() * 3);
+
+  if (roll === 0) {
+    const bossCell = state.board[mon.r]?.[mon.c];
+    const victimCell = state.board[victim.r]?.[victim.c];
+    if (bossCell && victimCell) {
+      bossCell.piece = victim.piece;
+      victimCell.piece = mon.piece;
+      const br = mon.r, bc = mon.c;
+      mon.r = victim.r; mon.c = victim.c;
+      victim.r = br; victim.c = bc;
+      events.push({ t: 'dndMessage', message: `🌀 邪神扭曲了空間，把 ${who} 跟自己對調了位置！` } as any);
+    }
+    return events;
+  }
+
+  if (roll === 1) {
+    const seatInfo = victim.seat >= 0 ? state.seats[victim.seat] : undefined;
+    if (seatInfo) {
+      seatInfo.stunnedTurns = 1;
+      events.push({ t: 'dndMessage', message: `💫 ${who} 被震懾了，下一個回合無法行動！` } as any);
+    }
+    return events;
+  }
+
+  // 彈飛：沿著「邪神 → 目標」的方向推 3 格，撞到東西就停在前一格
+  const dr = Math.sign(victim.r - mon.r);
+  const dc = Math.sign(victim.c - mon.c);
+  let landedR = victim.r;
+  let landedC = victim.c;
+  for (let step = 0; step < 3; step++) {
+    const nr = landedR + dr;
+    const nc = landedC + dc;
+    if (!inBounds(nr, nc) || state.board[nr]?.[nc]?.piece !== null) break;
+    landedR = nr;
+    landedC = nc;
+  }
+
+  if (landedR === victim.r && landedC === victim.c) {
+    events.push({ t: 'dndMessage', message: `💢 邪神想把 ${who} 彈飛，但身後沒有空間！` } as any);
+    return events;
+  }
+
+  state.board[victim.r]![victim.c]!.piece = null;
+  state.board[landedR]![landedC]!.piece = victim.piece;
+  victim.r = landedR;
+  victim.c = landedC;
+  events.push({ t: 'dndMessage', message: `💨 ${who} 被邪神一掌轟飛了出去！` } as any);
+  return events;
+}
+
+/**
+ * 分身使用被複製職業的技能。回傳空陣列代表這回合沒放技能，交還給一般的攻擊／移動邏輯。
+ *
+ * - 法師：鋪一道燒冒險者的火牆（hostile）
+ * - 牧師：幫附近受傷的怪物補血
+ * - 盜賊：對 5 格內的冒險者撒網，纏住不能移動
+ * - 戰士：沒有主動技能，反射寫在受擊那一側
+ */
+function runCopySkill(
+  seats: Seats,
+  state: DndState,
+  mon: { piece: DndPiece; r: number; c: number },
+  rng: () => number,
+): LogEvent[] {
+  const events: LogEvent[] = [];
+  // 兩輪放一次，不然分身會變成無限控場
+  if (state.roundCount % 2 !== 0) return events;
+
+  const nearestHero = () => {
+    let best: { piece: DndPiece; r: number; c: number; seat: number } | null = null;
+    let bestDist = 9999;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const piece = state.board[r]?.[c]?.piece;
+        if (!piece || piece.type !== 'player') continue;
+        const seat = seatIndexOfPiece(seats, piece);
+        if (seat === -1 || !state.seats[seat]?.alive) continue;
+        const dist = Math.abs(mon.r - r) + Math.abs(mon.c - c);
+        if (dist < bestDist) { bestDist = dist; best = { piece, r, c, seat }; }
+      }
+    }
+    return best ? { ...best, dist: bestDist } : null;
+  };
+
+  if (mon.piece.copyClass === 'tangerine') {
+    const hero = nearestHero();
+    if (!hero || hero.dist > FIRE_WALL_RANGE + 1) return events;
+    // 直接把火牆蓋在對方腳下
+    for (const cell of [{ r: hero.r, c: hero.c }, { r: hero.r - 1, c: hero.c }, { r: hero.r + 1, c: hero.c }]) {
+      if (!inBounds(cell.r, cell.c)) continue;
+      const existing = state.fireWalls.find((w) => w.r === cell.r && w.c === cell.c);
+      if (existing) { existing.turns = FIRE_WALL_TURNS; existing.hostile = true; }
+      else state.fireWalls.push({ r: cell.r, c: cell.c, turns: FIRE_WALL_TURNS, dmg: FIRE_WALL_DAMAGE, hostile: true });
+    }
+    events.push({ t: 'dndMessage', message: `🔥 ${mon.piece.name} 在 ${hero.piece.name.split(' ')[0]} 腳下燃起了火牆！` } as any);
+    return events;
+  }
+
+  if (mon.piece.copyClass === 'star') {
+    let wounded: DndPiece | null = null;
+    let bestDist = 9999;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const piece = state.board[r]?.[c]?.piece;
+        if (!piece || piece.type !== 'goblin' || piece.id === mon.piece.id) continue;
+        if (piece.hp >= piece.maxHp) continue;
+        const dist = Math.abs(mon.r - r) + Math.abs(mon.c - c);
+        if (dist <= CLERIC_HEAL_RANGE && dist < bestDist) { bestDist = dist; wounded = piece; }
+      }
+    }
+    if (!wounded) return events;
+    wounded.hp = Math.min(wounded.maxHp, wounded.hp + CLERIC_HEAL_AMOUNT);
+    events.push({
+      t: 'dndAttack', player: mon.piece.name, target: wounded.name,
+      roll: 0, hit: true, damage: -CLERIC_HEAL_AMOUNT,
+    });
+    return events;
+  }
+
+  if (mon.piece.copyClass === 'bubble') {
+    const hero = nearestHero();
+    if (!hero || hero.dist > ROGUE_NET_RANGE) return events;
+    const seatInfo = state.seats[hero.seat];
+    if (!seatInfo || (seatInfo.restrainedTurns ?? 0) > 0) return events;
+    seatInfo.restrainedTurns = ROGUE_NET_TURNS;
+    events.push({
+      t: 'dndMessage',
+      message: `🕸️ ${mon.piece.name} 甩出羅網，${hero.piece.name.split(' ')[0]} 接下來 ${ROGUE_NET_TURNS} 回合無法移動！`,
+    } as any);
+    return events;
+  }
+
+  return events;
+}
+
 /** 從 (r,c) 一圈一圈往外找空格擺棋子，找不到就退回場中央。 */
 function placeNear(state: DndState, r: number, c: number, piece: DndPiece): boolean {
   for (let radius = 1; radius <= 4; radius++) {
@@ -398,7 +673,7 @@ const DEBUFF_TURNS = 2;
 const DEBUFF_RATIO = 0.6;
 
 /** 地城總層數。護送關是第 3 層，虛空酋長挪到第 4 層。 */
-const MAX_LEVEL = 4;
+const MAX_LEVEL = 5;
 
 /** 護送關（B3）的設定。 */
 const ESCORT_LEVEL = 3;
@@ -579,14 +854,17 @@ function castFireWall(
  * 每回合結算火牆：燒站在裡面的怪物，然後倒數，燒完就熄。
  * 只燒怪物 —— 火牆不會誤傷隊友。
  */
-function burnFireWalls(state: DndState): LogEvent[] {
+function burnFireWalls(seats: Seats, state: DndState): LogEvent[] {
   const events: LogEvent[] = [];
   if (state.fireWalls.length === 0) return events;
 
   for (const wall of state.fireWalls) {
     const cell = state.board[wall.r]?.[wall.c];
     const piece = cell?.piece;
-    if (!piece || piece.type !== 'goblin') continue;
+    if (!piece) continue;
+    // 敵方（分身）鋪的牆燒冒險者，我方的燒怪物
+    const burns = wall.hostile ? piece.type === 'player' : piece.type === 'goblin';
+    if (!burns || piece.invulnerable) continue;
 
     piece.hp = Math.max(0, piece.hp - wall.dmg);
     events.push({
@@ -594,6 +872,10 @@ function burnFireWalls(state: DndState): LogEvent[] {
       message: `🔥 ${piece.name} 站在火牆裡，被燒掉 ${wall.dmg} 點 HP！`,
     } as any);
     if (piece.hp <= 0 && cell) {
+      if (piece.type === 'player') {
+        const seat = seatIndexOfPiece(seats, piece);
+        if (seat !== -1 && state.seats[seat]) state.seats[seat]!.alive = false;
+      }
       cell.piece = null;
       events.push({ t: 'dndMessage', message: `🔥 ${piece.name} 被火牆燒成了灰燼！` } as any);
     }
@@ -830,6 +1112,16 @@ export function checkAndSpawnBossOrStaircase(seats: Seats, state: DndState, even
         const boss = spawnMonster(state, { id: 'boss-3', type: 'goblin', name: 'Void Chief (虛空酋長)', hp: 80, maxHp: 80, ac: 15 });
         bossCell.piece = boss;
         events.push({ t: 'dndMessage', message: '👑 終極魔王 Void Chief (虛空酋長) 降臨王座！' } as any);
+      }
+    } else if (state.level === 5) {
+      const bossCell = findEmptyCellNearCenter(state);
+      if (bossCell) {
+        bossCell.piece = spawnMonster(state, {
+          id: 'boss-5', type: 'goblin', name: 'Goblin Evil God (哥布林邪神)',
+          hp: 120, maxHp: 120, ac: 16, attackBonus: 5, dmgDice: 10,
+        });
+        events.push({ t: 'dndMessage', message: '🕯️ 哥布林邪神睜開了眼睛 —— 它開始照著你們的模樣捏出分身…' } as any);
+        events.push(...summonGodCopies(seats, state, rng));
       }
     }
     return;
@@ -1183,6 +1475,8 @@ export function dealDnd(
     roundCount: 0,
     villagersRescued: 0,
     villagersLost: 0,
+    godWindow: 0,
+    godPhase2: false,
     phase: 'party',
     monsterMoved: new Set(),
     monsterActed: new Set(),
@@ -1245,7 +1539,7 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
 
   // 火牆先燒再讓怪物行動：規則是「站在火牆裡面每回合扣 3」，
   // 等牠們走完才結算的話，被蓋在火牆下的怪只要抬腳就一點傷都不用吃。
-  events.push(...burnFireWalls(state));
+  events.push(...burnFireWalls(seats, state));
 
   // 撒網的持續傷害。放在這裡而不是怪物 AI 裡，是因為被網住的怪仍然會行動
   // （只是不能移動），有魔王時牠也可能由魔王親自指揮 —— 扣血擺在回合開頭
@@ -1255,6 +1549,7 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
       const piece = state.board[r]?.[c]?.piece;
       if (!piece || piece.type !== 'goblin') continue;
       if (!piece.trappedTurns || piece.trappedTurns <= 0) continue;
+      if (piece.invulnerable) continue;
 
       piece.hp = Math.max(0, piece.hp - 1);
       events.push({
@@ -1296,6 +1591,10 @@ function endRound(seats: Seats, state: DndState, rng: () => number, events: LogE
     resolveEscortLevel(seats, state, events, rng);
   }
 
+  if (state.level === 5) {
+    events.push(...updateEvilGod(seats, state, rng));
+  }
+
   // 減益要撐過怪物回合才遞減，這樣【削弱】才會真的作用在牠那次攻擊上
   tickMonsterDebuffs(state);
 
@@ -1316,6 +1615,12 @@ function endRound(seats: Seats, state: DndState, rng: () => number, events: LogE
   for (let idx = 0; idx < SEAT_COUNT; idx++) {
     const seatInfo = state.seats[idx];
     if (!seatInfo) continue;
+    if (seatInfo.stunnedTurns && seatInfo.stunnedTurns > 0) {
+      seatInfo.stunnedTurns--;
+    }
+    if (seatInfo.restrainedTurns && seatInfo.restrainedTurns > 0) {
+      seatInfo.restrainedTurns--;
+    }
     if (seatInfo.damageCapTurns && seatInfo.damageCapTurns > 0) {
       seatInfo.damageCapTurns--;
       if (seatInfo.damageCapTurns === 0) seatInfo.damageCap = undefined;
@@ -1459,6 +1764,9 @@ export function applyDndAction(
 
       const classId = playerPiece.classId || 'brave';
       const maxMove = classId === 'bubble' ? 5 : (classId === 'brave' ? 2 : 1);
+      if ((state.seats[activeSeat]?.restrainedTurns ?? 0) > 0) {
+        return { ok: false, error: 'MONSTER_RESTRAINED' };
+      }
       const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
       // dist === 0 要擋掉：來源格與目標格會是同一格，先寫入再清空等於把角色從棋盤上抹掉
       if (dist === 0 || dist > maxMove) return { ok: false, error: 'INVALID_CELL' };
@@ -1588,6 +1896,7 @@ export function applyDndAction(
     // 隊友的棋子被打到 0 會從棋盤上被清掉，但 state.seats 的 hp/alive 完全沒同步，
     // 那位玩家從此送不出任何動作，checkDndGameOver 也永遠當他還活著、判不出結束。
     if (targetPiece.type !== 'goblin') return { ok: false, error: 'TARGET_NOT_FOUND' };
+    if (targetPiece.invulnerable) return { ok: false, error: 'TARGET_INVULNERABLE' };
 
     const classId = playerPiece.classId || 'brave';
     const maxRange = classId === 'tangerine' ? 3 : 1;
@@ -1707,6 +2016,24 @@ export function applyDndAction(
         damage,
       });
 
+      // 複製戰士的分身也會反射 —— 照著你的模樣捏出來的，當然連反射一起抄
+      if (targetPiece.copyClass === 'brave' && playerPiece.hp > 0) {
+        const bounced = Math.round(damage * WARRIOR_REFLECT_RATIO);
+        if (bounced > 0) {
+          playerPiece.hp = Math.max(0, playerPiece.hp - bounced);
+          if (state.seats[activeSeat]) state.seats[activeSeat]!.hp = playerPiece.hp;
+          events.push({
+            t: 'dndMessage',
+            message: `🪞 ${targetPiece.name} 把 ${bounced} 點傷害原封不動彈了回來！`,
+          } as any);
+          if (playerPiece.hp <= 0) {
+            if (state.seats[activeSeat]) state.seats[activeSeat]!.alive = false;
+            const selfCell = state.board[pr]?.[pc];
+            if (selfCell && selfCell.piece?.id === playerPiece.id) selfCell.piece = null;
+          }
+        }
+      }
+
       if (targetPiece.hp <= 0) {
         const targetCell = state.board[tr]?.[tc];
         if (targetCell) {
@@ -1755,11 +2082,13 @@ export function applyDndAction(
     }
 
     if (classId === 'star' && playerPiece.hp > 0) {
-      playerPiece.hp = Math.min(playerPiece.maxHp, playerPiece.hp + 1);
+      // 【法杖】把攻擊後的自補從 1 點提升到 2/3/4 點
+      const selfHeal = equipmentOf(state, activeSeat)?.healSelfOnAttack ?? 1;
+      playerPiece.hp = Math.min(playerPiece.maxHp, playerPiece.hp + selfHeal);
       if (state.seats[activeSeat]) {
         state.seats[activeSeat]!.hp = playerPiece.hp;
       }
-      events.push({ t: 'dndMessage', message: `🙏 ${playerPiece.name.split(' ')[0]} 的信仰之力湧現，補充了自己 1 點 HP。` } as any);
+      events.push({ t: 'dndMessage', message: `🙏 ${playerPiece.name.split(' ')[0]} 的信仰之力湧現，補充了自己 ${selfHeal} 點 HP。` } as any);
     }
   } else if (kind === 'rest') {
     playerPiece.hp = Math.min(playerPiece.maxHp, playerPiece.hp + 1);
@@ -2141,6 +2470,7 @@ function advanceParty(
     const seatInfo = state.seats[cursor];
     if (!seatInfo || !seatInfo.alive) continue;
     if (seatInfo.banishedTurns && seatInfo.banishedTurns > 0) continue;
+    if (seatInfo.stunnedTurns && seatInfo.stunnedTurns > 0) continue;
 
     if (seatInfo.isNpc && !state.npcController) {
       state.turnSeat = cursor;
@@ -2241,7 +2571,7 @@ function resolveMonsterAttack(
       if (hitTarget.piece.classId === 'brave') {
         // 【反射盾】疊加在基礎的 1/3 上
         const shield = hitTarget.seat >= 0 ? (equipmentOf(state, hitTarget.seat)?.reflect ?? 0) : 0;
-        const reflected = Math.round(dmg * (WARRIOR_REFLECT_RATIO + shield));
+        const reflected = mon.piece.invulnerable ? 0 : Math.round(dmg * (WARRIOR_REFLECT_RATIO + shield));
         if (reflected > 0) {
           mon.piece.hp = Math.max(0, mon.piece.hp - reflected);
           events.push({
@@ -2301,6 +2631,8 @@ function resolveMonsterAttack(
         }
       } else if (mon.piece.id === 'boss-3' && mon.piece.hp > 0) {
         events.push(...voidChiefPassive(state, hitTarget, rng));
+      } else if (mon.piece.id === 'boss-5' && mon.piece.hp > 0) {
+        events.push(...evilGodPassive(state, mon, hitTarget, rng));
       }
     } else {
       events.push({
@@ -2387,6 +2719,15 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
             events.push({ t: 'dndMessage', message: `⚡ 虛空酋長瞬移到了 ${victim.piece.name.split(' ')[0]} 身旁準備突襲！` } as any);
           }
         }
+      }
+    }
+
+    // 邪神分身會用被複製職業的招式 —— 你們有多強，分身就有多難纏
+    if (mon.piece.copyClass) {
+      const used = runCopySkill(seats, state, mon, rng);
+      if (used.length > 0) {
+        events.push(...used);
+        return;
       }
     }
 
@@ -2810,7 +3151,7 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       const cell = state.board[r]?.[c];
-      if (cell && cell.piece && cell.piece.type === 'goblin') {
+      if (cell && cell.piece && cell.piece.type === 'goblin' && !cell.piece.invulnerable) {
         const dist = Math.abs(pr - r) + Math.abs(pc - c);
         if (dist <= maxRange && dist < minGdist) {
           minGdist = dist;

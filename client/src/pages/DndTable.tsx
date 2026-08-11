@@ -287,7 +287,9 @@ export function DndRoom({ room }: { room: RoomView }) {
       return (
         <div className="dnd-token" style={{ opacity: 0.9 }}>
           <span className="token-icon" style={{ fontSize: '1.2rem' }}>🔥</span>
-          <span className="token-label" style={{ color: '#e67e22', fontSize: '0.65rem' }}>火牆 {fireWall.turns}</span>
+          <span className="token-label" style={{ color: fireWall.hostile ? 'var(--red)' : '#e67e22', fontSize: '0.65rem' }}>
+            {fireWall.hostile ? '邪火' : '火牆'} {fireWall.turns}
+          </span>
         </div>
       );
     }
@@ -344,6 +346,8 @@ export function DndRoom({ room }: { room: RoomView }) {
       else if (piece.name.includes('酋長') || piece.name.includes('Chief')) icon = '👑';
       else if (piece.name.includes('盜賊') || piece.name.includes('Rogue')) icon = '🥷';
       else if (piece.name.includes('法師') || piece.name.includes('Mage')) icon = '🧿';
+      if (piece.id === 'boss-5') icon = '🕯️';
+      else if (piece.copyClass) icon = '🪞';
       const acted = !!game?.actedMonsterIds.includes(piece.id);
       const picked = selectedMonsterId === piece.id;
       return (
@@ -357,9 +361,10 @@ export function DndRoom({ room }: { room: RoomView }) {
         >
           <span className="token-icon">{icon}</span>
           <span className="token-label">{piece.name.split(' ')[0]}</span>
-          {(piece.stunnedTurns || piece.trappedTurns || piece.acDebuffTurns || piece.atkDebuffTurns) ? (
+          {(piece.invulnerable || piece.stunnedTurns || piece.trappedTurns || piece.acDebuffTurns || piece.atkDebuffTurns) ? (
             <span className="token-label" style={{ color: 'var(--gold)', fontSize: '0.6rem' }}>
-              {piece.stunnedTurns ? '💫暈眩'
+              {piece.invulnerable ? '🛡️無敵'
+                : piece.stunnedTurns ? '💫暈眩'
                 : piece.trappedTurns ? '🪤受困'
                 : piece.acDebuffTurns ? '🗡️破甲'
                 : '🩸削弱'}
@@ -539,7 +544,7 @@ export function DndRoom({ room }: { room: RoomView }) {
           {playing && game && (
             <div style={{ width: '100%', maxWidth: '900px' }}>
               <h3 style={{ textAlign: 'center', margin: '0 0 1rem 0', color: 'var(--gold)', letterSpacing: '2px' }}>
-                🏰 地下城第 {game.level} 層 / 共 4 層
+                🏰 地下城第 {game.level} 層 / 共 5 層
                 <span style={{ marginLeft: '0.8rem', fontSize: '0.8rem', color: 'var(--muted)', letterSpacing: 'normal' }}>
                   {DND_DIFFICULTY_LABEL[game.difficulty]}模式 · 怪物強度 {Math.round(DND_DIFFICULTY_MULTIPLIER[game.difficulty] * 100)}%
                   {game.bossPlayerId && (
@@ -566,6 +571,7 @@ export function DndRoom({ room }: { room: RoomView }) {
                 {game.level === 1 && "📖 【B1 貪婪地窖】: 你們跟隨微光聖物的指引來到失落的法師塔。底層已被哥布林佔據，請清除牠們並找尋通往深處的樓梯。"}
                 {game.level === 2 && "📖 【B2 薩滿祭壇】: 這裡瀰漫著詭異的魔法氣息。哥布林薩滿正在進行儀式試圖召喚虛空魔物 —— 而且有 3 隻哥布林盜賊在暗處游走，牠們一次能衝刺 5 格。阻止他們！"}
                 {game.level === 3 && "📖 【B3 逃亡通道】: 哥布林把整村的人抓來當祭品。10 位村民正拼命往上方的出口跑，第二輪就會有伏兵殺出、之後每 3 輪還有追兵從後方追上來。擋住他們，至少讓 5 位村民活著離開！"}
+                {game.level === 5 && "📖 【B5 邪神祭壇】: 哥布林邪神照著你們的模樣捏出分身 —— 分身會用你們自己的招式。有分身護體時本體刀槍不入，打碎所有分身才有 2 回合的空窗可以真的傷到它。當它掉到半血，護體會消失、改成在分身之間流竄奪舍：看血量，找出哪一個才是本體。"}
                 {game.level === 4 && "📖 【B4 酋長王座】: 抵達高塔基石。除了精銳哥布林與盜賊，還有 3 名哥布林法師能隔 3 格轟擊你們。被虛空力量腐化的哥布林酋長就在前方 —— 牠的攻擊會放逐、召喚或降下恐懼，重傷時更會把上兩層的 Boss 一起召回！"}
               </div>
             </div>
@@ -618,6 +624,10 @@ export function DndRoom({ room }: { room: RoomView }) {
                               ? t('dnd.dead')
                               : seatInfo.banishedTurns
                                 ? `放逐 (${seatInfo.banishedTurns})`
+                                : seatInfo.stunnedTurns
+                                  ? `💫 暈眩 (${seatInfo.stunnedTurns})`
+                                  : seatInfo.restrainedTurns
+                                    ? `🕸️ 被纏住 (${seatInfo.restrainedTurns})`
                                 : seatInfo.fearTurns
                                   ? `😱 恐懼 (${seatInfo.fearTurns})`
                                   : seatInfo.damageCapTurns

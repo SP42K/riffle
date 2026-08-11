@@ -658,16 +658,17 @@ export const DND_EQUIPMENT_SPEC: Record<
     /** 法師：火牆邊長與額外傷害 */
     fireWallSize: number;
     fireWallDamage: number;
-    /** 牧師：主治療量與「除目標外每人」的治療量 */
+    /** 牧師：主治療量、「除目標外每人」的治療量，以及攻擊命中後回復自身的量 */
     healMain: number;
     healSplash: number;
+    healSelfOnAttack: number;
     /** 盜賊：命中骰乘上這個比例當作追加傷害，未命中也算 */
     diceRatio: number;
   }
 > = {
-  normal: { stat: 2, reflect: 0.2, fireWallSize: 2, fireWallDamage: 1, healMain: 4, healSplash: 1, diceRatio: 0.3 },
-  hard: { stat: 4, reflect: 0.4, fireWallSize: 3, fireWallDamage: 2, healMain: 5, healSplash: 2, diceRatio: 0.6 },
-  hell: { stat: 6, reflect: 0.6, fireWallSize: 4, fireWallDamage: 3, healMain: 6, healSplash: 3, diceRatio: 0.9 },
+  normal: { stat: 2, reflect: 0.2, fireWallSize: 2, fireWallDamage: 1, healMain: 5, healSplash: 1, healSelfOnAttack: 2, diceRatio: 0.3 },
+  hard: { stat: 4, reflect: 0.4, fireWallSize: 3, fireWallDamage: 2, healMain: 6, healSplash: 2, healSelfOnAttack: 3, diceRatio: 0.6 },
+  hell: { stat: 6, reflect: 0.6, fireWallSize: 4, fireWallDamage: 3, healMain: 7, healSplash: 3, healSelfOnAttack: 4, diceRatio: 0.9 },
 };
 
 export const DND_BOSS_SEAT = 4;
@@ -716,6 +717,10 @@ export interface DndPiece {
   acDebuffTurns?: number;
   /** 【削弱】：剩餘幾回合造成的傷害只有原本的 60% */
   atkDebuffTurns?: number;
+  /** 邪神分身複製的職業 —— 分身會用這個職業的技能 */
+  copyClass?: DownstairsCharacterId;
+  /** 這隻怪目前免疫傷害（邪神有分身護體時） */
+  invulnerable?: boolean;
 }
 
 export interface DndCellView {
@@ -743,6 +748,10 @@ export interface DndSeatInfo {
   damageCapTurns?: number;
   /** 【極限防禦】的傷害上限值 */
   damageCap?: number;
+  /** 被邪神分身（盜賊）撒網纏住，剩餘幾回合不能移動 */
+  restrainedTurns?: number;
+  /** 被邪神打暈，剩餘幾回合不能行動 */
+  stunnedTurns?: number;
   /** 護送關拿到的裝備；沒拿到就是 undefined */
   equipment?: DndEquipment;
 }
@@ -756,8 +765,11 @@ export interface DndGameView {
   seats: Record<number, DndSeatInfo>;
   ranking: PlayerId[];
   level: number;
-  /** 法師【火牆】燒著的格子，turns 是還會燒幾回合、dmg 是每回合燒多少 */
-  fireWalls: Array<{ r: number; c: number; turns: number; dmg: number }>;
+  /**
+   * 火牆。turns 是還會燒幾回合、dmg 是每回合燒多少；
+   * hostile 為 true 代表這是敵方（邪神分身）鋪的，燒的是冒險者而不是怪物。
+   */
+  fireWalls: Array<{ r: number; c: number; turns: number; dmg: number; hostile?: boolean }>;
   /** 這一局的難度，開局時定案 */
   difficulty: DndDifficulty;
   /** 目前輪到的這位玩家，本回合是否已經移動過（決定前端要顯示「移動」還是只剩「攻擊/技能/休息」） */

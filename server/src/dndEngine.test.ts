@@ -183,8 +183,8 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats);
     state.traps = [];
     
-    // 最終層現在是 B4（B3 改成護送關）
-    state.level = 4;
+    // 最終層是 B5（B3 護送關、B4 酋長、B5 邪神）
+    state.level = 5;
 
     // Clear all goblins and boss
     for (let r = 0; r < BOARD_SIZE; r++) {
@@ -1798,7 +1798,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'star' });
     state.traps = [];
     clearGoblins(state);
-    state.seats[0].equipment = { kind: 'star', tier: 'hell' }; // 主治療 6、其他人 +3
+    state.seats[0].equipment = { kind: 'star', tier: 'hell' }; // 主治療 7、其他人 +3
 
     const cleric = findPiece(state, (p) => p.playerId === 'p1');
     state.board[cleric.r][cleric.c].piece = null;
@@ -1813,7 +1813,7 @@ describe('D&D Game Engine', () => {
 
     const healed = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: cleric.piece.id }, () => 0.5);
     expect(healed.ok).toBe(true);
-    expect(state.seats[0].hp).toBe(7); // 1 + 6
+    expect(state.seats[0].hp).toBe(8); // 1 + 7
     // 其他隊員也被光芒掃到
     for (const seat of [1, 2, 3]) {
       expect(state.seats[seat].hp).toBeGreaterThan(1);
@@ -1841,6 +1841,140 @@ describe('D&D Game Engine', () => {
     expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('揮空'))).toBe(true);
     // d20 = 19 → round(19 * 0.9) = 17
     expect(findPiece(state, (p) => p.id === 'm-tough').piece.hp).toBe(60 - 17);
+  });
+
+  // ---------------------------------------------------------------------------
+  // B5 哥布林邪神
+  // ---------------------------------------------------------------------------
+
+  /** 把場面直接布置成「邪神 + 分身」，方便驗證機制。 */
+  function evilGodTable() {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    state.level = 5;
+    clearGoblins(state);
+
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[8][6].piece = me.piece;
+    state.seats[0].hp = 999;
+    me.piece.hp = 999;
+    me.piece.maxHp = 999;
+
+    state.board[8][7].piece = {
+      id: 'boss-5', type: 'goblin', name: 'Goblin Evil God (哥布林邪神)',
+      hp: 120, maxHp: 120, ac: 5, attackBonus: 5, dmgDice: 10,
+    };
+    return { seats, state };
+  }
+
+  it('should shield the evil god while any copy is alive', () => {
+    const { seats, state } = evilGodTable();
+    state.board[8][8].piece = {
+      id: 'boss-5-copy-x', type: 'goblin', name: '邪神分身（戰士）',
+      hp: 24, maxHp: 24, ac: 5, copyClass: 'brave',
+    };
+
+    // 先跑一輪讓維護邏輯把免疫掛上
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(findPiece(state, (p) => p.id === 'boss-5').piece.invulnerable).toBe(true);
+
+    const blocked = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'boss-5' }, () => 0.9);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toBe('TARGET_INVULNERABLE');
+  });
+
+  it('should open a two round window once every copy is down', () => {
+    const { seats, state } = evilGodTable();
+
+    // 一開始沒有分身 → 第一輪結算會開啟空窗
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.godWindow).toBe(2);
+    expect(findPiece(state, (p) => p.id === 'boss-5').piece.invulnerable).toBe(false);
+
+    // 空窗期間打得到
+    const hit = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'boss-5' }, () => 0.9);
+    expect(hit.ok).toBe(true);
+    expect(state.godWindow).toBe(1);
+
+    // 空窗結束就補回分身
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.godWindow).toBe(0);
+    expect(countPieces(state, (p) => p.id.startsWith('boss-5-copy'))).toBe(2);
+  });
+
+  it('should drop the shield and start body-hopping below half HP', () => {
+    const { seats, state } = evilGodTable();
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    boss.piece.hp = 50; // < 120 的一半
+    state.board[8][8].piece = {
+      id: 'boss-5-copy-x', type: 'goblin', name: '邪神分身（戰士）',
+      hp: 24, maxHp: 24, ac: 5, copyClass: 'brave',
+    };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+
+    expect(state.godPhase2).toBe(true);
+    // 奪舍階段沒有護體，打得到
+    const after = findPiece(state, (p) => p.id === 'boss-5');
+    expect(after.piece.invulnerable).toBe(false);
+    // 身體換過去了：本體不再站在原本那一格
+    expect(`${after.r},${after.c}`).not.toBe('8,7');
+    // 血量跟著身分走 —— 這就是玩家用來認人的線索。
+    // （同一輪 NPC 隊友會打到它，所以只驗「還是本體等級的血量」而不是精確值）
+    expect(after.piece.hp).toBeLessThanOrEqual(50);
+    expect(after.piece.hp).toBeGreaterThan(24); // 不是分身那種小血量
+    expect(after.piece.maxHp).toBe(120);
+  });
+
+  it('should let a copied mage burn the party with a hostile wall', () => {
+    const { seats, state } = evilGodTable();
+    state.roundCount = 1; // 下一輪是偶數，分身才會放技能
+    state.board[8][8].piece = {
+      id: 'boss-5-copy-m', type: 'goblin', name: '邪神分身（法師）',
+      hp: 16, maxHp: 16, ac: 5, copyClass: 'tangerine', range: 3,
+    };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('燃起了火牆'))).toBe(true);
+    expect(state.fireWalls.some((w) => w.hostile)).toBe(true);
+  });
+
+  it('should let a copied rogue pin a hero in place', () => {
+    const { seats, state } = evilGodTable();
+    state.roundCount = 1;
+    state.board[8][8].piece = {
+      id: 'boss-5-copy-r', type: 'goblin', name: '邪神分身（盜賊）',
+      hp: 18, maxHp: 18, ac: 5, copyClass: 'bubble',
+    };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(state.seats[0].restrainedTurns).toBeGreaterThan(0);
+
+    // 被纏住就不能移動
+    const move = applyDndAction(seats, state, 'p1', {
+      kind: 'turnCombo', move: { r: 7, c: 6 }, action: { kind: 'rest' },
+    }, () => 0.5);
+    expect(move.ok).toBe(false);
+    expect(move.error).toBe('MONSTER_RESTRAINED');
+  });
+
+  it('should bounce damage back from a copied warrior', () => {
+    const { seats, state } = evilGodTable();
+    state.board[8][5].piece = {
+      id: 'boss-5-copy-w', type: 'goblin', name: '邪神分身（戰士）',
+      hp: 60, maxHp: 60, ac: 1, copyClass: 'brave',
+    };
+    // 先把本體移走，免得護體擋住這次攻擊
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    state.board[boss.r][boss.c].piece = null;
+
+    const before = state.seats[0].hp;
+    const result = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'boss-5-copy-w' }, () => 0.9);
+    expect(result.ok).toBe(true);
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('彈了回來'))).toBe(true);
+    expect(state.seats[0].hp).toBeLessThan(before);
   });
 
   // ---------------------------------------------------------------------------
@@ -2025,7 +2159,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'brave' });
     state.traps = [];
     clearGoblins(state);
-    state.level = 4;
+    state.level = 5;
     state.bossSpawned = true;
 
     // 清空 + 最終層 = 勝利
