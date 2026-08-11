@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import {
   DND_DIFFICULTIES,
+  DND_EQUIPMENT_NAME,
   DND_NPC_CONTROLS,
   DND_NPC_CONTROL_LABEL,
   DND_DIFFICULTY_LABEL,
@@ -606,6 +607,11 @@ export function DndRoom({ room }: { room: RoomView }) {
                         <div className="party-member-header">
                           <span className="party-member-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             P{seatIndex + 1}. {displayName}
+                            {seatInfo.equipment && (
+                              <span title={`${DND_EQUIPMENT_NAME[seatInfo.equipment.kind]}（${seatInfo.equipment.tier}）`} style={{ color: 'var(--gold)', marginLeft: '4px' }}>
+                                ⚔️{DND_EQUIPMENT_NAME[seatInfo.equipment.kind]}
+                              </span>
+                            )}
                           </span>
                           <span className={`party-member-status ${!alive ? 'dead' : seatInfo.banishedTurns ? 'banished' : 'alive'}`} style={seatInfo.banishedTurns ? { color: 'var(--gold)' } : {}}>
                             {!alive

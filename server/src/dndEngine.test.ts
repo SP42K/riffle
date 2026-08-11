@@ -1629,6 +1629,149 @@ describe('D&D Game Engine', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // 護送關的獎勵裝備
+  // ---------------------------------------------------------------------------
+
+  /** 把場面直接推到「村民只剩一個、其餘算獲救」的狀態，跑完就會結算發裝備。 */
+  function finishEscortWith(rescued, difficulty = 'normal') {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, difficulty);
+    state.traps = [];
+    descendTo(state, seats, 3);
+    state.traps = [];
+    clearGoblins(state);
+
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r][c].piece?.type === 'villager') state.board[r][c].piece = null;
+      }
+    }
+    state.villagersRescued = rescued - 1;
+    state.board[0][3].piece = { id: 'v-last', type: 'villager', name: '村民 X', hp: 20, maxHp: 20, ac: 12 };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    return { seats, state, result };
+  }
+
+  const equippedCount = (state) =>
+    [0, 1, 2, 3].filter((seat) => state.seats[seat]?.equipment).length;
+
+  it('should hand out equipment on the 5/6/7/8 rescue ladder', () => {
+    expect(equippedCount(finishEscortWith(5).state)).toBe(1);
+    expect(equippedCount(finishEscortWith(6).state)).toBe(2);
+    expect(equippedCount(finishEscortWith(7).state)).toBe(3);
+    expect(equippedCount(finishEscortWith(8).state)).toBe(4);
+    // 超過 8 人也就是全隊都有，不會超發
+    expect(equippedCount(finishEscortWith(10).state)).toBe(4);
+  });
+
+  it('should not hand out equipment on easy', () => {
+    const { state } = finishEscortWith(10, 'easy');
+    expect(state.villagersRescued).toBe(10);
+    expect(equippedCount(state)).toBe(0);
+  });
+
+  it('should add the common stat bonus when equipment lands', () => {
+    const { state } = finishEscortWith(8); // 全隊都拿到
+    for (const seat of [0, 1, 2, 3]) {
+      const info = state.seats[seat];
+      expect(info.equipment).toBeDefined();
+      // 一般難度是 +2：HP 上限跟著漲
+      expect(info.maxHp).toBeGreaterThan(16);
+    }
+  });
+
+  it('should stack the reflect shield on top of the base one third', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'brave', tier: 'hell' }; // 反射 +60% → 共 93%
+
+    const warrior = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[warrior.r][warrior.c].piece = null;
+    state.board[8][6].piece = warrior.piece;
+    state.board[8][7].piece = {
+      id: 'm-hit', type: 'goblin', name: 'Goblin Hit', hp: 60, maxHp: 60, ac: 40,
+      attackBonus: 40, dmgDice: 6,
+    };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
+    const hit = result.events.find((e) => e.t === 'dndAttack' && e.player === 'Goblin Hit' && e.hit);
+    expect(hit).toBeDefined();
+
+    const expected = Math.round(hit.damage * (1 / 3 + 0.6));
+    expect(findPiece(state, (p) => p.id === 'm-hit').piece.hp).toBe(60 - expected);
+  });
+
+  it('should grow the fire wall into a square and burn harder', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'tangerine' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'tangerine', tier: 'hard' }; // 3x3、傷害 +2
+
+    const mage = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[mage.r][mage.c].piece = null;
+    state.board[8][6].piece = mage.piece;
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', r: 6, c: 6 }, () => 0.01);
+    expect(cast.ok).toBe(true);
+    expect(state.fireWalls).toHaveLength(9); // 3x3
+    expect(state.fireWalls[0].dmg).toBe(5);  // 基礎 3 + 2
+  });
+
+  it('should let the staff heal the whole party', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'star' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'star', tier: 'hell' }; // 主治療 6、其他人 +3
+
+    const cleric = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[cleric.r][cleric.c].piece = null;
+    state.board[8][6].piece = cleric.piece;
+    cleric.piece.hp = 1;
+    state.seats[0].hp = 1;
+    for (const seat of [1, 2, 3]) {
+      state.seats[seat].hp = 1;
+      const npc = findPiece(state, (p) => p.id === `npc-${seat}`);
+      if (npc) npc.piece.hp = 1;
+    }
+
+    const healed = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: cleric.piece.id }, () => 0.5);
+    expect(healed.ok).toBe(true);
+    expect(state.seats[0].hp).toBe(7); // 1 + 6
+    // 其他隊員也被光芒掃到
+    for (const seat of [1, 2, 3]) {
+      expect(state.seats[seat].hp).toBeGreaterThan(1);
+    }
+  });
+
+  it('should make the dice dagger bite even on a miss', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'bubble' });
+    state.traps = [];
+    clearGoblins(state);
+    state.seats[0].equipment = { kind: 'bubble', tier: 'hell' }; // 命中骰 x0.9
+
+    const rogue = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[rogue.r][rogue.c].piece = null;
+    state.board[8][6].piece = rogue.piece;
+    // AC 高到一定揮空；damagedByRogue 先設起來，避開「盜賊第一擊必中」
+    state.board[8][7].piece = {
+      id: 'm-tough', type: 'goblin', name: 'Goblin Tough', hp: 60, maxHp: 60, ac: 99,
+      damagedByRogue: true,
+    };
+
+    const result = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-tough' }, () => 0.9);
+    expect(result.ok).toBe(true);
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('揮空'))).toBe(true);
+    // d20 = 19 → round(19 * 0.9) = 17
+    expect(findPiece(state, (p) => p.id === 'm-tough').piece.hp).toBe(60 - 17);
+  });
+
+  // ---------------------------------------------------------------------------
   // 房主代打 NPC 隊友（單人房＝一個人操作 4 個角色）
   // ---------------------------------------------------------------------------
 

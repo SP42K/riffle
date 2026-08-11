@@ -1,4 +1,4 @@
-import { TURN_MS, DND_BOSS_SEAT, DND_DIFFICULTY_MULTIPLIER, type DndDifficulty, type PlayerId, type DndAction, type DndCellView, type DndSeatInfo, type DndPiece, type LogEvent, type DownstairsCharacterId } from 'shared';
+import { TURN_MS, DND_BOSS_SEAT, DND_DIFFICULTY_MULTIPLIER, DND_EQUIPMENT_SPEC, DND_EQUIPMENT_NAME, type DndDifficulty, type DndEquipment, type PlayerId, type DndAction, type DndCellView, type DndSeatInfo, type DndPiece, type LogEvent, type DownstairsCharacterId } from 'shared';
 
 export type Seats = Array<PlayerId | null>;
 
@@ -12,7 +12,7 @@ export interface DndState {
   level: number;
   traps: Array<{ r: number; c: number; triggered: boolean }>;
   /** 法師【火牆】燒著的格子，turns 是還會燒幾回合 */
-  fireWalls: Array<{ r: number; c: number; turns: number }>;
+  fireWalls: Array<{ r: number; c: number; turns: number; dmg: number }>;
   bossSpawned: boolean;
   turnHasMoved: boolean;
   /** B3 的虛空酋長是否已經在 1/4 血時召回一、二樓的 Boss（只會發動一次） */
@@ -311,7 +311,7 @@ function escortReinforcements(state: DndState, rng: () => number): LogEvent[] {
  * 護送關的結算：場上村民歸零就分勝負。
  * 救到門檻就生樓梯往下一層，沒救到就整局失敗。
  */
-function resolveEscortLevel(seats: Seats, state: DndState, events: LogEvent[]): void {
+function resolveEscortLevel(seats: Seats, state: DndState, events: LogEvent[], rng: () => number): void {
   if (state.level !== ESCORT_LEVEL || state.over) return;
   if (villagersOnBoard(state) > 0) return;
 
@@ -326,6 +326,7 @@ function resolveEscortLevel(seats: Seats, state: DndState, events: LogEvent[]): 
       t: 'dndMessage',
       message: `🎉 護送任務成功！${state.villagersRescued} 位村民平安逃出，通往深處的樓梯出現了！`,
     } as any);
+    awardEscortEquipment(seats, state, events, rng);
   } else {
     events.push({
       t: 'dndMessage',
@@ -409,6 +410,69 @@ const ESCORT_AMBUSH_ROUND = 2;
 /** 每幾輪從最底列補一隻哥布林盜賊。 */
 const ESCORT_REINFORCE_EVERY = 3;
 
+/** 這個座位身上的裝備規格；沒裝備回 null。 */
+function equipmentOf(state: DndState, seat: number) {
+  const equipment = state.seats[seat]?.equipment;
+  return equipment ? DND_EQUIPMENT_SPEC[equipment.tier] : null;
+}
+
+/** 職業基礎命中 + 裝備的命中加值（就是需求說的「敏捷」）。 */
+function attackBonusOf(state: DndState, seat: number, classId: DownstairsCharacterId): number {
+  return CLASS_STATS[classId].attackBonus + (equipmentOf(state, seat)?.stat ?? 0);
+}
+
+/**
+ * 護送關的獎勵：依獲救人數隨機挑幾個還活著的隊員發裝備。
+ * 5/6/7/8 人 → 1/2/3/4 件；簡單難度不發。
+ */
+function awardEscortEquipment(
+  seats: Seats,
+  state: DndState,
+  events: LogEvent[],
+  rng: () => number,
+): void {
+  if (state.difficulty === 'easy') {
+    events.push({ t: 'dndMessage', message: '（簡單難度不會掉落裝備，想拿裝備請挑一般以上的難度）' } as any);
+    return;
+  }
+
+  const tier = state.difficulty as Exclude<DndDifficulty, 'easy'>;
+  const count = Math.min(4, Math.max(0, state.villagersRescued - 4));
+  if (count === 0) return;
+
+  // 還活著、而且還沒有裝備的座位才進抽獎池
+  const pool: number[] = [];
+  for (let seat = 0; seat < SEAT_COUNT; seat++) {
+    const info = state.seats[seat];
+    if (info?.alive && !info.equipment) pool.push(seat);
+  }
+
+  for (let i = 0; i < count && pool.length > 0; i++) {
+    const pick = Math.floor(rng() * pool.length);
+    const seat = pool.splice(pick, 1)[0]!;
+    const info = state.seats[seat]!;
+    const piece = findSeatPiece(seats, state, seat)?.piece;
+    const classId = (piece?.classId ?? 'brave') as DownstairsCharacterId;
+    const spec = DND_EQUIPMENT_SPEC[tier];
+
+    info.equipment = { kind: classId, tier } satisfies DndEquipment;
+    // 共通加值：防禦、HP（當前與上限一起加）、命中
+    info.maxHp += spec.stat;
+    info.hp += spec.stat;
+    if (piece) {
+      piece.maxHp += spec.stat;
+      piece.hp += spec.stat;
+      piece.ac += spec.stat;
+      if (piece.acBase !== undefined) piece.acBase += spec.stat;
+    }
+
+    events.push({
+      t: 'dndMessage',
+      message: `🎁 ${info.name ?? `P${seat + 1}`} 獲得了【${DND_EQUIPMENT_NAME[classId]}】！防禦 +${spec.stat}、HP +${spec.stat}、命中 +${spec.stat}`,
+    } as any);
+  }
+}
+
 /** 盜賊【撒網】的射程與拘束回合數。 */
 const ROGUE_NET_RANGE = 5;
 const ROGUE_NET_TURNS = 3;
@@ -468,11 +532,33 @@ const FIRE_WALL_RANGE = 3;
  * 法師【火牆】：以指定格為中心拉出一道 3 格的直線火牆，方向與施法方向垂直
  * （擋路才叫牆）。超出棋盤的那一段就不生成。
  */
-function castFireWall(state: DndState, pr: number, pc: number, tr: number, tc: number): number {
-  const alongRow = Math.abs(tr - pr) >= Math.abs(tc - pc);
-  const cells = alongRow
-    ? [{ r: tr, c: tc - 1 }, { r: tr, c: tc }, { r: tr, c: tc + 1 }]
-    : [{ r: tr - 1, c: tc }, { r: tr, c: tc }, { r: tr + 1, c: tc }];
+function castFireWall(
+  state: DndState,
+  pr: number,
+  pc: number,
+  tr: number,
+  tc: number,
+  seat: number,
+): number {
+  const spec = equipmentOf(state, seat);
+  // 【魔法珠】把一條 3 格的牆撐成 N×N 的火場，傷害也跟著加
+  const cells: Array<{ r: number; c: number }> = [];
+  if (spec) {
+    for (let dr = 0; dr < spec.fireWallSize; dr++) {
+      for (let dc = 0; dc < spec.fireWallSize; dc++) {
+        cells.push({ r: tr + dr, c: tc + dc });
+      }
+    }
+  } else {
+    const alongRow = Math.abs(tr - pr) >= Math.abs(tc - pc);
+    cells.push(
+      ...(alongRow
+        ? [{ r: tr, c: tc - 1 }, { r: tr, c: tc }, { r: tr, c: tc + 1 }]
+        : [{ r: tr - 1, c: tc }, { r: tr, c: tc }, { r: tr + 1, c: tc }]),
+    );
+  }
+
+  const dmg = FIRE_WALL_DAMAGE + (spec?.fireWallDamage ?? 0);
 
   let placed = 0;
   for (const cell of cells) {
@@ -480,8 +566,9 @@ function castFireWall(state: DndState, pr: number, pc: number, tr: number, tc: n
     const existing = state.fireWalls.find((wall) => wall.r === cell.r && wall.c === cell.c);
     if (existing) {
       existing.turns = FIRE_WALL_TURNS; // 疊在同一格只是續燒
+      existing.dmg = Math.max(existing.dmg, dmg);
     } else {
-      state.fireWalls.push({ r: cell.r, c: cell.c, turns: FIRE_WALL_TURNS });
+      state.fireWalls.push({ r: cell.r, c: cell.c, turns: FIRE_WALL_TURNS, dmg });
     }
     placed++;
   }
@@ -501,10 +588,10 @@ function burnFireWalls(state: DndState): LogEvent[] {
     const piece = cell?.piece;
     if (!piece || piece.type !== 'goblin') continue;
 
-    piece.hp = Math.max(0, piece.hp - FIRE_WALL_DAMAGE);
+    piece.hp = Math.max(0, piece.hp - wall.dmg);
     events.push({
       t: 'dndMessage',
-      message: `🔥 ${piece.name} 站在火牆裡，被燒掉 ${FIRE_WALL_DAMAGE} 點 HP！`,
+      message: `🔥 ${piece.name} 站在火牆裡，被燒掉 ${wall.dmg} 點 HP！`,
     } as any);
     if (piece.hp <= 0 && cell) {
       cell.piece = null;
@@ -1206,7 +1293,7 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
 function endRound(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
   if (state.level === ESCORT_LEVEL) {
     events.push(...moveVillagers(state));
-    resolveEscortLevel(seats, state, events);
+    resolveEscortLevel(seats, state, events, rng);
   }
 
   // 減益要撐過怪物回合才遞減，這樣【削弱】才會真的作用在牠那次攻擊上
@@ -1509,13 +1596,17 @@ export function applyDndAction(
 
     const stats = CLASS_STATS[classId as DownstairsCharacterId];
     const roll = Math.floor(rng() * 20) + 1;
-    
+    const hitBonus = attackBonusOf(state, activeSeat, classId as DownstairsCharacterId);
+
     const isFirstRogueHit = classId === 'bubble' && !targetPiece.damagedByRogue;
-    const isHit = isFirstRogueHit ? true : roll + stats.attackBonus >= targetPiece.ac;
+    const isHit = isFirstRogueHit ? true : roll + hitBonus >= targetPiece.ac;
+    // 【骰子匕首】：命中骰乘上比例當追加傷害，揮空一樣照打
+    const daggerSpec = classId === 'bubble' ? equipmentOf(state, activeSeat) : null;
+    const daggerDamage = daggerSpec ? Math.round(roll * daggerSpec.diceRatio) : 0;
 
     if (isHit) {
       const dmgRoll = Math.floor(rng() * stats.dmgDice) + 1;
-      let damage = dmgRoll + stats.dmgFlat;
+      let damage = dmgRoll + stats.dmgFlat + daggerDamage;
 
       if (classId === 'bubble') {
         if (!targetPiece.damagedByRogue) {
@@ -1631,6 +1722,27 @@ export function applyDndAction(
           events.push(...roguePassive(playerPiece, targetPiece, rng));
         }
       }
+    } else if (daggerDamage > 0) {
+      // 【骰子匕首】：這一刀揮空了，但匕首上的骰子照樣咬下一塊肉
+      targetPiece.hp = Math.max(0, targetPiece.hp - daggerDamage);
+      events.push({
+        t: 'dndAttack',
+        player: playerPiece.name,
+        target: targetPiece.name,
+        roll,
+        hit: true,
+        damage: daggerDamage,
+      });
+      events.push({
+        t: 'dndMessage',
+        message: `🎲 ${playerPiece.name.split(' ')[0]} 揮空了，但【骰子匕首】仍劃出 ${daggerDamage} 點傷害！`,
+      } as any);
+
+      if (targetPiece.hp <= 0) {
+        const targetCell = state.board[tr]?.[tc];
+        if (targetCell) targetCell.piece = null;
+        checkAndSpawnBossOrStaircase(seats, state, events, rng);
+      }
     } else {
       events.push({
         t: 'dndAttack',
@@ -1679,7 +1791,8 @@ export function applyDndAction(
       const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
       if (dist > CLERIC_HEAL_RANGE) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
 
-      const healAmt = CLERIC_HEAL_AMOUNT;
+      const staff = equipmentOf(state, activeSeat);
+      const healAmt = staff?.healMain ?? CLERIC_HEAL_AMOUNT;
       targetPiece.hp = Math.min(targetPiece.maxHp, targetPiece.hp + healAmt);
       
       let tSeatIdx = -1;
@@ -1690,6 +1803,22 @@ export function applyDndAction(
         state.seats[tSeatIdx]!.hp = targetPiece.hp;
       }
       events.push({ t: 'dndMessage', message: `✨ ${playerPiece.name.split(' ')[0]} 施放治癒術，恢復了 ${targetPiece.name.split(' ')[0]} ${healAmt} 點 HP！` } as any);
+
+      // 【法杖】：主目標以外的隊員也一起回血
+      if (staff && staff.healSplash > 0) {
+        for (let seat = 0; seat < SEAT_COUNT; seat++) {
+          const info = state.seats[seat];
+          if (!info?.alive) continue;
+          const ally = findSeatPiece(seats, state, seat)?.piece;
+          if (!ally || ally.id === targetPiece.id) continue;
+          ally.hp = Math.min(ally.maxHp, ally.hp + staff.healSplash);
+          info.hp = ally.hp;
+        }
+        events.push({
+          t: 'dndMessage',
+          message: `🔮 法杖的光芒擴散開來，其他隊員各恢復了 ${staff.healSplash} 點 HP！`,
+        } as any);
+      }
       
     } else if (classId === 'bubble') {
       // 【撒網】：對 5 格內的一隻怪物撒網把牠拘束住
@@ -1760,7 +1889,7 @@ export function applyDndAction(
       const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
       if (dist > FIRE_WALL_RANGE) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
 
-      const placed = castFireWall(state, pr, pc, tr, tc);
+      const placed = castFireWall(state, pr, pc, tr, tc, activeSeat);
       if (placed === 0) return { ok: false, error: 'INVALID_CELL' };
 
       events.push({
@@ -2110,7 +2239,9 @@ function resolveMonsterAttack(
       // 戰士被動【反射】：把實際吃到的傷害彈 1/3 回去給攻擊者。
       // 這是常駐的，所以「輪到自己之前」被打幾次就反射幾次。
       if (hitTarget.piece.classId === 'brave') {
-        const reflected = Math.round(dmg * WARRIOR_REFLECT_RATIO);
+        // 【反射盾】疊加在基礎的 1/3 上
+        const shield = hitTarget.seat >= 0 ? (equipmentOf(state, hitTarget.seat)?.reflect ?? 0) : 0;
+        const reflected = Math.round(dmg * (WARRIOR_REFLECT_RATIO + shield));
         if (reflected > 0) {
           mon.piece.hp = Math.max(0, mon.piece.hp - reflected);
           events.push({
@@ -2694,11 +2825,13 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
   if (targetGoblin) {
     const stats = CLASS_STATS[classId];
     const roll = Math.floor(rng() * 20) + 1;
-    const isHit = roll + stats.attackBonus >= targetGoblin.ac;
+    const isHit = roll + attackBonusOf(state, npcSeat, classId) >= targetGoblin.ac;
+    const npcDagger = classId === 'bubble' ? equipmentOf(state, npcSeat) : null;
+    const npcDaggerDamage = npcDagger ? Math.round(roll * npcDagger.diceRatio) : 0;
 
     if (isHit) {
       const dmgRoll = Math.floor(rng() * stats.dmgDice) + 1;
-      const damage = dmgRoll + stats.dmgFlat;
+      const damage = dmgRoll + stats.dmgFlat + npcDaggerDamage;
       targetGoblin.hp = Math.max(0, targetGoblin.hp - damage);
 
       if (classId === 'star') {
