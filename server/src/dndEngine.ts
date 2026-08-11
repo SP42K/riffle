@@ -62,6 +62,7 @@ export type DndError =
   | 'MONSTER_ALREADY_ACTED'
   | 'MONSTER_ALREADY_MOVED'
   | 'MONSTER_RESTRAINED'
+  | 'PLAYER_RESTRAINED'
   | 'TARGET_INVULNERABLE';
 
 export const DND_ERROR_MESSAGE: Record<DndError, string> = {
@@ -79,6 +80,7 @@ export const DND_ERROR_MESSAGE: Record<DndError, string> = {
   MONSTER_ALREADY_ACTED: '這隻怪物這一輪已經行動過了',
   MONSTER_ALREADY_MOVED: '這隻怪物這一輪已經移動過了，只能選擇攻擊',
   MONSTER_RESTRAINED: '這隻怪物被網子纏住，這幾回合不能移動，但還可以攻擊',
+  PLAYER_RESTRAINED: '你被邪神分身的羅網纏住，這幾回合不能移動，但還可以攻擊或使用技能',
   TARGET_INVULNERABLE: '邪神有分身護體，先把分身清掉才打得到它',
 };
 
@@ -877,6 +879,9 @@ function castFireWall(
     if (existing) {
       existing.turns = FIRE_WALL_TURNS; // 疊在同一格只是續燒
       existing.dmg = Math.max(existing.dmg, dmg);
+      // 蓋在分身的邪火上就是把它壓過去 —— 沒有重設的話，法師自己放的牆
+      // 會繼續掛著 hostile，反過來燒自己的隊伍。
+      existing.hostile = false;
     } else {
       state.fireWalls.push({ r: cell.r, c: cell.c, turns: FIRE_WALL_TURNS, dmg });
     }
@@ -1570,6 +1575,16 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
     events.push(...escortReinforcements(state, rng));
   }
 
+  // 【震懾】與分身的【撒網】都是在上一輪的怪物回合掛上去的，倒數必須跟放逐一樣
+  // 放在回合開頭 —— 擺在 endRound 的話會在同一個 processRoundEnd 裡就被扣回 0，
+  // 玩家一個回合都沒被跳過，暈眩等於完全沒有效果。
+  for (let idx = 0; idx < SEAT_COUNT; idx++) {
+    const seatInfo = state.seats[idx];
+    if (!seatInfo) continue;
+    if (seatInfo.stunnedTurns && seatInfo.stunnedTurns > 0) seatInfo.stunnedTurns--;
+    if (seatInfo.restrainedTurns && seatInfo.restrainedTurns > 0) seatInfo.restrainedTurns--;
+  }
+
   for (let idx = 0; idx < 4; idx++) {
     const seatInfo = state.seats[idx];
     if (seatInfo && seatInfo.alive && seatInfo.banishedTurns && seatInfo.banishedTurns > 0) {
@@ -1679,12 +1694,6 @@ function endRound(seats: Seats, state: DndState, rng: () => number, events: LogE
   for (let idx = 0; idx < SEAT_COUNT; idx++) {
     const seatInfo = state.seats[idx];
     if (!seatInfo) continue;
-    if (seatInfo.stunnedTurns && seatInfo.stunnedTurns > 0) {
-      seatInfo.stunnedTurns--;
-    }
-    if (seatInfo.restrainedTurns && seatInfo.restrainedTurns > 0) {
-      seatInfo.restrainedTurns--;
-    }
     if (seatInfo.damageCapTurns && seatInfo.damageCapTurns > 0) {
       seatInfo.damageCapTurns--;
       if (seatInfo.damageCapTurns === 0) seatInfo.damageCap = undefined;
@@ -1829,7 +1838,7 @@ export function applyDndAction(
       const classId = playerPiece.classId || 'brave';
       const maxMove = classId === 'bubble' ? 5 : (classId === 'brave' ? 2 : 1);
       if ((state.seats[activeSeat]?.restrainedTurns ?? 0) > 0) {
-        return { ok: false, error: 'MONSTER_RESTRAINED' };
+        return { ok: false, error: 'PLAYER_RESTRAINED' };
       }
       const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
       // dist === 0 要擋掉：來源格與目標格會是同一格，先寫入再清空等於把角色從棋盤上抹掉
@@ -1871,6 +1880,11 @@ export function applyDndAction(
 
   if (kind === 'move' || kind === 'moveTo') {
     if (state.turnHasMoved) return { ok: false, error: 'ALREADY_MOVED' };
+    // 被分身撒網纏住就不能移動。這裡是「單獨按移動」的路徑，跟 turnCombo 裡
+    // 那一份是兩條獨立的入口，漏掉這邊等於網子只擋得住「移動＋攻擊」的組合技。
+    if ((state.seats[activeSeat]?.restrainedTurns ?? 0) > 0) {
+      return { ok: false, error: 'PLAYER_RESTRAINED' };
+    }
 
     let tr = pr;
     let tc = pc;
@@ -2422,10 +2436,16 @@ function applyBossAction(
   // bossAttack
   if (!action.targetId) return { ok: false, error: 'BAD_ACTION' };
   const victim = findPieceById(state, action.targetId);
-  if (!victim || victim.piece.type !== 'player') return { ok: false, error: 'TARGET_NOT_FOUND' };
+  if (!victim) return { ok: false, error: 'TARGET_NOT_FOUND' };
+  // 村民也是合法目標 —— 只認 player 的話，護送關碰上魔王模式就變成白送：
+  // 怪物全由魔王親自指揮（AI 的村民索敵根本不會跑），而他又一個村民都打不到。
+  const isVillager = victim.piece.type === 'villager';
+  if (!isVillager && victim.piece.type !== 'player') return { ok: false, error: 'TARGET_NOT_FOUND' };
 
-  const seat = seatIndexOfPiece(seats, victim.piece);
-  if (seat === -1 || !state.seats[seat]?.alive) return { ok: false, error: 'TARGET_NOT_FOUND' };
+  const seat = isVillager ? -1 : seatIndexOfPiece(seats, victim.piece);
+  if (!isVillager && (seat === -1 || !state.seats[seat]?.alive)) {
+    return { ok: false, error: 'TARGET_NOT_FOUND' };
+  }
 
   const range = mon.piece.range ?? (mon.piece.id === 'boss-3' ? 2 : 1);
   const dist = Math.abs(mon.r - victim.r) + Math.abs(mon.c - victim.c);
@@ -3355,6 +3375,22 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
         } else if (classId === 'bubble') {
           events.push(...roguePassive(npcPiece, targetGoblin, rng));
         }
+      }
+    } else if (npcDaggerDamage > 0) {
+      // 【骰子匕首】揮空也照打 —— NPC 盜賊跟真人走同一條規則
+      targetGoblin.hp = Math.max(0, targetGoblin.hp - npcDaggerDamage);
+      events.push({
+        t: 'dndAttack',
+        player: npcName,
+        target: targetGoblin.name,
+        roll,
+        hit: true,
+        damage: npcDaggerDamage,
+      });
+      if (targetGoblin.hp <= 0) {
+        const targetCell = state.board[targetR]?.[targetC];
+        if (targetCell) targetCell.piece = null;
+        checkAndSpawnBossOrStaircase(seats, state, events, rng);
       }
     } else {
       events.push({

@@ -169,7 +169,7 @@ export function DndRoom({ room }: { room: RoomView }) {
         }
       } else if (bossMode === 'attack') {
         const range = selectedMonster.piece.range ?? (selectedMonster.piece.id === 'boss-3' ? 2 : 1);
-        if (clicked?.type === 'player' && dist <= range) {
+        if ((clicked?.type === 'player' || clicked?.type === 'villager') && dist <= range) {
           bossCommand({ kind: 'bossAttack', monsterId: selectedMonster.piece.id, targetId: clicked.id });
         }
       }
@@ -738,7 +738,7 @@ export function DndRoom({ room }: { room: RoomView }) {
                             const range = selectedMonster.piece.range ?? (selectedMonster.piece.id === 'boss-3' ? 2 : 1);
                             if (bossMode === 'move' && !selectedHasMoved && bossDist > 0 && bossDist <= speed && !cell.piece) {
                               borderClass = 'can-move';
-                            } else if (bossMode === 'attack' && bossDist <= range && cell.piece?.type === 'player') {
+                            } else if (bossMode === 'attack' && bossDist <= range && (cell.piece?.type === 'player' || cell.piece?.type === 'villager')) {
                               borderClass = 'can-attack';
                             }
                           }
