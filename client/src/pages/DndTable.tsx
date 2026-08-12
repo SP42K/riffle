@@ -6,6 +6,7 @@ import {
   DND_EQUIPMENT_SPEC,
   DND_EQUIPMENT_NAME,
   DND_CLASSES,
+  DEFAULT_DND_NPC_CLASSES,
   DND_NPC_CONTROLS,
   DND_NPC_CONTROL_LABEL,
   DND_DIFFICULTY_LABEL,
@@ -1215,13 +1216,13 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
       <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>
         <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.3rem 0', color: 'var(--text)' }}>🎭 NPC 隊友的職業</h3>
         <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 0.8rem 0' }}>
-          沒人坐的位置補上的 NPC 要用哪個職業。選「隨機」就照舊隨機抽（會避開已經有人選的職業）。
-          位置上有真人時以他自己選的為準，這裡的設定會等他離開才生效。
+          沒人坐的位置補上的 NPC 要用哪個職業。位置上有真人時以他自己選的為準，
+          這裡的設定會等他離開才生效。
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {[0, 1, 2, 3].map((seat) => {
             const taken = room.seats.find((s) => s.seat === seat && s.dndRole !== 'boss');
-            const picked = room.dndNpcClasses?.[seat] ?? null;
+            const picked = room.dndNpcClasses?.[seat] ?? DEFAULT_DND_NPC_CLASSES[seat]!;
             return (
               <div key={seat} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                 <span style={{ fontSize: '0.8rem', color: 'var(--muted)', width: '4.5rem', flexShrink: 0 }}>
@@ -1233,23 +1234,14 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
                   </span>
                 ) : (
                   <select
-                    value={picked ?? ''}
+                    className="dnd-select"
+                    value={picked}
                     disabled={!isHost}
                     onChange={(e) => socket.emit('room:dndNpcClass', {
                       seat,
-                      classId: (e.target.value || null) as DndClassId | null,
+                      classId: e.target.value as DndClassId,
                     })}
-                    style={{
-                      flex: 1,
-                      background: 'rgba(0,0,0,0.3)',
-                      border: '1px solid var(--line)',
-                      borderRadius: '4px',
-                      padding: '0.35rem 0.5rem',
-                      color: picked ? 'var(--gold)' : 'var(--muted)',
-                      fontSize: '0.85rem',
-                    }}
                   >
-                    <option value="">🎲 隨機</option>
                     {DND_CLASSES.map((cls) => (
                       <option key={cls} value={cls}>
                         {DND_CLASSES_INFO.find((c) => c.id === cls)?.name ?? cls}

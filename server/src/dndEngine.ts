@@ -1634,6 +1634,12 @@ const WARRIOR_REFLECT_RATIO = 1 / 3;
 
 /** 牧師 NPC 的補血門檻：隊友血量低於這個比例就先補血再說 */
 const NPC_HEAL_THRESHOLD = 0.7;
+/**
+ * NPC 的撤退門檻：血量低於這個比例就退開找牧師，不再往前衝；
+ * 補過 70% 就自己回去打怪。刻意跟牧師的補血門檻同一個數字 ——
+ * 「牧師願意救的人」與「會自己退回來的人」是同一批，兩邊才不會互相錯過。
+ */
+const NPC_RETREAT_RATIO = NPC_HEAL_THRESHOLD;
 /** 牧師【神聖治癒】的射程與治療量，真人與 NPC 共用 */
 const CLERIC_HEAL_RANGE = 3;
 const CLERIC_HEAL_AMOUNT = 4;
@@ -4150,11 +4156,18 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
     }
 
     if (hasVoidPowers(mon.piece)) {
+      // 頭目挑瞬移目標時，跟一般怪一樣會被村民、殘影、被洗腦的隨從騙過去 ——
+      // 只認 type 'player' 的話，弓手的【殘影】對頭目等於不存在。
       const alivePlayers: { piece: DndPiece; r: number; c: number }[] = [];
       for (let r = 0; r < BOARD_SIZE; r++) {
         for (let c = 0; c < BOARD_SIZE; c++) {
           const p = state.board[r]?.[c]?.piece;
-          if (p && p.type === 'player' && !isHidden(seats, state, p)) {
+          if (!p) continue;
+          if (p.type === 'villager' || p.type === 'decoy' || isAlly(p)) {
+            alivePlayers.push({ piece: p, r, c });
+            continue;
+          }
+          if (p.type === 'player' && !isHidden(seats, state, p)) {
             let seat = -1;
             if (p.playerId) seat = seats.indexOf(p.playerId);
             else if (p.id.startsWith('npc-')) seat = parseInt(p.id.split('-')[1]!, 10);
@@ -4575,6 +4588,272 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
   const classId = npcPiece.classId || 'brave';
   const maxRange = DND_CLASS_RANGE[classId as DndClassId] ?? 1;
 
+  /**
+   * 受傷的 NPC 會撤退，而不是繼續往前送。
+   *
+   * 血量掉到門檻以下時：有牧師就往牧師身邊靠（牧師的 AI 會優先救血量低於 70% 的隊友），
+   * 沒有牧師就往遠離怪物的方向退，然後原地休息。回傳 true 代表這一回合用掉了。
+   */
+  const tryNpcRetreat = (): boolean => {
+    if (npcPiece.hp / Math.max(1, npcPiece.maxHp) > NPC_RETREAT_RATIO) return false;
+
+    // 一步一步走，每一步都重新定位 —— 中途可能踩到陷阱或掉進別的結算
+    const stepTo = (want: (r: number, c: number) => number, budget: number) => {
+      for (let step = 0; step < budget; step++) {
+        let best: { r: number; c: number; dir: string } | null = null;
+        let bestScore = want(pr, pc);
+        for (const d of dirs) {
+          const nr = pr + d.dr;
+          const nc = pc + d.dc;
+          if (!inBounds(nr, nc)) continue;
+          if (state.board[nr]?.[nc]?.piece !== null) continue;
+          const score = want(nr, nc);
+          if (score < bestScore) {
+            bestScore = score;
+            best = { r: nr, c: nc, dir: d.dir };
+          }
+        }
+        if (!best) break;
+        if (!backendApplyMove(seats, state, npcPiece, best, false, rng, events)) break;
+        const moved = findPieceById(state, npcPiece.id);
+        if (!moved) return false;
+        pr = moved.r;
+        pc = moved.c;
+      }
+      return true;
+    };
+
+    const moveRange = DND_CLASS_MOVE[classId] ?? 1;
+
+    // 找還活著的牧師隊友（不算自己）
+    let healer: { r: number; c: number } | null = null;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const piece = state.board[r]?.[c]?.piece;
+        if (!piece || piece.type !== 'player' || piece.id === npcPiece.id) continue;
+        if (piece.classId !== 'star') continue;
+        const seat = seatIndexOfPiece(seats, piece);
+        if (seat === -1 || !state.seats[seat]?.alive) continue;
+        healer = { r, c };
+      }
+    }
+
+    const who = npcName.split(' ')[0];
+    if (healer) {
+      const dist = Math.abs(pr - healer.r) + Math.abs(pc - healer.c);
+      if (dist > 1) {
+        if (!stepTo((r, c) => Math.abs(r - healer!.r) + Math.abs(c - healer!.c), moveRange)) return true;
+        events.push({ t: 'dndMessage', message: `🩹 ${who} 傷得不輕，退到牧師身邊。` } as any);
+      }
+    } else {
+      // 沒有牧師：往離怪物遠一點的地方退（分數取負的距離，越遠分數越低）
+      let foe: { r: number; c: number } | null = null;
+      let near = 9999;
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          if (!isHostile(state.board[r]?.[c]?.piece)) continue;
+          const dist = Math.abs(pr - r) + Math.abs(pc - c);
+          if (dist < near) { near = dist; foe = { r, c }; }
+        }
+      }
+      if (foe) {
+        if (!stepTo((r, c) => -(Math.abs(r - foe!.r) + Math.abs(c - foe!.c)), moveRange)) return true;
+        events.push({ t: 'dndMessage', message: `🩹 ${who} 撐不住了，退開幾步喘口氣。` } as any);
+      }
+    }
+
+    // 退完就地休息，把血補一點回來
+    const restBonus = classId === 'gladiator' ? (equipmentOf(state, npcSeat)?.restBonus ?? 0) : 0;
+    const heal = 1 + restBonus;
+    npcPiece.hp = Math.min(npcPiece.maxHp, npcPiece.hp + heal);
+    npcInfo.hp = npcPiece.hp;
+    events.push({ t: 'dndMessage', message: `🏕️ ${who} 原地休息，恢復了 ${heal} 點 HP。` } as any);
+    return true;
+  };
+
+  /**
+   * NPC 的主動技能。原本只有牧師會放，其他七個職業一律只會普攻 ——
+   * 等於隊友身上有一半的設計是關掉的。
+   *
+   * 這裡刻意寫得比真人保守（條件不成立就退回普攻），而且所有數字都讀跟玩家同一組常數，
+   * 不然平衡調整只會改到一邊。回傳 true 代表技能放掉了，這一回合就到此為止。
+   */
+  const tryNpcSkill = (): boolean => {
+    // 場上一隻敵人都沒有就別放技能。沒有這道閘門，召喚術士會在清完場之後
+    // 站在原地繼續召喚，隊伍永遠走不到樓梯。
+    if (!findAnyMonster(state)) return false;
+
+    const cooldown = npcInfo.skillCooldown ?? 0;
+    if (cooldown > 0) {
+      npcInfo.skillCooldown = cooldown - 1;
+      return false;
+    }
+
+    const nearest = (range: number, filter: (p: DndPiece) => boolean = () => true) => {
+      let best: { piece: DndPiece; r: number; c: number; dist: number } | null = null;
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          const piece = state.board[r]?.[c]?.piece;
+          if (!isHostile(piece) || piece!.invulnerable || !filter(piece!)) continue;
+          const dist = Math.abs(pr - r) + Math.abs(pc - c);
+          if (dist <= range && (!best || dist < best.dist)) best = { piece: piece!, r, c, dist };
+        }
+      }
+      return best;
+    };
+    const spend = () => { npcInfo.skillCooldown = SKILL_COOLDOWN[classId] ?? 1; };
+    const who = npcName.split(' ')[0];
+
+    // 騎士【鎖鏈】：把搆不到的怪拉到臉上，這樣同一輪就打得到
+    if (classId === 'brave') {
+      const target = nearest(3, (p) => true);
+      if (!target || target.dist <= maxRange) return false;
+      const spot = freeCellNextTo(state, pr, pc);
+      if (!spot) return false;
+      state.board[target.r]![target.c]!.piece = null;
+      state.board[spot.r]![spot.c]!.piece = target.piece;
+      pushFx(state, target.piece.id, 'chain');
+      events.push({ t: 'dndMessage', message: `⛓️ ${who} 揮出【鎖鏈】，將 ${target.piece.name} 強行拉到身旁！` } as any);
+      spend();
+      return true;
+    }
+
+    // 鬥士【野蠻衝撞】：衝到目標旁邊，造成固定傷害並暈眩
+    if (classId === 'gladiator') {
+      const target = nearest(GLADIATOR_CHARGE_RANGE);
+      if (!target || target.dist <= 1) return false;
+      const landing = freeCellNextTo(state, target.r, target.c);
+      if (landing) {
+        state.board[pr]![pc]!.piece = null;
+        state.board[landing.r]![landing.c]!.piece = npcPiece;
+        pr = landing.r;
+        pc = landing.c;
+      }
+      target.piece.hp = Math.max(0, target.piece.hp - GLADIATOR_CHARGE_DAMAGE);
+      target.piece.stunnedTurns = 1;
+      pushFx(state, target.piece.id, 'stun');
+      events.push({
+        t: 'dndAttack', player: npcName, target: target.piece.name,
+        roll: 0, hit: true, damage: GLADIATOR_CHARGE_DAMAGE,
+      });
+      events.push({ t: 'dndMessage', message: `🐗 ${who} 一記【野蠻衝撞】撞上了 ${target.piece.name}！` } as any);
+      events.push(...sweepDeadMonsters(seats, state, rng));
+      spend();
+      return true;
+    }
+
+    // 盜賊【撒網】：釘住還沒被網住、而且還搆不到的怪
+    if (classId === 'bubble') {
+      const target = nearest(ROGUE_NET_RANGE, (p) => !p.trappedTurns);
+      if (!target || target.dist <= maxRange) return false;
+      const dagger = equipmentOf(state, npcSeat);
+      target.piece.trappedTurns = ROGUE_NET_TURNS + (dagger?.netBonusTurns ?? 0);
+      target.piece.netDamage = 1 + (dagger?.netBonusDamage ?? 0);
+      pushFx(state, target.piece.id, 'net');
+      events.push({ t: 'dndMessage', message: `🕸️ ${who} 撒出羅網纏住了 ${target.piece.name}！` } as any);
+      spend();
+      return true;
+    }
+
+    // 弓手【狙擊】：全場任一隻怪，優先挑快死的收頭
+    if (classId === 'archer') {
+      let best: { piece: DndPiece } | null = null;
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          const piece = state.board[r]?.[c]?.piece;
+          if (!isHostile(piece) || piece!.invulnerable) continue;
+          if (!best || piece!.hp < best.piece.hp) best = { piece: piece! };
+        }
+      }
+      if (!best) return false;
+      const shots = equipmentOf(state, npcSeat)?.sniperShots ?? 1;
+      for (let i = 0; i < shots; i++) {
+        if (best.piece.hp <= 0) break;
+        best.piece.hp = Math.max(0, best.piece.hp - ARCHER_SNIPE_DAMAGE);
+        events.push({
+          t: 'dndAttack', player: npcName, target: best.piece.name,
+          roll: 0, hit: true, damage: ARCHER_SNIPE_DAMAGE,
+        });
+      }
+      pushFx(state, best.piece.id, 'snipe');
+      events.push({ t: 'dndMessage', message: `🎯 ${who} 屏息瞄準，射出了一發【狙擊】！` } as any);
+      events.push(...sweepDeadMonsters(seats, state, rng));
+      spend();
+      return true;
+    }
+
+    // 法師【火牆】：至少要燒得到兩隻才值得放
+    if (classId === 'tangerine') {
+      let bestSpot: { r: number; c: number; hits: number } | null = null;
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          if (Math.abs(pr - r) + Math.abs(pc - c) > FIRE_WALL_RANGE) continue;
+          let hits = 0;
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (isHostile(state.board[r + dr]?.[c + dc]?.piece)) hits++;
+            }
+          }
+          if (hits >= 2 && (!bestSpot || hits > bestSpot.hits)) bestSpot = { r, c, hits };
+        }
+      }
+      if (!bestSpot) return false;
+      const placed = castFireWall(state, pr, pc, bestSpot.r, bestSpot.c, npcSeat);
+      if (placed === 0) return false;
+      events.push({ t: 'dndMessage', message: `🔥 ${who} 燃起一道【火牆】，擋在 ${bestSpot.hits} 隻敵人腳下！` } as any);
+      spend();
+      return true;
+    }
+
+    // 吟遊詩人【進擊之歌】：附近有兩隻以上的怪，值得替全隊開一輪增傷
+    if (classId === 'bard') {
+      let near = 0;
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          if (isHostile(state.board[r]?.[c]?.piece) && Math.abs(pr - r) + Math.abs(pc - c) <= 6) near++;
+        }
+      }
+      if (near < 2) return false;
+      const ratio = BARD_MARCH_RATIO + songBonusOf(state, npcSeat) / 10;
+      eachLivingSeat(state, (info) => {
+        info.dmgBuffTurns = BARD_OFFENSE_TURNS;
+        info.dmgBuffRatio = ratio;
+      });
+      pushFx(state, npcPiece.id, 'song');
+      events.push({
+        t: 'dndMessage',
+        message: `🎺 ${who} 奏起【進擊之歌】—— 全隊的傷害提高 ${Math.round(ratio * 100)}%！`,
+      } as any);
+      spend();
+      return true;
+    }
+
+    // 召喚術士【魔物召喚】：一層兩次，能召就召
+    if (classId === 'summoner') {
+      const used = npcInfo.summonsUsed ?? 0;
+      if (used >= SUMMON_PER_LEVEL) return false;
+      const { cap, roster } = summonRosterOf(state, npcSeat);
+      if (cap - allyCount(state) <= 0) return false;
+
+      let born = 0;
+      for (let i = 0; i < Math.min(SUMMON_BASE_CAP, cap - allyCount(state)); i++) {
+        const template = roster[Math.floor(rng() * roster.length)]!;
+        const minion = makeGoblin(`ally-${npcSeat}-${state.roundCount}-${i}-${Math.floor(rng() * 1000)}`, template);
+        minion.ally = true;
+        state.monsterActed.add(minion.id);
+        if (placeNear(state, pr, pc, minion)) born++;
+      }
+      if (born === 0) return false;
+      npcInfo.summonsUsed = used + 1;
+      pushFx(state, npcPiece.id, 'summon');
+      events.push({ t: 'dndMessage', message: `🌑 ${who} 撕開地面，喚出了 ${born} 隻隨從！` } as any);
+      spend();
+      return true;
+    }
+
+    return false;
+  };
+
   // 牧師 NPC 以奶量優先：只要 3 格內有隊友掉到 70% 以下，這回合就補血不打人。
   // 冷卻跟真人牧師一樣是 1 回合，才不會變成無限治療機。
   if (classId === 'star') {
@@ -4625,6 +4904,10 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
       }
     }
   }
+
+  // 順序：先看要不要撤退（血快沒了就別再談輸出），再看要不要放技能
+  if (tryNpcRetreat()) return events;
+  if (classId !== 'star' && tryNpcSkill()) return events;
 
   // 目標掃描做成函式：移動之前掃一次、走完之後再掃一次。
   // 只掃一次的話 NPC 永遠只打得到「站著不動就搆得到」的怪 —— 走過去那一輪不會出手。

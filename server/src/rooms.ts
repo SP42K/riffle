@@ -44,6 +44,7 @@ import {
   DND_DIFFICULTIES,
   DND_NPC_CONTROLS,
   DND_CLASSES,
+  DEFAULT_DND_NPC_CLASSES,
   type DndDifficulty,
   type DndNpcControl,
   type DndRole,
@@ -108,8 +109,8 @@ export interface Room {
   dndDifficulty: DndDifficulty;
   /** 龍與地下城：NPC 隊友由 AI 自動行動，還是交給房主手動操作。 */
   dndNpcControl: DndNpcControl;
-  /** 空位要補什麼職業的 NPC 隊友，四個座位各一格；null 代表隨機。 */
-  dndNpcClasses: Array<DndClassId | null>;
+  /** 空位要補什麼職業的 NPC 隊友，四個座位各一格。 */
+  dndNpcClasses: DndClassId[];
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -201,7 +202,7 @@ export function normalizeMonopolyOptions(value: unknown): MonopolyOptions {
 }
 
 /** 只收認得的 NPC 操作方式，其他一律吃 AI 自動。 */
-/** 只收認得的職業，其他一律當成「隨機」。 */
+/** 只收認得的職業，認不得就回 null 讓呼叫端忽略這次設定。 */
 export function normalizeDndClass(value: unknown): DndClassId | null {
   return DND_CLASSES.find((id) => id === value) ?? null;
 }
@@ -242,7 +243,7 @@ export function createRoom(input: CreateRoomInput): Room {
     monopolyOptions,
     dndDifficulty: 'normal',
     dndNpcControl: 'auto',
-    dndNpcClasses: [null, null, null, null],
+    dndNpcClasses: [...DEFAULT_DND_NPC_CLASSES],
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),

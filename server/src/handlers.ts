@@ -722,7 +722,11 @@ export class GameServer {
     const seat = typeof payload?.seat === 'number' ? Math.floor(payload.seat) : -1;
     if (seat < 0 || seat >= DND_BOSS_SEAT) return;
 
-    room.dndNpcClasses[seat] = normalizeDndClass(payload?.classId);
+    // 認不得的職業就當作沒按到，維持原本的選擇 —— 沒有「隨機」這個選項
+    const classId = normalizeDndClass(payload?.classId);
+    if (!classId) return;
+
+    room.dndNpcClasses[seat] = classId;
     this.broadcastRoom(room);
   }
 

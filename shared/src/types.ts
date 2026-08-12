@@ -490,10 +490,11 @@ export interface RoomView {
   /** 只有龍與地下城房有值：NPC 隊友由 AI 還是房主操作。 */
   dndNpcControl: DndNpcControl | null;
   /**
-   * 空位要補什麼職業的 NPC 隊友。四個座位各一格，null 代表隨機。
+   * 空位要補什麼職業的 NPC 隊友，四個座位各一格。
+   * 一律是明確的職業，不會是「隨機」—— 隊伍組成是要能事先規劃的東西。
    * 只有龍與地下城房有值。
    */
-  dndNpcClasses: Array<DndClassId | null> | null;
+  dndNpcClasses: DndClassId[] | null;
   hostId: PlayerId;
   maxPlayers: number;
   status: RoomStatus;
@@ -550,8 +551,8 @@ export interface ClientToServerEvents {
   'room:dndRole': (p: { role: DndRole }) => void;
   /** 龍與地下城：房主在開局前決定 NPC 隊友要不要自己手動操作。 */
   'room:dndNpcControl': (p: { control: DndNpcControl }) => void;
-  /** 指定某個空位要補什麼職業的 NPC；classId 給 null 就是隨機。 */
-  'room:dndNpcClass': (p: { seat: number; classId: DndClassId | null }) => void;
+  /** 指定某個空位要補什麼職業的 NPC。 */
+  'room:dndNpcClass': (p: { seat: number; classId: DndClassId }) => void;
   'game:start': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 大老二專用。 */
   'game:play': (p: { cardIds: string[] }, ack: Ack<null>) => void;
@@ -651,6 +652,9 @@ export interface DndEquipment {
  * 所以在這裡另開一個更寬的型別，只有地下城吃它。
  */
 export type DndClassId = DownstairsCharacterId | 'gladiator' | 'archer' | 'bard' | 'summoner';
+
+/** 空位的預設職業：經典四人隊，一個前排、一個機動、一個輸出、一個補。 */
+export const DEFAULT_DND_NPC_CLASSES: DndClassId[] = ['brave', 'bubble', 'tangerine', 'star'];
 
 export const DND_CLASSES: readonly DndClassId[] = [
   'brave',

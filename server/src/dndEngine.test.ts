@@ -11,7 +11,7 @@ import {
   BOARD_SIZE,
   type Seats,
 } from './dndEngine.js';
-import { DND_CLASS_MOVE, DND_CLASS_RANGE } from 'shared';
+import { DND_CLASS_MOVE, DND_CLASS_RANGE, DEFAULT_DND_NPC_CLASSES } from 'shared';
 
 /** 把 NPC 隊友從棋盤上撤掉 —— 驗單一怪物的行為時，不要讓他們跑過來插手。 */
 function clearNpcs(state) {
@@ -75,6 +75,7 @@ describe('D&D Game Engine', () => {
   it('should initialize the board with players and monsters correctly', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
 
     expect(state.board.length).toBe(BOARD_SIZE);
     expect(state.board[0].length).toBe(BOARD_SIZE);
@@ -101,6 +102,7 @@ describe('D&D Game Engine', () => {
   it('should allow player to move in valid directions and reject invalid moves', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = []; // 隨機陷阱剛好落在目的地會讓這個案例偶發失敗
 
     // Initial position is (15, 6)
@@ -124,6 +126,7 @@ describe('D&D Game Engine', () => {
     const seats: Seats = ['p1', null, null, null];
     // 沒指定職業的座位會自動補一個還沒被用掉的職業，傷害公式會跟著變 —— 測試要明寫
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 隊友會放技能把場上的怪清掉，這裡只驗玩家自己那幾刀
 
     // Teleport player near a goblin at (4, 4) to (4, 3)
     const playerPiece = state.board[15][6].piece;
@@ -159,6 +162,7 @@ describe('D&D Game Engine', () => {
   it('should handle monster turn AI, moving monsters closer to players and attacking them', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
 
     // Move player close to Goblin A (4, 4) -> to (3, 4)
@@ -191,6 +195,7 @@ describe('D&D Game Engine', () => {
   it('should check game over conditions and rank players accordingly', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     
     // 最終層是 B6 異界大門：過關看的是四座祭壇拆光了沒
@@ -235,9 +240,15 @@ describe('D&D Game Engine', () => {
     const actionResult = applyDndAction(seats, state, 'p1', { kind: 'rest' });
     expect(actionResult.ok).toBe(true);
 
-    // Verify NPC turns were run by checking their log events
+    // Verify NPC turns were run by checking their log events.
+    // 有些行動只會留下 dndMessage（唱歌、召喚、撤退休息），那類事件沒有 player 欄位，
+    // 所以也要看訊息裡有沒有提到這個 NPC。
     for (const name of npcNames) {
-      expect(actionResult.events.filter((e) => e.player === name).length).toBeGreaterThan(0);
+      const short = name.split(' ')[0];
+      const traced = actionResult.events.some((e) => (
+        e.player === name || (e.t === 'dndMessage' && e.message.includes(short))
+      ));
+      expect(traced).toBe(true);
     }
 
     // Verify monsters turn ran as well at the end of the round
@@ -345,6 +356,7 @@ describe('D&D Game Engine', () => {
     // 兩個真人：p1 踩到陷阱之後回合會交給 p2，放逐倒數還沒開始遞減
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
 
     // Player starts at (15, 6). Put trap at (14, 6)
     state.traps = [{ r: 14, c: 6, triggered: false }];
@@ -364,6 +376,7 @@ describe('D&D Game Engine', () => {
     // 舊的推進迴圈不會結算回合，NPC 會在同一次動作裡連跑上百回合把三層樓打完。
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
 
     // 一樓已經清空、Boss 也倒了，樓梯就擺在場中央
     clearGoblins(state);
@@ -444,6 +457,7 @@ describe('D&D Game Engine', () => {
   it('should run the monster round once per full lap of the seat ring, whichever seat acted', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
 
     // 座位 0 行動：0 → 1 就交棒給另一個真人，這一輪還沒繞完，怪物不動
@@ -464,6 +478,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'bubble' });
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state);
 
     const rogue = findPiece(state, (p) => p.playerId === 'p1');
     state.board[rogue.r][rogue.c].piece = null;
@@ -495,6 +510,7 @@ describe('D&D Game Engine', () => {
   it('should keep a netted monster attacking, only pinned in place', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'bubble' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -565,6 +581,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'bubble' });
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state);
 
     const rogue = findPiece(state, (p) => p.playerId === 'p1');
     state.board[rogue.r][rogue.c].piece = null;
@@ -596,6 +613,7 @@ describe('D&D Game Engine', () => {
   it('should still let the netted Void Chief teleport, only bleeding it', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'bubble' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.level = 3;
@@ -635,6 +653,7 @@ describe('D&D Game Engine', () => {
   it('should reject netting anything that is not a monster', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats, { p1: 'bubble', p2: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -653,6 +672,7 @@ describe('D&D Game Engine', () => {
   it('should end the run when every human seat is down, even if NPC party members survive', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
 
     state.seats[0].alive = false;
 
@@ -665,6 +685,7 @@ describe('D&D Game Engine', () => {
   it('should reject a turnCombo that "moves" onto the cell the player is already standing on', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
 
     const result = applyDndAction(seats, state, 'p1', {
       kind: 'turnCombo',
@@ -682,7 +703,7 @@ describe('D&D Game Engine', () => {
     const seats: Seats = ['p1', null, null, null];
     const characterIds = { 'p1': 'star' };
     const state = dealDnd(seats, characterIds);
-    
+
     state.seats[0].hp = 10;
     state.seats[1].hp = 5;
     
@@ -698,8 +719,9 @@ describe('D&D Game Engine', () => {
     const actionResult = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-0' }, rngHit);
     expect(actionResult.ok).toBe(true);
     
-    expect(state.seats[1].hp).toBe(6); // 攻擊命中順帶治癒隊友 1 點
-    expect(roguePiece.hp).toBe(6);
+    // 牧師出手順手補 1 點；受傷的隊友自己也會退開休息再回 1 點，所以只驗「有補到」
+    expect(state.seats[1].hp).toBeGreaterThan(5); // 攻擊命中順帶治癒隊友 1 點
+    expect(roguePiece.hp).toBeGreaterThan(5); // 補血之外，受傷的隊友自己也會退開休息
   });
 
   // ---------------------------------------------------------------------------
@@ -746,6 +768,7 @@ describe('D&D Game Engine', () => {
   it('should cap every incoming hit while 極限防禦 is up', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -795,6 +818,7 @@ describe('D&D Game Engine', () => {
   it('should add three high-speed Goblin Rogues on B2 and add Goblin Mages on top of them on B4', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
 
     descendTo(state, seats, 2);
     expect(state.level).toBe(2);
@@ -842,18 +866,150 @@ describe('D&D Game Engine', () => {
       seats, { p1: 'star' }, 'normal', null, null, () => 0,
       [null, 'star', 'star', 'star'],
     );
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     for (const seat of [1, 2, 3]) {
       expect(state.seats[seat].classId).toBe('star');
     }
   });
 
+  it('should fill every empty seat from the room default', () => {
+    // 房間的預設就是經典四人隊，不再抽籤 —— 隊伍組成要能事先規劃
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(
+      seats, { p1: 'brave' }, 'normal', null, null, () => 0,
+      [...DEFAULT_DND_NPC_CLASSES],
+    );
+    expect(state.seats[1].classId).toBe('bubble');
+    expect(state.seats[2].classId).toBe('tangerine');
+    expect(state.seats[3].classId).toBe('star');
+  });
+
   it('should still randomise the seats the host left alone', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, null, () => 0);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     // 沒有指定表時完全照舊：三個 NPC 各拿到不重複的職業
     const picked = [1, 2, 3].map((seat) => state.seats[seat].classId);
     expect(new Set(picked).size).toBe(3);
     expect(picked).not.toContain('brave');
+  });
+
+  it('should let NPC allies use their active skill', () => {
+    // 原本只有牧師會放技能，其他七個職業一律只會普攻
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'star' }, 'normal', null, null, () => 0);
+    state.traps = [];
+    clearGoblins(state);
+
+    // 座位 1 指定成盜賊，5 格外放一隻怪 —— 搆不到就該撒網
+    const npc = findPiece(state, (p) => p.id === 'npc-1');
+    npc.piece.classId = 'bubble';
+    state.seats[1].classId = 'bubble';
+    state.board[npc.r][npc.c].piece = null;
+    state.board[8][4].piece = npc.piece;
+    for (const id of ['npc-2', 'npc-3']) {
+      const other = findPiece(state, (p) => p.id === id);
+      if (other) state.board[other.r][other.c].piece = null;
+    }
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[0][0].piece = me.piece;
+    state.board[8][8].piece = { id: 'm-net', type: 'goblin', name: 'Netted', hp: 99, maxHp: 99, ac: 99 };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(findPiece(state, (p) => p.id === 'm-net').piece.trappedTurns).toBeGreaterThan(0);
+  });
+
+  it('should send a wounded NPC back to the cleric instead of charging', () => {
+    const seats: Seats = ['p1', null, null, null];
+    // p1 是牧師，座位 1 指定成鬥士並打成重傷
+    const state = dealDnd(seats, { p1: 'star' }, 'normal', null, null, () => 0);
+    state.traps = [];
+    clearGoblins(state);
+
+    const cleric = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[cleric.r][cleric.c].piece = null;
+    state.board[8][2].piece = cleric.piece;
+
+    const npc = findPiece(state, (p) => p.id === 'npc-1');
+    npc.piece.classId = 'gladiator';
+    state.seats[1].classId = 'gladiator';
+    state.board[npc.r][npc.c].piece = null;
+    state.board[8][8].piece = npc.piece;
+    npc.piece.maxHp = 30;
+    npc.piece.hp = 6; // 20%，遠低於 70% 的撤退門檻
+    state.seats[1].maxHp = 30;
+    state.seats[1].hp = 6;
+
+    for (const id of ['npc-2', 'npc-3']) {
+      const other = findPiece(state, (p) => p.id === id);
+      if (other) state.board[other.r][other.c].piece = null;
+    }
+    // 怪在另一邊：沒有撤退邏輯的話牠會往怪那裡衝
+    state.board[8][12].piece = { id: 'm-far', type: 'goblin', name: 'Far', hp: 99, maxHp: 99, ac: 99 };
+
+    const before = Math.abs(8 - 8) + Math.abs(8 - 2); // 離牧師 6 格
+    const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(res.ok).toBe(true);
+
+    const moved = findPiece(state, (p) => p.id === 'npc-1');
+    const after = Math.abs(moved.r - 8) + Math.abs(moved.c - 2);
+    expect(after).toBeLessThan(before); // 往牧師靠過去了
+    expect(res.events.some((e) => e.t === 'dndMessage' && e.message.includes('退到牧師身邊'))).toBe(true);
+  });
+
+  it('should let a healthy NPC go back to fighting', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'star' }, 'normal', null, null, () => 0);
+    state.traps = [];
+    clearGoblins(state);
+
+    const npc = findPiece(state, (p) => p.id === 'npc-1');
+    npc.piece.classId = 'brave';
+    state.seats[1].classId = 'brave';
+    state.board[npc.r][npc.c].piece = null;
+    state.board[8][6].piece = npc.piece;
+    npc.piece.maxHp = 30;
+    npc.piece.hp = 25; // 83%，高於門檻
+    state.seats[1].maxHp = 30;
+    state.seats[1].hp = 25;
+
+    for (const id of ['npc-2', 'npc-3']) {
+      const other = findPiece(state, (p) => p.id === id);
+      if (other) state.board[other.r][other.c].piece = null;
+    }
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[0][0].piece = me.piece;
+    state.board[8][7].piece = { id: 'm-t', type: 'goblin', name: 'T', hp: 99, maxHp: 99, ac: 1 };
+
+    const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
+    expect(res.events.some((e) => e.t === 'dndAttack' && e.player.includes('NPC'))).toBe(true);
+    expect(res.events.some((e) => e.t === 'dndMessage' && e.message.includes('退到牧師身邊'))).toBe(false);
+  });
+
+  it('should let a boss take the decoy bait too', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'archer' }, 'normal', null, null, () => 0);
+    state.traps = [];
+    clearGoblins(state);
+    clearNpcs(state);
+
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[0][0].piece = me.piece; // 本人躲遠一點
+
+    state.board[8][6].piece = {
+      id: 'decoy-x', type: 'decoy', name: '殘影', hp: 16, maxHp: 16, ac: 1,
+    };
+    state.board[8][7].piece = {
+      id: 'boss-3', type: 'goblin', name: 'Void Chief (虛空酋長)', hp: 80, maxHp: 80, ac: 15,
+    };
+
+    const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
+    expect(res.ok).toBe(true);
+    // 頭目原本只認 type 'player'，會無視殘影直接瞬移去打本人
+    expect(res.events.some((e) => e.t === 'dndAttack' && e.target === '殘影')).toBe(true);
   });
 
   it('should let NPC allies close the distance with their full move range', () => {
@@ -898,11 +1054,13 @@ describe('D&D Game Engine', () => {
     state.traps = [];
     clearGoblins(state);
 
+    // 用騎士：鎖鏈只搆得到 3 格內，目標放 4 格外就不會改成放技能，
+    // 這一條要驗的是「移動 + 攻擊在同一輪」
     const npc = findPiece(state, (p) => p.id === 'npc-1');
-    npc.piece.classId = 'bubble'; // 移動 6
-    state.seats[1].classId = 'bubble';
+    npc.piece.classId = 'brave';
+    state.seats[1].classId = 'brave';
     state.board[npc.r][npc.c].piece = null;
-    state.board[8][4].piece = npc.piece;
+    state.board[8][5].piece = npc.piece;
     for (const id of ['npc-2', 'npc-3']) {
       const other = findPiece(state, (p) => p.id === id);
       if (other) state.board[other.r][other.c].piece = null;
@@ -970,6 +1128,7 @@ describe('D&D Game Engine', () => {
   it('should summon the B1 and B2 bosses once the Void Chief drops to a quarter HP', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.level = 3;
@@ -998,6 +1157,7 @@ describe('D&D Game Engine', () => {
   it('should reverse the movement of a feared player', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -1020,6 +1180,7 @@ describe('D&D Game Engine', () => {
     // 被放逐的人自己動不了，要靠隊友行動把回合推過去，放逐倒數才會遞減
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats, { p1: 'brave', p2: 'star' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -1114,6 +1275,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'tangerine' });
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state);
 
     const mage = findPiece(state, (p) => p.playerId === 'p1');
     state.board[mage.r][mage.c].piece = null;
@@ -1156,6 +1318,7 @@ describe('D&D Game Engine', () => {
   it('should reject a fire wall cast further than three cells away', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'tangerine' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
 
     const mage = findPiece(state, (p) => p.playerId === 'p1');
@@ -1233,6 +1396,7 @@ describe('D&D Game Engine', () => {
     for (const c of cases) {
       const seats: Seats = ['p1', null, null, null];
       const state = dealDnd(seats, { p1: 'brave' }, c.difficulty);
+      clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
       const goblin = findPiece(state, (p) => p.id === 'm-0');
       expect(goblin.piece.hp).toBe(c.hp);
       expect(goblin.piece.maxHp).toBe(c.hp);
@@ -1267,6 +1431,7 @@ describe('D&D Game Engine', () => {
     const damageOn = (difficulty) => {
       const seats: Seats = ['p1', null, null, null];
       const state = dealDnd(seats, { p1: 'brave' }, difficulty);
+      clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
       state.traps = [];
       clearGoblins(state);
 
@@ -1533,6 +1698,7 @@ describe('D&D Game Engine', () => {
   it('should reflect a third of the damage back at the attacker', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -1565,6 +1731,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'tangerine' });
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state);
 
     const mage = findPiece(state, (p) => p.playerId === 'p1');
     state.board[mage.r][mage.c].piece = null;
@@ -1583,6 +1750,7 @@ describe('D&D Game Engine', () => {
   it('should let reflect damage finish off the attacker', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -1783,6 +1951,7 @@ describe('D&D Game Engine', () => {
   it('should scale the judgement drain with the staff', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'star' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.seats[0].equipment = { kind: 'star', tier: 'hell' }; // 汲取 4
@@ -1804,6 +1973,7 @@ describe('D&D Game Engine', () => {
   it('should fire the mage passive even on a miss', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'tangerine' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -1827,6 +1997,7 @@ describe('D&D Game Engine', () => {
   it('should make fire burn harder on a magic-shredded monster', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'tangerine' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -1855,6 +2026,7 @@ describe('D&D Game Engine', () => {
   it('should bind a monster with the mage passive', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'tangerine' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -1876,6 +2048,7 @@ describe('D&D Game Engine', () => {
   it('should use the shared move table for every class', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'star' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -2010,6 +2183,7 @@ describe('D&D Game Engine', () => {
   it('should stack the reflect shield on top of the base one third', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.seats[0].equipment = { kind: 'brave', tier: 'hell' }; // 反射 +60% → 共 93%
@@ -2033,6 +2207,7 @@ describe('D&D Game Engine', () => {
   it('should turn the chain into an area pull once the shield is equipped', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.seats[0].equipment = { kind: 'brave', tier: 'hard' }; // 範圍 3
@@ -2065,6 +2240,7 @@ describe('D&D Game Engine', () => {
   it('should keep the chain single-target without the shield', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -2083,6 +2259,7 @@ describe('D&D Game Engine', () => {
   it('should grow the fire wall into a square and burn harder', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'tangerine' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.seats[0].equipment = { kind: 'tangerine', tier: 'hard' }; // 3x3、傷害 +2
@@ -2100,6 +2277,7 @@ describe('D&D Game Engine', () => {
   it('should report a reflect fx when the warrior bounces damage back', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -2117,6 +2295,7 @@ describe('D&D Game Engine', () => {
   it('should clear the fx list at the start of every action', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.fx = [{ pieceId: 'stale', kind: 'stun' }];
@@ -2128,6 +2307,7 @@ describe('D&D Game Engine', () => {
   it('should report a bind fx from the mage passive', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'tangerine' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -2143,6 +2323,7 @@ describe('D&D Game Engine', () => {
   it('should let the warrior chain an ally over', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats, { p1: 'brave', p2: 'star' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -2165,6 +2346,7 @@ describe('D&D Game Engine', () => {
   it('should refuse to chain an ally standing too far away', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats, { p1: 'brave', p2: 'star' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -2184,6 +2366,7 @@ describe('D&D Game Engine', () => {
   it('should pull only the targeted ally even with the shield equipped', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats, { p1: 'brave', p2: 'star' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.seats[0].equipment = { kind: 'brave', tier: 'hell' }; // 範圍 4、指定怪物時是群拉
@@ -2237,6 +2420,7 @@ describe('D&D Game Engine', () => {
   it('should hide the rogue from monsters after the dice dagger is awarded', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'bubble' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.seats[0].equipment = { kind: 'bubble', tier: 'normal' };
@@ -2260,6 +2444,7 @@ describe('D&D Game Engine', () => {
   it('should break stealth when the rogue attacks and restore it on rest', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'bubble' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.seats[0].equipment = { kind: 'bubble', tier: 'normal' };
@@ -2286,6 +2471,7 @@ describe('D&D Game Engine', () => {
   it('should break stealth when the rogue throws the net', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'bubble' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.seats[0].equipment = { kind: 'bubble', tier: 'normal' };
@@ -2305,6 +2491,7 @@ describe('D&D Game Engine', () => {
   it('should not grant stealth to a rogue without the dagger', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'bubble' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -2319,6 +2506,7 @@ describe('D&D Game Engine', () => {
   it('should let the dice dagger strengthen the net as well', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'bubble' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.seats[0].equipment = { kind: 'bubble', tier: 'hard' }; // 多綁 2 輪、持續傷害 +2
@@ -2344,6 +2532,7 @@ describe('D&D Game Engine', () => {
   it('should keep the net at its base strength without the dagger', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'bubble' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -2365,6 +2554,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'bubble' });
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state);
     state.seats[0].equipment = { kind: 'bubble', tier: 'hell' }; // 命中骰 x0.9
 
     const rogue = findPiece(state, (p) => p.playerId === 'p1');
@@ -2414,6 +2604,7 @@ describe('D&D Game Engine', () => {
   it('should start B5 with zealots only and hold the god back until three quarters are down', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     descendTo(state, seats, 5);
     expect(state.level).toBe(5);
@@ -2634,6 +2825,7 @@ describe('D&D Game Engine', () => {
   it('should clear a skill cooldown after one of that character own turns', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'star' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -2686,6 +2878,7 @@ describe('D&D Game Engine', () => {
   it('should keep NPC seats on the AI when nobody is controlling them', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
 
     // 沒有代打者：一次動作就把三個 NPC 跑完，回合直接繞回自己
@@ -2712,6 +2905,7 @@ describe('D&D Game Engine', () => {
   it('should fall back to the AI when the controller lets an NPC turn time out', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1');
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     state.turnSeat = 1;
 
@@ -2725,6 +2919,7 @@ describe('D&D Game Engine', () => {
   it('should drop back to AI control when the controller leaves', () => {
     const seats: Seats = ['p1', 'p2', null, null];
     const state = dealDnd(seats, { p1: 'brave', p2: 'star' }, 'normal', null, 'p1');
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
 
     removePlayerFromDnd(seats, state, 'p1');
@@ -2750,6 +2945,7 @@ describe('D&D Game Engine', () => {
     // 只有魔王一個真人，四個冒險者位全部是 NPC
     const seats: Seats = [null, null, null, null, 'boss'];
     const state = dealDnd(seats, {}, 'normal', 4);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
 
     // 開局就要把 NPC 隊伍跑完並把回合交給魔王，不能停在 NPC 座位空轉
     const opening = openingDndTurn(seats, state, () => 0.5);
@@ -2777,6 +2973,9 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: classId }, opts.difficulty ?? 'normal', null, null, () => 0);
     state.traps = [];
     clearGoblins(state);
+    // 這一組測試驗的都是玩家自己的能力：隊友現在會撒網、放火、狙擊，
+    // 留著他們的話每個傷害數字都要再扣掉他們那一份
+    clearNpcs(state);
 
     const me = findPiece(state, (p) => p.playerId === 'p1');
     state.board[me.r][me.c].piece = null;
@@ -2904,6 +3103,7 @@ describe('D&D Game Engine', () => {
   it('should give the greatsword a percentage HP boost and flat AC', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'gladiator' }, 'normal', null, null, () => 0);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     descendTo(state, seats, 3);
     state.traps = [];
@@ -2955,6 +3155,7 @@ describe('D&D Game Engine', () => {
   it('should give the warrior extra AC and HP from the shield', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' }, 'hell', null, null, () => 0);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     descendTo(state, seats, 3);
     state.traps = [];
@@ -3165,6 +3366,7 @@ describe('D&D Game Engine', () => {
   it('should let monsters attack a decoy without ending the run', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'archer' }, 'normal', null, null, () => 0);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -3291,6 +3493,7 @@ describe('D&D Game Engine', () => {
   it('should reset the summon count on a new floor', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'summoner' }, 'normal', null, null, () => 0);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     state.seats[0].summonsUsed = 2;
 
@@ -3453,6 +3656,7 @@ describe('D&D Game Engine', () => {
     const seats: Seats = ['p1', null, null, null];
     // 固定亂數源：NPC 職業一變，隊友的射程與移動力就不同，數字全部會飄
     const state = dealDnd(seats, { p1: classId }, 'normal', null, null, () => 0);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     descendTo(state, seats, 6);
     state.traps = [];
@@ -3592,6 +3796,7 @@ describe('D&D Game Engine', () => {
   it('should let the goblin hero stun or shove the player', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -3618,6 +3823,7 @@ describe('D&D Game Engine', () => {
   it('should let the troll punt the player five cells', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -3664,6 +3870,7 @@ describe('D&D Game Engine', () => {
   it('should let the new shaman heal a wounded monster', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
 
@@ -3690,6 +3897,7 @@ describe('D&D Game Engine', () => {
     // 不然前端只能拿 ranking.length 猜，敗北會被顯示成通關
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
     state.level = 6;
@@ -3716,6 +3924,7 @@ describe('D&D Game Engine', () => {
     // 沒有魔王時維持原本的判定：真人全滅就結束
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.seats[0].alive = false;
 
     const result = checkDndGameOver(seats, state);
@@ -3726,6 +3935,7 @@ describe('D&D Game Engine', () => {
   it('should let the party keep playing for the boss until they are wiped out', () => {
     const seats: Seats = [null, null, null, null, 'boss'];
     const state = dealDnd(seats, {}, 'normal', 4);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
 
     // 全 NPC 隊伍還活著 → 這一局還沒結束
     expect(checkDndGameOver(seats, state).over).toBe(false);
@@ -3741,6 +3951,7 @@ describe('D&D Game Engine', () => {
     const seats: Seats = ['p1', null, null, null];
     const characterIds = { 'p1': 'tangerine' };
     const state = dealDnd(seats, characterIds);
+    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     
     const playerPiece = state.board[15][6].piece;
     state.board[15][6].piece = null;

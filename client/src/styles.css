@@ -1722,6 +1722,40 @@ svg.pixel-sprite {
   50% { box-shadow: 0 0 18px rgba(120, 220, 180, 0.8); }
 }
 
+/*
+ * 大廳的下拉選單（NPC 職業）。
+ * 原生 <select> 的選項清單是作業系統畫的，只在 select 上設顏色的話，
+ * 展開後會變成「系統的淺色底 + 我們的淺色字」—— 整串看不見。
+ * 所以 option 要自己再設一次底色與字色。
+ */
+.dnd-select {
+  flex: 1;
+  background: #16202a;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.dnd-select:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.dnd-select:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.dnd-select option {
+  background: #16202a;
+  color: var(--text);
+}
+.dnd-select option:checked {
+  background: #2a3a48;
+  color: var(--gold);
+}
+
 /* 層間分鏡與終章：蓋在整個畫面上的讀本框 */
 .dnd-story {
   position: fixed;
