@@ -2435,6 +2435,8 @@ export function dealDnd(
   bossSeat: number | null = null,
   npcController: PlayerId | null = null,
   rng: () => number = Math.random,
+  /** 空位要補什麼職業的 NPC；沒指定的位置照舊隨機抽（且避開已經有人選的職業）。 */
+  npcClasses: Array<DndClassId | null> = [],
 ): DndState {
   const board: DndCellView[][] = [];
   for (let r = 0; r < BOARD_SIZE; r++) {
@@ -2469,6 +2471,11 @@ export function dealDnd(
     let classId: DndClassId;
     if (playerId && characterIds?.[playerId]) {
       classId = characterIds[playerId];
+    } else if (npcClasses[seatIndex]) {
+      // 房主指定了這個空位的職業。指定就照辦，不管跟別人重不重複 ——
+      // 想開四個牧師是他的自由。
+      classId = npcClasses[seatIndex]!;
+      usedClasses.add(classId);
     } else {
       const availableClasses = ALL_CLASSES.filter(c => !usedClasses.has(c));
       if (availableClasses.length > 0) {
@@ -4619,32 +4626,130 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
     }
   }
 
-  let targetGoblin: DndPiece | null = null;
-  let targetR = -1, targetC = -1;
-  let minGdist = 9999;
+  // 目標掃描做成函式：移動之前掃一次、走完之後再掃一次。
+  // 只掃一次的話 NPC 永遠只打得到「站著不動就搆得到」的怪 —— 走過去那一輪不會出手。
+  // 回傳而不是改外面的變數：TypeScript 追不進 closure，改外面的話後面全部會被 narrow 成 never。
+  const scanTarget = (): { piece: DndPiece; r: number; c: number } | null => {
+    let best: { piece: DndPiece; r: number; c: number } | null = null;
+    let bestFoe = false;
+    let minGdist = 9999;
 
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      const cell = state.board[r]?.[c];
-      if (!cell?.piece || cell.piece.invulnerable) continue;
-      // B6 的祭壇也是打擊目標 —— 不然四個位置都是 NPC 的時候永遠拆不掉，這一層會卡死。
-      // 怪物永遠優先（dist 相同時先選到的是怪，祭壇要比它更近才會被挑走）
-      const foe = isHostile(cell.piece);
-      const attackable = foe || cell.piece.type === 'altar';
-      if (attackable) {
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const cell = state.board[r]?.[c];
+        if (!cell?.piece || cell.piece.invulnerable) continue;
+        // B6 的祭壇也是打擊目標 —— 不然四個位置都是 NPC 的時候永遠拆不掉，這一層會卡死。
+        // 怪物永遠優先：祭壇只有在還沒選到任何怪的時候才會被挑走
+        const foe = isHostile(cell.piece);
+        if (!foe && cell.piece.type !== 'altar') continue;
         const dist = Math.abs(pr - r) + Math.abs(pc - c);
-        const better = foe ? dist < minGdist : dist < minGdist && targetGoblin === null;
-        if (dist <= maxRange && better) {
+        if (dist > maxRange) continue;
+        const better = foe ? (dist < minGdist || !bestFoe) : (dist < minGdist && best === null);
+        if (better) {
           minGdist = dist;
-          targetGoblin = cell.piece;
-          targetR = r;
-          targetC = c;
+          bestFoe = foe;
+          best = { piece: cell.piece, r, c };
         }
       }
     }
+    return best;
+  };
+
+  let found = scanTarget();
+
+  // 射程內沒東西打就先走過去。走幾格照職業的移動力，不是固定一格 ——
+  // 盜賊能衝 6 格卻跟法師一樣一輪挪一步，那條移動力等於沒有意義。
+  if (!found) {
+    let targetMon: { piece: DndPiece; r: number; c: number } | null = null;
+    let minDist = 9999;
+    let targetIsStairs = false;
+
+    let stairsPos: { r: number; c: number } | null = null;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (state.board[r]?.[c]?.piece?.type === 'staircase') {
+          stairsPos = { r, c };
+          break;
+        }
+      }
+    }
+
+    if (stairsPos) {
+      minDist = Math.abs(pr - stairsPos.r) + Math.abs(pc - stairsPos.c);
+      targetMon = { piece: state.board[stairsPos.r]![stairsPos.c]!.piece!, r: stairsPos.r, c: stairsPos.c };
+      targetIsStairs = true;
+    } else {
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        const row = state.board[r];
+        if (!row) continue;
+        for (let c = 0; c < row.length; c++) {
+          const piece = row[c]?.piece;
+          if (isHostile(piece)) {
+            const dist = Math.abs(pr - r) + Math.abs(pc - c);
+            if (dist < minDist) {
+              minDist = dist;
+              targetMon = { piece: piece!, r, c };
+            }
+          }
+        }
+      }
+      // 場上沒有怪（B6 兩波之間會有空檔）就往最近的祭壇走
+      if (!targetMon) {
+        for (const altar of altarsOnBoard(state)) {
+          const dist = Math.abs(pr - altar.r) + Math.abs(pc - altar.c);
+          if (dist < minDist) {
+            minDist = dist;
+            targetMon = altar;
+          }
+        }
+      }
+    }
+
+    if (targetMon) {
+      // 走幾格照職業的移動力。原本固定一格，等於盜賊的 6 格移動完全沒有意義，
+      // 而且離得稍遠的 NPC 要走好幾輪才碰得到怪，看起來就像整支隊伍在發呆。
+      const moveRange = DND_CLASS_MOVE[classId] ?? 1;
+      // NPC 隊友會走向樓梯但不會踏上去 —— 什麼時候下樓是真人玩家的決定。
+      // 例外：隊伍裡沒有真人（單人魔王模式）時得由 NPC 自己下樓，不然會卡在這一層。
+      const npcMayDescend = targetIsStairs && !partyHasHuman(seats, state);
+
+      for (let step = 0; step < moveRange; step++) {
+        const here = Math.abs(pr - targetMon.r) + Math.abs(pc - targetMon.c);
+        // 進得了射程就停下來，剩下的步數留著 —— 再往前只是白白貼臉
+        if (!targetIsStairs && here <= maxRange) break;
+
+        let bestMove: { r: number; c: number; dir: string } | null = null;
+        let bestDist = here;
+        for (const d of dirs) {
+          const nr = pr + d.dr;
+          const nc = pc + d.dc;
+          const targetCell = state.board[nr]?.[nc];
+          if (targetCell && (targetCell.piece === null
+              || (npcMayDescend && targetCell.piece.type === 'staircase'))) {
+            const dist = Math.abs(nr - targetMon.r) + Math.abs(nc - targetMon.c);
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestMove = { r: nr, c: nc, dir: d.dir };
+            }
+          }
+        }
+        if (!bestMove) break; // 四面都堵住了
+        if (!backendApplyMove(seats, state, npcPiece, bestMove, targetIsStairs, rng, events)) break;
+
+        // 這一步可能踩到陷阱被放逐、或是踏上樓梯換層 —— 兩種情況棋盤都已經不是原來那張了
+        const moved = findPieceById(state, npcPiece.id);
+        if (!moved) return events;
+        pr = moved.r;
+        pc = moved.c;
+      }
+    }
+    found = scanTarget();
   }
 
-  if (targetGoblin) {
+  if (found) {
+    const targetGoblin = found.piece;
+    const targetR = found.r;
+    const targetC = found.c;
     const stats = CLASS_STATS[classId];
     const roll = Math.floor(rng() * 20) + 1;
     const isHit = roll + attackBonusOf(seats, state, npcSeat, classId) >= targetGoblin.ac;
@@ -4737,77 +4842,6 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
         hit: false,
         damage: 0,
       });
-    }
-  } else {
-    let targetMon: { piece: DndPiece; r: number; c: number } | null = null;
-    let minDist = 9999;
-    let targetIsStairs = false;
-
-    let stairsPos: { r: number; c: number } | null = null;
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (state.board[r]?.[c]?.piece?.type === 'staircase') {
-          stairsPos = { r, c };
-          break;
-        }
-      }
-    }
-
-    if (stairsPos) {
-      minDist = Math.abs(pr - stairsPos.r) + Math.abs(pc - stairsPos.c);
-      targetMon = { piece: state.board[stairsPos.r]![stairsPos.c]!.piece!, r: stairsPos.r, c: stairsPos.c };
-      targetIsStairs = true;
-    } else {
-      for (let r = 0; r < BOARD_SIZE; r++) {
-        const row = state.board[r];
-        if (!row) continue;
-        for (let c = 0; c < row.length; c++) {
-          const piece = row[c]?.piece;
-          if (isHostile(piece)) {
-            const dist = Math.abs(pr - r) + Math.abs(pc - c);
-            if (dist < minDist) {
-              minDist = dist;
-              targetMon = { piece: piece!, r, c };
-            }
-          }
-        }
-      }
-      // 場上沒有怪（B6 兩波之間會有空檔）就往最近的祭壇走
-      if (!targetMon) {
-        for (const altar of altarsOnBoard(state)) {
-          const dist = Math.abs(pr - altar.r) + Math.abs(pc - altar.c);
-          if (dist < minDist) {
-            minDist = dist;
-            targetMon = altar;
-          }
-        }
-      }
-    }
-
-    if (targetMon) {
-      let bestMove: { r: number; c: number; dir: string } | null = null;
-      let bestDist = minDist;
-
-      for (const d of dirs) {
-        const nr = pr + d.dr;
-        const nc = pc + d.dc;
-        const targetCell = state.board[nr]?.[nc];
-        // NPC 隊友會走向樓梯但不會踏上去 —— 什麼時候下樓是真人玩家的決定。
-        // 例外：隊伍裡沒有真人（單人魔王模式）時得由 NPC 自己下樓，不然會卡在這一層。
-        const npcMayDescend = targetIsStairs && !partyHasHuman(seats, state);
-        if (targetCell && (targetCell.piece === null
-            || (npcMayDescend && targetCell.piece.type === 'staircase'))) {
-          const dist = Math.abs(nr - targetMon.r) + Math.abs(nc - targetMon.c);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestMove = { r: nr, c: nc, dir: d.dir };
-          }
-        }
-      }
-
-      if (backendApplyMove(seats, state, npcPiece, bestMove, targetIsStairs, rng, events)) {
-        // moved
-      }
     }
   }
 

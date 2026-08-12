@@ -5,6 +5,7 @@ import {
   DND_DIFFICULTIES,
   DND_EQUIPMENT_SPEC,
   DND_EQUIPMENT_NAME,
+  DND_CLASSES,
   DND_NPC_CONTROLS,
   DND_NPC_CONTROL_LABEL,
   DND_DIFFICULTY_LABEL,
@@ -48,7 +49,7 @@ import { emitWithAck, socket } from '../net/socket';
 import { useGame } from '../state/GameProvider';
 import { useSkin } from '../state/skinContext';
 
-const DND_CLASSES: Array<{ id: DndClassId; name: string; hp: number; ac: number }> = [
+const DND_CLASSES_INFO: Array<{ id: DndClassId; name: string; hp: number; ac: number }> = [
   { id: 'brave', name: '騎士 (Knight) 🛡️', hp: 24, ac: 14 },
   { id: 'gladiator', name: '鬥士 (Gladiator) 🐗', hp: 30, ac: 12 },
   { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12 },
@@ -184,6 +185,13 @@ export function DndRoom({ room }: { room: RoomView }) {
     if (!myFearTurns || !myPosition) return { r, c };
     return { r: myPosition.r * 2 - r, c: myPosition.c * 2 - c };
   };
+
+  /**
+   * 這個職業的技能要不要選目標。
+   * 吟遊詩人的【進擊之歌】與召喚術士的【魔物召喚】都是對自己／對全隊發動 ——
+   * 送進瞄準模式的話畫面只會把怪物點亮，看起來像「非得點一隻怪不可」。
+   */
+  const skillNeedsTarget = (classId: string) => classId !== 'bard' && classId !== 'summoner';
 
   const getSkillName = (classId: string) => {
     switch (classId) {
@@ -625,7 +633,15 @@ export function DndRoom({ room }: { room: RoomView }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_move')}>👣 移動</button>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_attack')}>⚔️ 攻擊</button>
-            <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_skill')}>{getSkillName(classId)}</button>
+            <button
+              className="btn btn--primary"
+              style={{ display: 'flex', justifyContent: 'center' }}
+              onClick={() => (skillNeedsTarget(classId)
+                ? setTurnPhase('targeting_skill')
+                : executeTurn({ kind: 'skill' }))}
+            >
+              {getSkillName(classId)}
+            </button>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => executeTurn({ kind: 'rest' })}>🏕️ 休息</button>
           </div>
         </div>
@@ -638,7 +654,15 @@ export function DndRoom({ room }: { room: RoomView }) {
           <h4 style={{ color: 'var(--gold)', textAlign: 'center', margin: '0 0 0.3rem 0', fontSize: '0.85rem' }}>已移動，選擇終結動作</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_attack')}>⚔️ 攻擊</button>
-            <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_skill')}>{getSkillName(classId)}</button>
+            <button
+              className="btn btn--primary"
+              style={{ display: 'flex', justifyContent: 'center' }}
+              onClick={() => (skillNeedsTarget(classId)
+                ? setTurnPhase('targeting_skill')
+                : executeTurn({ kind: 'skill' }))}
+            >
+              {getSkillName(classId)}
+            </button>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => executeTurn({ kind: 'rest' })}>🏕️ 休息</button>
           </div>
           <div style={{ borderTop: '1px solid var(--line)', margin: '0.1rem 0' }} />
@@ -1189,6 +1213,57 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
       </div>
 
       <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>
+        <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.3rem 0', color: 'var(--text)' }}>🎭 NPC 隊友的職業</h3>
+        <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 0.8rem 0' }}>
+          沒人坐的位置補上的 NPC 要用哪個職業。選「隨機」就照舊隨機抽（會避開已經有人選的職業）。
+          位置上有真人時以他自己選的為準，這裡的設定會等他離開才生效。
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {[0, 1, 2, 3].map((seat) => {
+            const taken = room.seats.find((s) => s.seat === seat && s.dndRole !== 'boss');
+            const picked = room.dndNpcClasses?.[seat] ?? null;
+            return (
+              <div key={seat} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--muted)', width: '4.5rem', flexShrink: 0 }}>
+                  P{seat + 1}
+                </span>
+                {taken ? (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text)' }}>
+                    {taken.nickname}（真人）
+                  </span>
+                ) : (
+                  <select
+                    value={picked ?? ''}
+                    disabled={!isHost}
+                    onChange={(e) => socket.emit('room:dndNpcClass', {
+                      seat,
+                      classId: (e.target.value || null) as DndClassId | null,
+                    })}
+                    style={{
+                      flex: 1,
+                      background: 'rgba(0,0,0,0.3)',
+                      border: '1px solid var(--line)',
+                      borderRadius: '4px',
+                      padding: '0.35rem 0.5rem',
+                      color: picked ? 'var(--gold)' : 'var(--muted)',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    <option value="">🎲 隨機</option>
+                    {DND_CLASSES.map((cls) => (
+                      <option key={cls} value={cls}>
+                        {DND_CLASSES_INFO.find((c) => c.id === cls)?.name ?? cls}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>
         <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.3rem 0', color: 'var(--text)' }}>⚔️ 地城難度</h3>
         <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 0.8rem 0' }}>
           {isHost ? '由房主決定，開打之後整局固定。倍率同時吃在怪物的 HP、傷害與防禦上。' : '由房主決定。倍率同時吃在怪物的 HP、傷害與防禦上。'}
@@ -1223,7 +1298,7 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginBottom: '2rem', opacity: myRole === 'boss' ? 0.35 : 1, pointerEvents: myRole === 'boss' ? 'none' : 'auto' }}>
-        {DND_CLASSES.map((cls) => {
+        {DND_CLASSES_INFO.map((cls) => {
           const isSelected = mine === cls.id;
           return (
             <button
@@ -1265,7 +1340,7 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
           {room.seats.map((seat) => {
             if (!seat) return null;
-            const classInfo = DND_CLASSES.find((c) => c.id === seat.characterId) || DND_CLASSES[0]!;
+            const classInfo = DND_CLASSES_INFO.find((c) => c.id === seat.characterId) || DND_CLASSES_INFO[0]!;
             const isBoss = seat.dndRole === 'boss';
             return (
               <div key={seat.playerId} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: isBoss ? 'rgba(231, 76, 60, 0.12)' : 'rgba(255,255,255,0.03)', padding: '6px 12px', borderRadius: '20px', border: isBoss ? '1px solid var(--red)' : '1px solid var(--line)' }}>

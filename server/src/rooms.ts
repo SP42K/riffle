@@ -43,6 +43,7 @@ import {
   DND_BOSS_SEAT,
   DND_DIFFICULTIES,
   DND_NPC_CONTROLS,
+  DND_CLASSES,
   type DndDifficulty,
   type DndNpcControl,
   type DndRole,
@@ -107,6 +108,8 @@ export interface Room {
   dndDifficulty: DndDifficulty;
   /** 龍與地下城：NPC 隊友由 AI 自動行動，還是交給房主手動操作。 */
   dndNpcControl: DndNpcControl;
+  /** 空位要補什麼職業的 NPC 隊友，四個座位各一格；null 代表隨機。 */
+  dndNpcClasses: Array<DndClassId | null>;
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -198,6 +201,11 @@ export function normalizeMonopolyOptions(value: unknown): MonopolyOptions {
 }
 
 /** 只收認得的 NPC 操作方式，其他一律吃 AI 自動。 */
+/** 只收認得的職業，其他一律當成「隨機」。 */
+export function normalizeDndClass(value: unknown): DndClassId | null {
+  return DND_CLASSES.find((id) => id === value) ?? null;
+}
+
 export function normalizeDndNpcControl(value: unknown): DndNpcControl {
   return DND_NPC_CONTROLS.find((control) => control === value) ?? 'auto';
 }
@@ -234,6 +242,7 @@ export function createRoom(input: CreateRoomInput): Room {
     monopolyOptions,
     dndDifficulty: 'normal',
     dndNpcControl: 'auto',
+    dndNpcClasses: [null, null, null, null],
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -938,6 +947,7 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     monopolyOptions: room.gameType === 'monopoly' ? room.monopolyOptions : null,
     dndDifficulty: room.gameType === 'dnd' ? room.dndDifficulty : null,
     dndNpcControl: room.gameType === 'dnd' ? room.dndNpcControl : null,
+    dndNpcClasses: room.gameType === 'dnd' ? room.dndNpcClasses : null,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),

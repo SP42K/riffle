@@ -97,6 +97,7 @@ import {
   swapSeats,
   normalizeDndDifficulty,
   normalizeDndNpcControl,
+  normalizeDndClass,
   npcControllerOf,
   normalizeMonopolyOptions,
   pushChat,
@@ -269,6 +270,7 @@ export class GameServer {
     socket.on('room:dndDifficulty', (payload) => this.onDndDifficulty(socket, payload));
     socket.on('room:dndRole', (payload) => this.onDndRole(socket, payload));
     socket.on('room:dndNpcControl', (payload) => this.onDndNpcControl(socket, payload));
+    socket.on('room:dndNpcClass', (payload) => this.onDndNpcClass(socket, payload));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -706,6 +708,24 @@ export class GameServer {
     this.broadcastRoom(room);
   }
 
+  /**
+   * 空位要補什麼職業的 NPC，也是房主的決定，只能在開局前改。
+   * 座位上有真人時這個設定不生效（他自己選的職業優先），但還是可以先設好等他離開。
+   */
+  private onDndNpcClass(socket: GameSocket, payload: { seat?: unknown; classId?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room || room.gameType !== 'dnd') return;
+    if (room.hostId !== session.playerId || statusOf(room) === 'playing') return;
+
+    const seat = typeof payload?.seat === 'number' ? Math.floor(payload.seat) : -1;
+    if (seat < 0 || seat >= DND_BOSS_SEAT) return;
+
+    room.dndNpcClasses[seat] = normalizeDndClass(payload?.classId);
+    this.broadcastRoom(room);
+  }
+
   /** 難度是房主的決定，而且只能在開局前改。 */
   private onDndDifficulty(socket: GameSocket, payload: { difficulty?: unknown }): void {
     const session = this.sessions.get(socket.id);
@@ -809,6 +829,8 @@ export class GameServer {
           room.dndDifficulty,
           bossSeatOf(room),
           npcControllerOf(room),
+          Math.random,
+          room.dndNpcClasses,
         );
         room.game = { type: 'dnd', state };
         pushLog(room, { t: 'dndStart', players: seatedPlayers(room).length });

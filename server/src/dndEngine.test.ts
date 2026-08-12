@@ -13,6 +13,15 @@ import {
 } from './dndEngine.js';
 import { DND_CLASS_MOVE, DND_CLASS_RANGE } from 'shared';
 
+/** 把 NPC 隊友從棋盤上撤掉 —— 驗單一怪物的行為時，不要讓他們跑過來插手。 */
+function clearNpcs(state) {
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (state.board[r][c].piece?.id?.startsWith('npc-')) state.board[r][c].piece = null;
+    }
+  }
+}
+
 /** 清掉場上所有哥布林，方便測試「這層打完了」的狀態。 */
 function clearGoblins(state) {
   for (let r = 0; r < BOARD_SIZE; r++) {
@@ -517,10 +526,11 @@ describe('D&D Game Engine', () => {
 
   it('should stop a netted monster from closing the distance', () => {
     const seats: Seats = ['p1', null, null, null];
-    // 固定 NPC 職業：抽到弓手的話牠射程 5 格，會從遠處補刀把血量算亂
+    // NPC 隊友會衝過來拉怪、擊退、補刀，把「網住的怪有沒有動」測歪
     const state = dealDnd(seats, { p1: 'bubble' }, 'normal', null, null, () => 0);
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state);
 
     const rogue = findPiece(state, (p) => p.playerId === 'p1');
     state.board[rogue.r][rogue.c].piece = null;
@@ -809,11 +819,112 @@ describe('D&D Game Engine', () => {
     expect(mage.piece.speed).toBe(1);
   });
 
+  it('should let the host pin the class of each NPC seat', () => {
+    const seats: Seats = ['p1', null, null, null];
+    // 指定：座位 1 弓手、座位 3 吟遊詩人；座位 2 留空 → 隨機
+    const state = dealDnd(
+      seats, { p1: 'star' }, 'normal', null, null, () => 0,
+      [null, 'archer', null, 'bard'],
+    );
+
+    expect(findPiece(state, (p) => p.id === 'npc-1').piece.classId).toBe('archer');
+    expect(findPiece(state, (p) => p.id === 'npc-3').piece.classId).toBe('bard');
+    expect(state.seats[1].classId).toBe('archer');
+    expect(state.seats[3].classId).toBe('bard');
+    // 沒指定的那個位置照舊有職業
+    expect(findPiece(state, (p) => p.id === 'npc-2').piece.classId).toBeTruthy();
+  });
+
+  it('should allow a duplicate class when the host asks for it', () => {
+    const seats: Seats = ['p1', null, null, null];
+    // 真人選牧師，三個 NPC 也指定牧師 —— 想開四個牧師是房主的自由
+    const state = dealDnd(
+      seats, { p1: 'star' }, 'normal', null, null, () => 0,
+      [null, 'star', 'star', 'star'],
+    );
+    for (const seat of [1, 2, 3]) {
+      expect(state.seats[seat].classId).toBe('star');
+    }
+  });
+
+  it('should still randomise the seats the host left alone', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, null, () => 0);
+    // 沒有指定表時完全照舊：三個 NPC 各拿到不重複的職業
+    const picked = [1, 2, 3].map((seat) => state.seats[seat].classId);
+    expect(new Set(picked).size).toBe(3);
+    expect(picked).not.toContain('brave');
+  });
+
+  it('should let NPC allies close the distance with their full move range', () => {
+    // NPC 原本一輪只挪一格，跟職業的移動力完全脫鉤 ——
+    // 盜賊的 6 格移動等於沒有意義，離得稍遠的隊友要走好幾輪才碰得到怪。
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'star' }, 'normal', null, null, () => 0);
+    state.traps = [];
+    clearGoblins(state);
+
+    // 把座位 1 指定成盜賊（移動 6），放在 8 格外
+    const npc = findPiece(state, (p) => p.id === 'npc-1');
+    npc.piece.classId = 'bubble';
+    state.seats[1].classId = 'bubble';
+    state.board[npc.r][npc.c].piece = null;
+    state.board[8][2].piece = npc.piece;
+
+    // 其餘隊友先撤掉，只看這一個
+    for (const id of ['npc-2', 'npc-3']) {
+      const other = findPiece(state, (p) => p.id === id);
+      if (other) state.board[other.r][other.c].piece = null;
+    }
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[0][0].piece = me.piece;
+
+    state.board[8][10].piece = { id: 'm-far', type: 'goblin', name: 'Far', hp: 99, maxHp: 99, ac: 99 };
+
+    const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(res.ok).toBe(true);
+
+    // 8 格外的盜賊一輪要能推進到剩 1 格（6 格移動 + 停在射程外緣）
+    const moved = findPiece(state, (p) => p.id === 'npc-1');
+    const dist = Math.abs(moved.r - 8) + Math.abs(moved.c - 10);
+    expect(dist).toBeLessThanOrEqual(2);
+  });
+
+  it('should let an NPC move in and attack in the same round', () => {
+    // 走過去那一輪也要能出手 —— 原本走完就結束，等於白走一輪
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'star' }, 'normal', null, null, () => 0);
+    state.traps = [];
+    clearGoblins(state);
+
+    const npc = findPiece(state, (p) => p.id === 'npc-1');
+    npc.piece.classId = 'bubble'; // 移動 6
+    state.seats[1].classId = 'bubble';
+    state.board[npc.r][npc.c].piece = null;
+    state.board[8][4].piece = npc.piece;
+    for (const id of ['npc-2', 'npc-3']) {
+      const other = findPiece(state, (p) => p.id === id);
+      if (other) state.board[other.r][other.c].piece = null;
+    }
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[0][0].piece = me.piece;
+
+    state.board[8][9].piece = { id: 'm-far', type: 'goblin', name: 'Far', hp: 99, maxHp: 99, ac: 1 };
+
+    const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
+    expect(res.events.some((e) => e.t === 'dndMove' && e.player.includes('NPC'))).toBe(true);
+    expect(res.events.some((e) => e.t === 'dndAttack' && e.player.includes('NPC'))).toBe(true);
+    expect(findPiece(state, (p) => p.id === 'm-far').piece.hp).toBeLessThan(99);
+  });
+
   it('should let a Goblin Rogue close five cells in a single monster round', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'brave' });
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state);
 
     const me = findPiece(state, (p) => p.playerId === 'p1');
     state.board[me.r][me.c].piece = null;
@@ -835,6 +946,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'brave' });
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state); // 不然 10 點血的法師會先被隊友圍毆掉
 
     const me = findPiece(state, (p) => p.playerId === 'p1');
     state.board[me.r][me.c].piece = null;
@@ -1133,6 +1245,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'brave' }, 'hell');
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state); // 隊友會在同一輪衝上去砍剛登場的 Boss，血量就對不上了
 
     // 清場後補一隻小怪讓玩家打死，觸發 Boss 登場
     const me = findPiece(state, (p) => p.playerId === 'p1');
@@ -1650,6 +1763,7 @@ describe('D&D Game Engine', () => {
     const state = dealDnd(seats, { p1: 'star' });
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state); // 只驗判官汲取的那一點，隊友的傷害會把數字算亂
 
     const cleric = findPiece(state, (p) => p.playerId === 'p1');
     state.board[cleric.r][cleric.c].piece = null;
@@ -2280,6 +2394,8 @@ describe('D&D Game Engine', () => {
     state.traps = [];
     state.level = 5;
     clearGoblins(state);
+    // 隊友現在會依移動力衝過來，18 點血的分身常常還沒動就被砍掉了
+    clearNpcs(state);
 
     const me = findPiece(state, (p) => p.playerId === 'p1');
     state.board[me.r][me.c].piece = null;
@@ -3335,7 +3451,8 @@ describe('D&D Game Engine', () => {
   /** 直接把場面推到第六層。 */
   function enterGate(classId = 'brave') {
     const seats: Seats = ['p1', null, null, null];
-    const state = dealDnd(seats, { p1: classId });
+    // 固定亂數源：NPC 職業一變，隊友的射程與移動力就不同，數字全部會飄
+    const state = dealDnd(seats, { p1: classId }, 'normal', null, null, () => 0);
     state.traps = [];
     descendTo(state, seats, 6);
     state.traps = [];
@@ -3400,6 +3517,7 @@ describe('D&D Game Engine', () => {
   it('should count the corruption down and give the relics back', () => {
     const { seats, state } = enterGate();
     clearGoblins(state);
+    clearNpcs(state); // 只驗腐化的倒數，場上不要有別的變數
     state.seats[0].equipment = { kind: 'brave', tier: 'normal' };
     state.seats[0].corruptedTurns = 3;
 

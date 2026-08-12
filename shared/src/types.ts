@@ -489,6 +489,11 @@ export interface RoomView {
   dndDifficulty: DndDifficulty | null;
   /** 只有龍與地下城房有值：NPC 隊友由 AI 還是房主操作。 */
   dndNpcControl: DndNpcControl | null;
+  /**
+   * 空位要補什麼職業的 NPC 隊友。四個座位各一格，null 代表隨機。
+   * 只有龍與地下城房有值。
+   */
+  dndNpcClasses: Array<DndClassId | null> | null;
   hostId: PlayerId;
   maxPlayers: number;
   status: RoomStatus;
@@ -545,6 +550,8 @@ export interface ClientToServerEvents {
   'room:dndRole': (p: { role: DndRole }) => void;
   /** 龍與地下城：房主在開局前決定 NPC 隊友要不要自己手動操作。 */
   'room:dndNpcControl': (p: { control: DndNpcControl }) => void;
+  /** 指定某個空位要補什麼職業的 NPC；classId 給 null 就是隨機。 */
+  'room:dndNpcClass': (p: { seat: number; classId: DndClassId | null }) => void;
   'game:start': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 大老二專用。 */
   'game:play': (p: { cardIds: string[] }, ack: Ack<null>) => void;
