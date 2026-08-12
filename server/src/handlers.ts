@@ -27,6 +27,7 @@ import {
   setDownstairsDirection,
   startDownstairs,
   DOWNSTAIRS_CHARACTERS,
+  DND_CLASSES,
   DOWNSTAIRS_TICK_MS,
   type MinesweeperAction,
   type DndAction,
@@ -652,7 +653,9 @@ export class GameServer {
     const room = this.rooms.get(session.roomId);
     const player = room?.players.get(session.playerId);
     if (!room || !player || (room.gameType !== 'downstairs' && room.gameType !== 'dnd') || statusOf(room) === 'playing') return;
-    const characterId = DOWNSTAIRS_CHARACTERS.find((id) => id === payload?.characterId);
+    // 地下城多兩個職業（鬥士／弓手），樓梯小勇者只認原本那四個
+    const allowed = room.gameType === 'dnd' ? DND_CLASSES : DOWNSTAIRS_CHARACTERS;
+    const characterId = allowed.find((id) => id === payload?.characterId);
     if (!characterId) return;
     player.characterId = characterId;
     this.broadcastRoom(room);
@@ -769,7 +772,12 @@ export class GameServer {
         const state = startDownstairs(
           players.map((player) => player.playerId),
           Date.now(),
-          Object.fromEntries(players.map((player) => [player.playerId, player.characterId])),
+          // 玩家可能在地下城房選過鬥士／弓手，那兩個 id 樓梯小勇者沒有對應的技能表，
+          // 直接餵進去 DOWNSTAIRS_SKILLS 會查到 undefined —— 這裡先擋掉
+          Object.fromEntries(players.map((player) => [
+            player.playerId,
+            DOWNSTAIRS_CHARACTERS.find((id) => id === player.characterId) ?? 'brave',
+          ])),
           'pve',
         );
         room.game = { type: 'downstairs', state };
@@ -1109,6 +1117,10 @@ export class GameServer {
       kind: rawAction.kind as any,
       dir: rawAction.dir,
       targetId: rawAction.targetId,
+      // 弓手【連射】的其餘目標：只收字串陣列，長度交給引擎依裝備截斷
+      targetIds: Array.isArray(rawAction.targetIds)
+        ? rawAction.targetIds.filter((id): id is string => typeof id === 'string').slice(0, 8)
+        : undefined,
       r: rawAction.r,
       c: rawAction.c,
       move: rawAction.move,     // 支援組合動作的移動座標

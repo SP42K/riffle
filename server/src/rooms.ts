@@ -39,7 +39,7 @@ import {
   type SystemNotice,
   type DownstairsGameView,
   type DownstairsState,
-  type DownstairsCharacterId,
+  type DndClassId,
   DND_BOSS_SEAT,
   DND_DIFFICULTIES,
   DND_NPC_CONTROLS,
@@ -64,7 +64,7 @@ import {
 import type { SnakeEvent, SnakeState } from './snakeEngine.js';
 import { assertNeverGame, type TurnBased } from './turnBased.js';
 import { type MinesweeperState, countAdjacentMines } from './minesweeperEngine.js';
-import { type DndState } from './dndEngine.js';
+import { altarsTotalOf, type DndState } from './dndEngine.js';
 
 export interface Member {
   playerId: PlayerId;
@@ -73,7 +73,7 @@ export interface Member {
   connected: boolean;
   /** 斷線寬限計時器，重新連上時要清掉。 */
   graceTimer: NodeJS.Timeout | null;
-  characterId: DownstairsCharacterId;
+  characterId: DndClassId;
   /** 只有龍與地下城使用：當冒險者還是當操控怪物的魔王。 */
   dndRole: DndRole;
 }
@@ -269,6 +269,11 @@ export function freeSeatOf(room: Room): number {
   if (taken >= budget) return -1;
 
   for (let i = 0; i < DND_BOSS_SEAT; i++) if (!room.seats[i]) return i;
+
+  // 四個冒險者位滿了，但房間還容得下人 —— 剩下的那一個位置只可能是魔王。
+  // 不這樣接的話，第 5 個人會被推去觀戰，而認領魔王又要求「已經入座」，
+  // 於是五人房永遠湊不出魔王。
+  if (room.maxPlayers > DND_BOSS_SEAT && !room.seats[DND_BOSS_SEAT]) return DND_BOSS_SEAT;
   return -1;
 }
 
@@ -277,7 +282,9 @@ export function seatPlayer(room: Room, member: Member): number | null {
   const seat = freeSeatOf(room);
   if (seat === -1) return null;
   room.seats[seat] = member.playerId;
-  room.players.set(member.playerId, { ...member, ready: false });
+  // 坐上魔王位就是魔王 —— 一間房只有 4 個冒險者位，第 5 個人只能當魔王
+  const dndRole: DndRole = room.gameType === 'dnd' && seat === DND_BOSS_SEAT ? 'boss' : member.dndRole;
+  room.players.set(member.playerId, { ...member, dndRole, ready: false });
   // 第一次入座才發籌碼；回鍋的人接回原本的堆疊
   if (room.gameType === 'holdem' && !room.chips.has(member.playerId)) {
     room.chips.set(member.playerId, HOLDEM_START_CHIPS);
@@ -858,6 +865,9 @@ function buildDndGameView(room: Room, game: DndState): DndGameView {
     villagersRescued: game.villagersRescued,
     villagersLost: game.villagersLost,
     roundCount: game.roundCount,
+    fx: game.fx,
+    altarsTotal: altarsTotalOf(game),
+    altarsDestroyed: game.altarsDestroyed,
     npcControllerId: game.npcController,
     phase: game.phase,
     actedMonsterIds: [...game.monsterActed],
