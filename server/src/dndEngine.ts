@@ -54,6 +54,10 @@ export interface DndState {
   altarsDestroyed: number;
   /** B6：場上那隻虛空酋長的 id；null 代表現在沒有。用來偵測牠被打死了沒。 */
   gateChiefId: string | null;
+  /** 被術士【放逐】的怪物：離場中，時間到會回到原本的格子。 */
+  banishedMonsters: Array<{ piece: DndPiece; r: number; c: number; turns: number }>;
+  /** 術士【嗜魔鬥志】：還剩幾輪，隨從的傷害會被放大。 */
+  allyRage: number;
 }
 
 /** 記一筆技能特效。同一個棋子同一種特效只記一次，避免連續觸發時圖示疊在一起。 */
@@ -121,7 +125,7 @@ export const CLASS_STATS: Record<DndClassId, { name: string; hp: number; ac: num
   gladiator: { name: 'Gladiator (鬥士)', hp: 30, ac: 12, attackBonus: 4, dmgDice: 10, dmgFlat: 2, description: '血厚甲薄的前線輸出。【野蠻衝撞】：衝到 5 格內的目標身旁，造成 5 傷害並暈眩 1 回合。【嗜血】：命中時各 1/2 機率致命斬殺（傷害 ×1.2）或旋風（周圍 8 格各吃半刀） (移動3格)' },
   archer: { name: 'Archer (弓手)', hp: 18, ac: 12, attackBonus: 6, dmgDice: 8, dmgFlat: 2, description: '射程 5 格的後排輸出。【狙擊】：對全場任一隻怪造成 5 傷害。【獵殺】：命中與否都各 1/2 機率放血（3 回合每回合 -1）或穿刺（射中時才會貫穿到目標正後方的怪） (移動3格)' },
   bard: { name: 'Bard (吟遊詩人)', hp: 18, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 3, description: '全隊的增益核心。【進擊之歌】：一回合內全隊傷害 +40%（冷卻 2 回合）。【即興吟唱】：出手時各 1/3 機率讓全隊 AC +3、命中 +2，或全體回 1 點 HP (移動3格)' },
-  summoner: { name: 'Summoner (召喚術士)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '把敵人變成戰力的術士。【魔物召喚】：召出 2 隻替你作戰的哥布林。【墮落低語】：出手時 1/5 機率在目標體內種下惡魔之卵（5 回合後必死）、1/5 機率把牠洗腦成隊友 (移動2格)' },
+  summoner: { name: 'Summoner (召喚術士)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '把敵人變成戰力的術士，攻擊距離 2 格。【魔物召喚】：召出 2 隻替你作戰的哥布林。【墮落低語】：出手時各 1/3 機率洗腦目標、把牠放逐出場 2 回合，或讓隨從這一輪傷害 +30% (移動2格)' },
 };
 
 /**
@@ -1219,6 +1223,11 @@ const SUMMON_BASE_CAP = 2;
 const SUMMON_PER_LEVEL = 2;
 /** 【惡魔之卵】幾回合後必死。 */
 const DOOM_TURNS = 5;
+/** 【放逐】把怪物丟出場外幾回合。 */
+const MONSTER_BANISH_TURNS = 2;
+/** 【嗜魔鬥志】：隨從的傷害提升幾成、持續幾輪。 */
+const ALLY_RAGE_RATIO = 0.3;
+const ALLY_RAGE_TURNS = 1;
 /** 洗腦無效的怪：頭目、薩滿、英雄、巨魔。 */
 function immuneToCharm(piece: DndPiece): boolean {
   if (piece.id.startsWith('boss-')) return true;
@@ -1258,26 +1267,15 @@ function summonRosterOf(state: DndState, seat: number): { cap: number; roster: M
 function summonerPassive(
   state: DndState,
   target: DndPiece,
+  tr: number,
+  tc: number,
   rng: () => number,
 ): LogEvent[] {
   const events: LogEvent[] = [];
-  const roll = Math.floor(rng() * 5);
+  const roll = Math.floor(rng() * 3);
 
+  // 【洗腦】把牠拉到我方
   if (roll === 0) {
-    if (target.id.startsWith('boss-')) {
-      events.push({ t: 'dndMessage', message: `🥚 惡魔之卵在 ${target.name} 體內化成了灰 —— 頭目的軀殼容不下它。` } as any);
-      return events;
-    }
-    target.doomTurns = DOOM_TURNS;
-    pushFx(state, target.id, 'doom');
-    events.push({
-      t: 'dndMessage',
-      message: `🥚 一顆【惡魔之卵】鑽進了 ${target.name} 體內 —— ${DOOM_TURNS} 回合之後牠必死無疑。`,
-    } as any);
-    return events;
-  }
-
-  if (roll === 1) {
     if (immuneToCharm(target)) {
       events.push({ t: 'dndMessage', message: `💢 低語滑過 ${target.name} 的耳邊 —— 牠的意志硬得撬不開。` } as any);
       return events;
@@ -1290,6 +1288,57 @@ function summonerPassive(
     return events;
   }
 
+  // 【放逐】把牠丟出這個世界幾回合。跟虛空酋長對玩家做的是同一件事，
+  // 所以也照同一套規矩：離場、記住原本站的格子、時間到回來。
+  if (roll === 1) {
+    if (target.id.startsWith('boss-')) {
+      events.push({ t: 'dndMessage', message: `🌌 裂隙咬不動 ${target.name} —— 頭目的份量撐開了它。` } as any);
+      return events;
+    }
+    const cell = state.board[tr]?.[tc];
+    if (cell && cell.piece?.id === target.id) cell.piece = null;
+    state.banishedMonsters.push({ piece: target, r: tr, c: tc, turns: MONSTER_BANISH_TURNS });
+    pushFx(state, target.id, 'banish');
+    events.push({
+      t: 'dndMessage',
+      message: `🌌 術士撕開一道裂隙，${target.name} 被吞了進去 —— ${MONSTER_BANISH_TURNS} 回合後才會被吐回來。`,
+    } as any);
+    return events;
+  }
+
+  // 【嗜魔鬥志】讓場上的隨從這一輪打得更兇
+  state.allyRage = ALLY_RAGE_TURNS;
+  events.push({
+    t: 'dndMessage',
+    message: `🔺 術士低聲下令【嗜魔鬥志】—— 這一輪隨從的傷害提高 ${Math.round(ALLY_RAGE_RATIO * 100)}%！`,
+  } as any);
+  return events;
+}
+
+/** 被放逐的怪物每輪倒數，時間到就回到原本的格子（被佔走就找中央附近的空位）。 */
+function tickBanishedMonsters(state: DndState): LogEvent[] {
+  const events: LogEvent[] = [];
+  const staying: typeof state.banishedMonsters = [];
+
+  for (const entry of state.banishedMonsters) {
+    entry.turns--;
+    if (entry.turns > 0) {
+      staying.push(entry);
+      continue;
+    }
+    const home = state.board[entry.r]?.[entry.c];
+    const cell = home && home.piece === null ? home : findEmptyCellNearCenter(state);
+    if (!cell) {
+      // 整張棋盤都滿了：留著下一輪再試，總比讓牠人間蒸發好
+      entry.turns = 1;
+      staying.push(entry);
+      continue;
+    }
+    cell.piece = entry.piece;
+    events.push({ t: 'dndMessage', message: `🌌 裂隙把 ${entry.piece.name} 吐了回來！` } as any);
+  }
+
+  state.banishedMonsters = staying;
   return events;
 }
 
@@ -1356,7 +1405,9 @@ function runAlliesTurn(seats: Seats, state: DndState, rng: () => number): LogEve
       const roll = Math.floor(rng() * 20) + 1;
       const bonus = located.piece.attackBonus ?? 2;
       if (roll + bonus >= target.piece.ac) {
-        const dmg = Math.floor(rng() * (located.piece.dmgDice ?? 6)) + 1;
+        let dmg = Math.floor(rng() * (located.piece.dmgDice ?? 6)) + 1;
+        // 【嗜魔鬥志】：術士下令的那一輪，隨從打得更兇
+        if (state.allyRage > 0) dmg = Math.max(1, Math.round(dmg * (1 + ALLY_RAGE_RATIO)));
         target.piece.hp = Math.max(0, target.piece.hp - dmg);
         events.push({
           t: 'dndAttack', player: located.piece.name, target: target.piece.name, roll, hit: true, damage: dmg,
@@ -2595,6 +2646,8 @@ export function dealDnd(
     fx: [],
     altarsDestroyed: 0,
     gateChiefId: null,
+    banishedMonsters: [],
+    allyRage: 0,
   };
 
   spawnTraps(state, 8, rng);
@@ -2646,6 +2699,7 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
   state.roundCount++;
   events.push(...bleedMonsters(seats, state));
   events.push(...tickDoom(seats, state));
+  events.push(...tickBanishedMonsters(state));
   if (state.level === ESCORT_LEVEL) {
     events.push(...escortReinforcements(state, rng));
   }
@@ -2761,6 +2815,9 @@ function endRound(seats: Seats, state: DndState, rng: () => number, events: LogE
       }
     }
   }
+
+  // 隨從的鬥志只撐這一輪，等牠們動完才遞減
+  if (state.allyRage > 0) state.allyRage--;
 
   // 減益要撐過怪物回合才遞減，這樣【削弱】才會真的作用在牠那次攻擊上
   tickMonsterDebuffs(state);
@@ -3299,7 +3356,7 @@ export function applyDndAction(
       } else if (classId === 'bard') {
         events.push(...bardPassive(seats, state, playerPiece, activeSeat, rng));
       } else if (classId === 'summoner') {
-        events.push(...summonerPassive(state, tNow.piece, rng));
+        events.push(...summonerPassive(state, tNow.piece, tNow.r, tNow.c, rng));
       } else if (classId === 'bubble') {
         events.push(...roguePassive(state, playerPiece, targetPiece, rng));
       } else if (classId === 'tangerine') {

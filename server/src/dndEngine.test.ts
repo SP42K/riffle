@@ -2995,6 +2995,7 @@ describe('D&D Game Engine', () => {
       expect(DND_CLASS_RANGE[id]).toBeGreaterThan(0);
     }
     expect(DND_CLASS_RANGE.archer).toBe(5);
+    expect(DND_CLASS_RANGE.summoner).toBe(2); // 術士是遠距離，不是近戰
     expect(DND_CLASS_MOVE.gladiator).toBe(3);
   });
 
@@ -3538,33 +3539,43 @@ describe('D&D Game Engine', () => {
     if (!hit.ok) expect(hit.error).toBe('TARGET_NOT_FOUND');
   });
 
-  it('should plant a demon egg that kills after five rounds', () => {
+  it('should banish a monster out of the fight for two rounds', () => {
     const { seats, state } = soloTable('summoner', { tanky: true });
-    state.board[8][7].piece = { id: 'm-egg', type: 'goblin', name: 'Egg', hp: 999, maxHp: 999, ac: 99 };
+    state.board[8][7].piece = { id: 'm-gone', type: 'goblin', name: 'Gone', hp: 999, maxHp: 999, ac: 99 };
 
-    // rng 0.01 → 五選一的第一個（惡魔之卵）
-    const cast = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-egg' }, () => 0.01);
+    // rng 0.4 → 三選一的第二個（放逐）
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-gone' }, () => 0.4);
     expect(cast.ok).toBe(true);
-    const egg = findPiece(state, (p) => p.id === 'm-egg');
-    expect(egg.piece.doomTurns).toBeGreaterThan(0);
+    expect(findPiece(state, (p) => p.id === 'm-gone')).toBeNull(); // 離場了
+    expect(state.banishedMonsters.length).toBe(1);
 
-    // 撐到時間就當場死
-    for (let i = 0; i < 6; i++) {
-      if (!findPiece(state, (p) => p.id === 'm-egg')) break;
-      applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
-    }
-    expect(findPiece(state, (p) => p.id === 'm-egg')).toBeNull();
+    // 兩輪之後回到原本的格子
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    const back = findPiece(state, (p) => p.id === 'm-gone');
+    expect(back).not.toBeNull();
+    expect(back.r).toBe(8);
+    expect(back.c).toBe(7);
+    expect(state.banishedMonsters.length).toBe(0);
   });
 
-  it('should not plant a demon egg in a boss', () => {
+  it('should not banish a boss', () => {
     const { seats, state } = soloTable('summoner', { tanky: true });
-    state.board[8][7].piece = {
-      id: 'boss-1', type: 'goblin', name: 'Boss', hp: 999, maxHp: 999, ac: 99,
-    };
+    state.board[8][7].piece = { id: 'boss-1', type: 'goblin', name: 'Boss', hp: 999, maxHp: 999, ac: 99 };
 
-    const cast = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'boss-1' }, () => 0.01);
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'boss-1' }, () => 0.4);
     expect(cast.ok).toBe(true);
-    expect(findPiece(state, (p) => p.id === 'boss-1').piece.doomTurns).toBeFalsy();
+    expect(findPiece(state, (p) => p.id === 'boss-1')).not.toBeNull();
+    expect(state.banishedMonsters.length).toBe(0);
+  });
+
+  it('should let the rage order make minions hit harder', () => {
+    const { seats, state } = soloTable('summoner', { tanky: true });
+    state.board[8][7].piece = { id: 'm-t', type: 'goblin', name: 'T', hp: 999, maxHp: 999, ac: 99 };
+
+    // rng 0.9 → 三選一的第三個（嗜魔鬥志）
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-t' }, () => 0.9);
+    expect(cast.ok).toBe(true);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('嗜魔鬥志'))).toBe(true);
   });
 
   it('should charm an ordinary monster onto the party side', () => {

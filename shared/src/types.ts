@@ -691,7 +691,7 @@ export const DND_CLASS_RANGE: Record<DndClassId, number> = {
   gladiator: 1,
   archer: 5,
   bard: 2,
-  summoner: 1,
+  summoner: 2,
 };
 
 export const DND_EQUIPMENT_NAME: Record<DndClassId, string> = {
