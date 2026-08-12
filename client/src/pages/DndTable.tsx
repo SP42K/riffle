@@ -27,7 +27,7 @@ const DND_FX_ICON: Record<DndFxKind, string> = {
   swap: '🌀', possess: '👁️', stealth: '🌫️',
   corrupt: '🕳️', altarBreak: '💥', empower: '⬆️',
   execute: '🩸', whirlwind: '🌀', bleed: '💧', pierce: '➶', snipe: '🎯', decoy: '👥',
-  song: '🎵', charm: '💞', doom: '🥚',
+  song: '🎵', charm: '💞', rage: '🔺', doom: '🥚',
 };
 
 const DND_FX_LABEL: Record<DndFxKind, string> = {
@@ -38,7 +38,7 @@ const DND_FX_LABEL: Record<DndFxKind, string> = {
   swap: '錯位', possess: '奪舍', stealth: '匿蹤',
   corrupt: '聖物腐化', altarBreak: '祭壇碎裂', empower: '強化',
   execute: '致命斬殺', whirlwind: '旋風', bleed: '放血', pierce: '穿刺', snipe: '狙擊', decoy: '殘影',
-  song: '吟唱', charm: '洗腦', doom: '惡魔之卵',
+  song: '吟唱', charm: '洗腦', rage: '嗜魔鬥志', doom: '惡魔之卵',
 };
 import { PixelSprite, spriteFor, LEVEL_DECOR, type SpriteKey } from './dndSprites';
 import { DndGuide, DND_CLASS_LINE } from './DndGuide';
@@ -365,6 +365,22 @@ export function DndRoom({ room }: { room: RoomView }) {
     socket.emit('room:chat', { text: chatInput });
     setChatInput('');
   };
+
+  /**
+   * 戰報拆成兩欄：右邊只留「誰打了誰、幾點」，左邊放技能與被動的敘述。
+   * 混在一起時傷害會被大量的技能訊息沖掉，反過來也一樣。
+   *
+   * 依事件型別分：dndAttack 是傷害交換，dndMessage 是所有技能／被動／狀態的敘述。
+   * 其餘（換層、開場、結束…）留在右欄，它們是整局的節點，不該被埋進技能紀錄裡。
+   */
+  const damageLog = useMemo(
+    () => room.log.filter((item) => item.t !== 'dndMessage'),
+    [room.log],
+  );
+  const skillLog = useMemo(
+    () => room.log.filter((item) => item.t === 'dndMessage'),
+    [room.log],
+  );
 
   // 剛剛那一次行動發動了哪些技能 —— 在對應的棋子頭上冒圖示
   const fxAt = useMemo(() => {
@@ -836,6 +852,25 @@ export function DndRoom({ room }: { room: RoomView }) {
                   })}
                 </div>
 
+                {playing && skillLog.length > 0 && (
+                  <div className="dnd-latest-log dnd-skill-log">
+                    <div className="dnd-latest-log__title">✨ 技能與被動</div>
+                    <div className="dnd-latest-log__scroll">
+                      {skillLog.map((_, idx) => {
+                        const logIdx = skillLog.length - 1 - idx;
+                        return (
+                          <div
+                            key={logIdx}
+                            className={`dnd-latest-log__line${idx === 0 ? ' dnd-latest-log__line--newest' : ''}`}
+                          >
+                            {skin.formatLog(skillLog[logIdx]!)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {lastAttackEvent && (
                   <div className="dnd-dice-sidebar-card" style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '1rem', borderRadius: 'var(--radius)', border: '1px solid var(--line)', textAlign: 'center' }}>
                     <h4 style={{ margin: '0 0 0.8rem 0', fontSize: '0.85rem', color: 'var(--gold)' }}>🎲 最後戰役判定</h4>
@@ -1044,9 +1079,9 @@ export function DndRoom({ room }: { room: RoomView }) {
           )}
 
           {/* 3. 行動面板下方的即時戰報：最新的一直在最上面，舊的往下堆，整塊自己捲 */}
-          {playing && game && room.log.length > 0 && (
+          {playing && game && damageLog.length > 0 && (
             <div className="dnd-latest-log">
-              <div className="dnd-latest-log__title">{t('dnd.logTitle')}</div>
+              <div className="dnd-latest-log__title">⚔️ 戰鬥紀錄</div>
               <div className="dnd-latest-log__scroll">
                 {/*
                   戰報一律交給外觀的 formatLog。自己寫一份 if-chain 的話，沒列到的事件
@@ -1056,14 +1091,14 @@ export function DndRoom({ room }: { room: RoomView }) {
                   倒著跑而不是先 reverse() —— room.log 是共用的快照陣列，
                   reverse() 會就地改動它，聊天室那邊的順序會跟著壞掉。
                 */}
-                {room.log.map((_, idx) => {
-                  const logIdx = room.log.length - 1 - idx;
+                {damageLog.map((_, idx) => {
+                  const logIdx = damageLog.length - 1 - idx;
                   return (
                     <div
                       key={logIdx}
                       className={`dnd-latest-log__line${idx === 0 ? ' dnd-latest-log__line--newest' : ''}`}
                     >
-                      {skin.formatLog(room.log[logIdx]!)}
+                      {skin.formatLog(damageLog[logIdx]!)}
                     </div>
                   );
                 })}

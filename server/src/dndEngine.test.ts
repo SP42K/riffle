@@ -3568,7 +3568,27 @@ describe('D&D Game Engine', () => {
     expect(state.banishedMonsters.length).toBe(0);
   });
 
-  it('should let the rage order make minions hit harder', () => {
+  it('should let the rage order raise both minion accuracy and damage', () => {
+    // 同一組亂數跑兩次：一次有鬥志、一次沒有。命中門檻卡在中間，
+    // 有鬥志才打得中 —— 這樣同時驗到命中與傷害兩邊都吃到加成。
+    const runOnce = (rage) => {
+      const { seats, state } = soloTable('summoner', { tanky: true });
+      state.board[8][8].piece = {
+        id: 'ally-1', type: 'goblin', name: '隨從', hp: 20, maxHp: 20, ac: 11,
+        ally: true, speed: 2, range: 1, attackBonus: 10, dmgDice: 6,
+      };
+      // AC 14：命中骰 3 + 加值 10 = 13 打不中；鬥志把加值拉到 13 就打得中
+      state.board[8][9].piece = { id: 'm-foe', type: 'goblin', name: 'Foe', hp: 99, maxHp: 99, ac: 14 };
+      if (rage) state.allyRage = 1;
+      applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.1);
+      return 99 - findPiece(state, (p) => p.id === 'm-foe').piece.hp;
+    };
+
+    expect(runOnce(false)).toBe(0);
+    expect(runOnce(true)).toBeGreaterThan(0);
+  });
+
+  it('should let the rage order fire from the passive', () => {
     const { seats, state } = soloTable('summoner', { tanky: true });
     state.board[8][7].piece = { id: 'm-t', type: 'goblin', name: 'T', hp: 999, maxHp: 999, ac: 99 };
 

@@ -788,6 +788,7 @@ export type DndFxKind =
   | 'empower'    // 打倒酋長的強化
   | 'song'       // 吟遊詩人的歌
   | 'charm'      // 洗腦
+  | 'rage'       // 嗜魔鬥志
   | 'doom'       // 惡魔之卵
   | 'execute'    // 鬥士致命斬殺
   | 'whirlwind'  // 鬥士旋風

@@ -1756,6 +1756,18 @@ svg.pixel-sprite {
   color: var(--gold);
 }
 
+/* 左欄的技能紀錄：跟右欄的戰鬥紀錄同一套外觀，只是矮一點、字級小一點 */
+.dnd-skill-log {
+  margin-top: 0.8rem;
+}
+.dnd-skill-log .dnd-latest-log__scroll {
+  max-height: 180px;
+}
+.dnd-skill-log .dnd-latest-log__line {
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
 /* 層間分鏡與終章：蓋在整個畫面上的讀本框 */
 .dnd-story {
   position: fixed;

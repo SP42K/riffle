@@ -125,7 +125,7 @@ export const CLASS_STATS: Record<DndClassId, { name: string; hp: number; ac: num
   gladiator: { name: 'Gladiator (鬥士)', hp: 30, ac: 12, attackBonus: 4, dmgDice: 10, dmgFlat: 2, description: '血厚甲薄的前線輸出。【野蠻衝撞】：衝到 5 格內的目標身旁，造成 5 傷害並暈眩 1 回合。【嗜血】：命中時各 1/2 機率致命斬殺（傷害 ×1.2）或旋風（周圍 8 格各吃半刀） (移動3格)' },
   archer: { name: 'Archer (弓手)', hp: 18, ac: 12, attackBonus: 6, dmgDice: 8, dmgFlat: 2, description: '射程 5 格的後排輸出。【狙擊】：對全場任一隻怪造成 5 傷害。【獵殺】：命中與否都各 1/2 機率放血（3 回合每回合 -1）或穿刺（射中時才會貫穿到目標正後方的怪） (移動3格)' },
   bard: { name: 'Bard (吟遊詩人)', hp: 18, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 3, description: '全隊的增益核心。【進擊之歌】：一回合內全隊傷害 +40%（冷卻 2 回合）。【即興吟唱】：出手時各 1/3 機率讓全隊 AC +3、命中 +2，或全體回 1 點 HP (移動3格)' },
-  summoner: { name: 'Summoner (召喚術士)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '把敵人變成戰力的術士，攻擊距離 2 格。【魔物召喚】：召出 2 隻替你作戰的哥布林。【墮落低語】：出手時各 1/3 機率洗腦目標、把牠放逐出場 2 回合，或讓隨從這一輪傷害 +30% (移動2格)' },
+  summoner: { name: 'Summoner (召喚術士)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '把敵人變成戰力的術士，攻擊距離 2 格。【魔物召喚】：召出 2 隻替你作戰的哥布林。【墮落低語】：出手時各 1/3 機率洗腦目標、把牠放逐出場 2 回合，或讓隨從這一輪攻擊力與命中率各 +30% (移動2格)' },
 };
 
 /**
@@ -1225,7 +1225,7 @@ const SUMMON_PER_LEVEL = 2;
 const DOOM_TURNS = 5;
 /** 【放逐】把怪物丟出場外幾回合。 */
 const MONSTER_BANISH_TURNS = 2;
-/** 【嗜魔鬥志】：隨從的傷害提升幾成、持續幾輪。 */
+/** 【嗜魔鬥志】：隨從的命中與傷害各提升幾成、持續幾輪。 */
 const ALLY_RAGE_RATIO = 0.3;
 const ALLY_RAGE_TURNS = 1;
 /** 洗腦無效的怪：頭目、薩滿、英雄、巨魔。 */
@@ -1306,11 +1306,19 @@ function summonerPassive(
     return events;
   }
 
-  // 【嗜魔鬥志】讓場上的隨從這一輪打得更兇
+  // 【嗜魔鬥志】讓場上的隨從這一輪打得更兇。
+  // 圖示掛在每一隻隨從身上 —— 三個結果裡只有這個沒有位移也沒有換邊，
+  // 不在棋盤上留下痕跡的話，玩家會以為自己從來沒抽到它。
   state.allyRage = ALLY_RAGE_TURNS;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const piece = state.board[r]?.[c]?.piece;
+      if (isAlly(piece)) pushFx(state, piece!.id, 'rage');
+    }
+  }
   events.push({
     t: 'dndMessage',
-    message: `🔺 術士低聲下令【嗜魔鬥志】—— 這一輪隨從的傷害提高 ${Math.round(ALLY_RAGE_RATIO * 100)}%！`,
+    message: `🔺 術士低聲下令【嗜魔鬥志】—— 這一輪隨從的攻擊力與命中率各提高 ${Math.round(ALLY_RAGE_RATIO * 100)}%！`,
   } as any);
   return events;
 }
@@ -1403,11 +1411,13 @@ function runAlliesTurn(seats: Seats, state: DndState, rng: () => number): LogEve
     const range = located.piece.range ?? 1;
     if (best <= range) {
       const roll = Math.floor(rng() * 20) + 1;
-      const bonus = located.piece.attackBonus ?? 2;
+      // 【嗜魔鬥志】：術士下令的那一輪，隨從的命中與傷害同時放大
+      const raging = state.allyRage > 0;
+      const base = located.piece.attackBonus ?? 2;
+      const bonus = raging ? Math.round(base * (1 + ALLY_RAGE_RATIO)) : base;
       if (roll + bonus >= target.piece.ac) {
         let dmg = Math.floor(rng() * (located.piece.dmgDice ?? 6)) + 1;
-        // 【嗜魔鬥志】：術士下令的那一輪，隨從打得更兇
-        if (state.allyRage > 0) dmg = Math.max(1, Math.round(dmg * (1 + ALLY_RAGE_RATIO)));
+        if (raging) dmg = Math.max(1, Math.round(dmg * (1 + ALLY_RAGE_RATIO)));
         target.piece.hp = Math.max(0, target.piece.hp - dmg);
         events.push({
           t: 'dndAttack', player: located.piece.name, target: target.piece.name, roll, hit: true, damage: dmg,
