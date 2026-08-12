@@ -586,6 +586,8 @@ const ERRORS: Skin['errors'] = {
   MONSTER_ALREADY_ACTED: 'process already ran this pass',
   MONSTER_ALREADY_MOVED: 'process already moved this pass — exec only',
   MONSTER_RESTRAINED: 'process pinned to its slot for a few passes — exec only',
+  PLAYER_RESTRAINED: 'you are pinned to your slot for a few passes — exec only',
+  TARGET_INVULNERABLE: 'target shielded by replicas — kill the replicas first',
 };
 
 /** 偽裝成終端機：等寬字、深色、牌變成短代號。 */
