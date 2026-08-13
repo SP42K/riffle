@@ -142,6 +142,14 @@ export function SkinSettings() {
               onChange={(event) => setPrefs({ swapTitle: event.target.checked })}
             />
           </label>
+          <label className="skin-settings__row">
+            <span>輪到我時震動（行動裝置）</span>
+            <input
+              type="checkbox"
+              checked={prefs.vibrateOnTurn}
+              onChange={(event) => setPrefs({ vibrateOnTurn: event.target.checked })}
+            />
+          </label>
           <p className="muted">
             提醒：暱稱、房名與聊天內容是你自己打的字，外觀換不掉，取名時避開會露餡的詞。
           </p>

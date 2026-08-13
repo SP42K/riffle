@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   BIG_TWO_RULE_KEYS,
   MONOPOLY_OPTION_KEYS,
@@ -33,7 +33,7 @@ interface Props {
  */
 export function RoomShell({ room, center, footer, isMyTurn, showLog = true }: Props) {
   const { roomMessages, run } = useGame();
-  const { skin, t } = useSkin();
+  const { skin, t, prefs } = useSkin();
   const game = room.game;
   const me = room.me;
   const isSpectator = me.mode === 'spectate';
@@ -49,6 +49,20 @@ export function RoomShell({ room, center, footer, isMyTurn, showLog = true }: Pr
     if (chatOpen) setSeenCount(roomMessages.length);
   }, [chatOpen, roomMessages.length]);
   const unread = Math.max(0, roomMessages.length - seenCount);
+
+  // 輪到自己時震一下：手機螢幕關著或在看別的 App 時，這是唯一叫得動人的提示。
+  // 只認 false→true 那一次，同一個回合裡重畫幾次都不會再震；
+  // 初值直接抓進場當下的狀態，重新連線接回牌桌時不會莫名震一下。
+  const wasMyTurn = useRef(Boolean(isMyTurn));
+  useEffect(() => {
+    const mine = Boolean(isMyTurn);
+    const changed = mine && !wasMyTurn.current;
+    wasMyTurn.current = mine;
+    if (!changed) return;
+    if (!prefs.vibrateOnTurn) return;
+    if (typeof navigator === 'undefined' || !('vibrate' in navigator)) return;
+    navigator.vibrate(200);
+  }, [isMyTurn, prefs.vibrateOnTurn]);
 
   const others = room.seats.filter((seat) => seat.playerId !== me.playerId);
   const rules = room.bigTwoRules;
