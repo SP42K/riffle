@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LogEvent } from 'shared';
+import type { TextKey } from '../skins/text';
 
 /** 碰／吃／槓／自摸／胡／放槍，2 秒後自動消失。 */
 const BANNER_MS = 2_000;
 
 export type MahjongBannerKind = 'chi' | 'peng' | 'gang' | 'selfDraw' | 'win' | 'shoot';
 
+/** 大字提示是滿版蓋在座位上的，字面一定要走 skin，不能寫死中文。 */
+export const MAHJONG_BANNER_TEXT_KEY: Record<MahjongBannerKind, TextKey> = {
+  chi: 'mahjong.bannerChi',
+  peng: 'mahjong.bannerPeng',
+  gang: 'mahjong.bannerGang',
+  selfDraw: 'mahjong.bannerSelfDraw',
+  win: 'mahjong.bannerWin',
+  shoot: 'mahjong.bannerShoot',
+};
+
 export interface MahjongActionBanner {
   kind: MahjongBannerKind;
-  text: string;
 }
 
 /**
@@ -47,16 +57,11 @@ export function useMahjongActionBanner(
     for (const event of freshEvents) {
       let next: MahjongActionBanner | null = null;
       if (event.t === 'mahjongMeld' && event.player === nickname) {
-        next =
-          event.kind === 'chi'
-            ? { kind: 'chi', text: '吃！' }
-            : event.kind === 'peng'
-              ? { kind: 'peng', text: '碰！' }
-              : { kind: 'gang', text: '槓！' };
+        next = { kind: event.kind === 'chi' ? 'chi' : event.kind === 'peng' ? 'peng' : 'gang' };
       } else if (event.t === 'mahjongWin' && event.player === nickname) {
-        next = event.winType === 'selfDraw' ? { kind: 'selfDraw', text: '自摸！' } : { kind: 'win', text: '胡！' };
+        next = { kind: event.winType === 'selfDraw' ? 'selfDraw' : 'win' };
       } else if (event.t === 'mahjongWin' && event.from === nickname) {
-        next = { kind: 'shoot', text: '放槍！' };
+        next = { kind: 'shoot' };
       }
       if (next) {
         if (clearTimer.current !== null) window.clearTimeout(clearTimer.current);

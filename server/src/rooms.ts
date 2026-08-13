@@ -422,7 +422,11 @@ export function removeMember(room: Room, playerId: PlayerId): void {
   room.spectators.delete(playerId);
 
   if (room.hostId === playerId) {
-    const nextHost = room.seats.find((id): id is PlayerId => id !== null);
+    // 電腦玩家也在 seats 裡，直接 find 會把房主交給電腦——那之後就沒有人能開局／處理加入申請了，
+    // 所以優先挑真人，真的只剩電腦才退回原本的行為（這種房間馬上就會被 isEmpty 回收）。
+    const nextHost =
+      room.seats.find((id): id is PlayerId => id !== null && !room.players.get(id)?.isNpc) ??
+      room.seats.find((id): id is PlayerId => id !== null);
     if (nextHost) room.hostId = nextHost;
   }
 }

@@ -12,6 +12,8 @@
   --snake-seat-1: #4ea9e0;
   --snake-seat-2: #e0794e;
   --snake-seat-3: #c14ee0;
+  --snake-seat-4: #e0d24e;
+  --snake-seat-5: #4ee0d2;
 }
 
 * {
@@ -1621,6 +1623,12 @@ select:focus {
 .snake-cell--seat3 {
   color: var(--snake-seat-3);
 }
+.snake-cell--seat4 {
+  color: var(--snake-seat-4);
+}
+.snake-cell--seat5 {
+  color: var(--snake-seat-5);
+}
 
 .snake-color-dot {
   display: inline-block;
@@ -1641,6 +1649,12 @@ select:focus {
 }
 .snake-color-dot--seat3 {
   background: var(--snake-seat-3);
+}
+.snake-color-dot--seat4 {
+  background: var(--snake-seat-4);
+}
+.snake-color-dot--seat5 {
+  background: var(--snake-seat-5);
 }
 
 /* 道具點：跟果實/地雷的顏色明顯不同，用金屬感的青色標出來 */

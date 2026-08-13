@@ -903,7 +903,9 @@ export class GameServer {
     }
 
     room.log = [];
-    for (const player of room.players.values()) player.ready = false;
+    // 電腦座位永遠算準備好：跟著清成 false 的話，第二場的 canStart 會永遠不成立，
+    // 而麻將打完之後 footer 也不會再出現準備按鈕，房間就卡死在結算畫面。
+    for (const player of room.players.values()) player.ready = player.isNpc === true;
 
     switch (room.gameType) {
       case 'bigTwo': {
@@ -1926,6 +1928,11 @@ export class GameServer {
   ): void {
     const session = this.sessions.get(socket.id);
     if (!session) return reply(ack, { ok: false, error: { code: 'BAD_SESSION', message: '請先連線' } });
+    // 這條路徑是手工複製 onJoinRoom 的入座步驟，中間沒有 leaveCurrentRoom；人還在別的房間裡就先擋掉，
+    // 不然房主接受之後，舊房間會留下一個永遠清不掉的幽靈座位（playerRoom 已經指向新房間）。
+    if (session.roomId) {
+      return reply(ack, { ok: false, error: { code: 'ALREADY_IN_ROOM', message: '你已經在房間裡了' } });
+    }
 
     const roomId = cleanText(payload?.roomId, 16).toUpperCase();
     const room = this.rooms.get(roomId);
@@ -2039,6 +2046,12 @@ export class GameServer {
   }
 
   private runMahjongNpcAction(room: Room, state: MahjongState): void {
+    // 排程之後座位可能已經被真人頂替（room:respondJoinRequest），不再是電腦就什麼都別做——
+    // 不然這個 timer 會用那位真人的 playerId 幫他打牌。
+    const actingSeat = state.phase === 'reaction' ? (state.reaction?.respondSeat ?? -1) : state.turnSeat;
+    const actingId = room.seats[actingSeat];
+    if (!actingId || !room.players.get(actingId)?.isNpc) return;
+
     const context = {
       allDiscards: state.players.map((p) => p.discards),
       allMeldsPublic: state.players.map((p, seat) => ({ seat, melds: p.melds })),
@@ -2051,9 +2064,12 @@ export class GameServer {
       const playerId = room.seats[seat];
       const player = state.players[seat];
       if (playerId && player) {
+        // 打出最後一張牌會直接流局，結算戰報跟另外兩個分支一樣要補
+        const before = state.roundResult;
         const tile = aiChooseDiscard(player, context);
         const result = discardTile(room.seats, state, playerId, tile);
         if (result.ok) pushLog(room, { t: 'mahjongDiscard', player: nicknameOf(room, playerId), tile });
+        this.logMahjongRoundEnd(room, state, before);
       }
     } else if (state.phase === 'selfDraw' && state.selfDraw) {
       const seat = state.turnSeat;

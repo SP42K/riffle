@@ -70,6 +70,17 @@ describe('discardTile', () => {
     // 出完牌後不是還在原座位的出牌階段，就是進了反應／自摸階段
     expect(state.turnSeat === before && state.phase === 'discard').toBe(false);
   });
+
+  it('clears justDrawn for the seat that discarded, so the client never shows a tile already thrown', () => {
+    const state = startMahjong(SEATS);
+    const seat = state.turnSeat;
+    expect(state.justDrawn?.seat).toBe(seat);
+    const tile = state.justDrawn!.tile;
+    expect(discardTile(SEATS, state, SEATS[seat]!, tile).ok).toBe(true);
+    // 沒人反應時下一家會馬上摸牌換掉 justDrawn；有人被問吃碰槓胡時則必須是 null，
+    // 兩種情況都不可以還停在剛剛那位出牌者身上
+    expect(state.justDrawn?.seat === seat).toBe(false);
+  });
 });
 
 
@@ -114,6 +125,39 @@ describe('claimedDiscards', () => {
       concealed: false,
       from: seat,
     });
+  });
+});
+
+describe('反應順位', () => {
+  it('前面順位的人過了以後，還是要問後面想吃的人，不能直接輪下一家', () => {
+    const state = startMahjong(SEATS);
+    const seat = state.turnSeat;
+    const chiSeat = (seat + 1) % 4; // 只有下家能吃
+    const pengSeat = (seat + 2) % 4; // 對家能碰，順位比吃高，會先被問
+    const tile = '5s';
+    // 除了要碰的那家，其他人手上都不能有這張，不然會多冒出一個碰的候選人打亂順位
+    for (const s of [seat, chiSeat, (seat + 3) % 4]) {
+      const p = state.players[s]!;
+      p.hand = p.hand.map((t) => (t === tile ? '9s' : t));
+    }
+    state.players[seat]!.hand[0] = tile;
+    state.players[pengSeat]!.hand[0] = tile;
+    state.players[pengSeat]!.hand[1] = tile;
+    state.players[chiSeat]!.hand[0] = '6s';
+    state.players[chiSeat]!.hand[1] = '7s';
+
+    expect(discardTile(SEATS, state, SEATS[seat]!, tile).ok).toBe(true);
+    expect(state.reaction?.respondSeat).toBe(pengSeat);
+
+    respondToReaction(SEATS, state, SEATS[pengSeat]!, 'pass');
+    expect(state.phase).toBe('reaction');
+    expect(state.reaction?.respondSeat).toBe(chiSeat);
+    expect(state.reaction?.options).toContain('chi');
+
+    // 全部人都過了才輪下一家
+    respondToReaction(SEATS, state, SEATS[chiSeat]!, 'pass');
+    expect(state.reaction).toBe(null);
+    expect(state.turnSeat).toBe(chiSeat);
   });
 });
 

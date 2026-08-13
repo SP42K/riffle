@@ -9,7 +9,7 @@ import {
 } from 'shared';
 import { MahjongTileIcon } from '../mahjong/MahjongTileIcon';
 import { tileWidth } from '../mahjong/pixelart';
-import { useMahjongActionBanner } from '../mahjong/useMahjongActionBanner';
+import { MAHJONG_BANNER_TEXT_KEY, useMahjongActionBanner } from '../mahjong/useMahjongActionBanner';
 import { StartControls } from '../components/StartControls';
 import { TurnBanner } from '../components/TurnBanner';
 import { useCountdown } from '../hooks/useCountdown';
@@ -273,7 +273,11 @@ export function MahjongRoom({ room }: { room: RoomView }) {
       {started && !matchOver && (
         <>
           <div className="table__last mahjong-meta">
-            {myBanner && <div className={`mahjong-banner mahjong-banner--${myBanner.kind}`}>{myBanner.text}</div>}
+            {myBanner && (
+              <div className={`mahjong-banner mahjong-banner--${myBanner.kind}`}>
+                {t(MAHJONG_BANNER_TEXT_KEY[myBanner.kind])}
+              </div>
+            )}
             <p className="table__last-label">
               {t('mahjong.round', { n: game.round })} · {t('mahjong.banker', { name: nicknameOfSeat(game.bankerSeat) })} ·{' '}
               {t('mahjong.wall', { n: game.wallCount })}

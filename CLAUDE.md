@@ -108,7 +108,7 @@ engine via `dealGame` and the client via `RoomView.bigTwoRules` / `RoomSummary.b
 **Many games, one room layer.** A room picks its `gameType`
 (`'bigTwo' | 'holdem' | 'monopoly' | 'downstairs' | 'snake' | 'minesweeper' | 'dnd' |
 'taiwanMahjong'`) at creation and never changes it. `SEAT_LIMITS`
-gives per-game seat counts (Big Two 2–4, hold'em 2–9, Monopoly 2–6, Snake 2–4, mahjong fixed 4–4).
+gives per-game seat counts (Big Two 2–4, hold'em 2–9, Monopoly 2–6, Snake 2–6, mahjong fixed 4–4).
 The pieces that
 differ are exactly three: the engine, the `GameView` union member, and the client table component.
 Everything else — sessions, reconnect grace, chat, lobby, per-viewer snapshots, turn timers — is

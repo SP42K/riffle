@@ -105,6 +105,12 @@ export interface MahjongState {
   pendingKongReplacement: boolean;
   pendingSelfDrawContext: PendingSelfDrawContext | null;
   pendingRobKong: { actingSeat: number; tile: MahjongTileId } | null;
+  /**
+   * 目前這張可以被吃碰槓胡的牌，已經表示不動作的座位。一張牌可能同時有好幾家想要，
+   * 但一次只問一個人；被問的人過了以後要換問下一順位，不能直接輪下一家（那會把
+   * 後面所有人的碰／槓／吃默默吃掉）。每出現一張新的可反應牌就清空。
+   */
+  reactionPassed: number[];
 }
 
 export type MahjongError = 'GAME_NOT_RUNNING' | 'NOT_YOUR_TURN' | 'NOT_IN_HAND' | 'WRONG_PHASE' | 'INVALID_ACTION';
@@ -205,6 +211,7 @@ export function startMahjong(seats: Seats): MahjongState {
     pendingKongReplacement: false,
     pendingSelfDrawContext: null,
     pendingRobKong: null,
+    reactionPassed: [],
   };
   resetForNewRound(state);
   return state;
@@ -228,6 +235,7 @@ function resetForNewRound(state: MahjongState): void {
   state.pendingKongReplacement = false;
   state.pendingSelfDrawContext = null;
   state.pendingRobKong = null;
+  state.reactionPassed = [];
   state.pendingMatchEnd = false;
   state.over = false;
 
@@ -333,6 +341,7 @@ function offerReaction(
 
 function findHuCandidate(state: MahjongState, fromSeat: number, tile: MahjongTileId): number | null {
   for (const seat of seatsInPriorityOrder(fromSeat)) {
+    if (state.reactionPassed.includes(seat)) continue;
     const p = state.players[seat]!;
     if (canHu([...p.hand, tile], p.melds)) return seat;
   }
@@ -345,6 +354,7 @@ function findPengGangCandidate(
   tile: MahjongTileId,
 ): { seat: number; type: 'gang' | 'peng' } | null {
   for (const seat of seatsInPriorityOrder(fromSeat)) {
+    if (state.reactionPassed.includes(seat)) continue;
     const p = state.players[seat]!;
     if (canGang(p.hand, tile, false).length > 0) return { seat, type: 'gang' };
     if (canPeng(p.hand, tile)) return { seat, type: 'peng' };
@@ -358,6 +368,7 @@ function findChiCandidate(
   tile: MahjongTileId,
 ): { seat: number; chiOptions: ChiOption[] } | null {
   const seat = (fromSeat + 1) % 4;
+  if (state.reactionPassed.includes(seat)) return null;
   const chiOptions = canChi(state.players[seat]!.hand, tile);
   return chiOptions.length > 0 ? { seat, chiOptions } : null;
 }
@@ -390,7 +401,11 @@ function applyDiscard(state: MahjongState, tile: MahjongTileId): void {
   state.discardSeq += 1;
   player.discardOrder.push(state.discardSeq);
   state.lastDiscard = { tile, fromSeat: seat };
+  // 這張牌已經離開手牌了，「剛摸到還沒打」的那一格要一起清掉——不然在下一位真的摸牌之前
+  // （有人被問吃碰槓胡時可能長達一分鐘），出牌者畫面上會多出一張自己明明已經打掉的幽靈牌。
+  state.justDrawn = null;
   state.phase = 'discard';
+  state.reactionPassed = [];
   resolveDiscardReactions(state, seat, tile);
 }
 
@@ -398,6 +413,7 @@ function offerRobKong(state: MahjongState, actingSeat: number, tile: MahjongTile
   const order = seatsInPriorityOrder(actingSeat);
   let robberSeat: number | null = null;
   for (const s of order) {
+    if (state.reactionPassed.includes(s)) continue;
     const p = state.players[s]!;
     if (canHu([...p.hand, tile], p.melds)) {
       robberSeat = s;
@@ -452,6 +468,7 @@ function applySelfDraw(state: MahjongState, action: MahjongSelfDrawAction, chose
       return;
     }
     // jia：加槓前先讓其他人有機會搶槓胡
+    state.reactionPassed = [];
     offerRobKong(state, seat, match.tile);
     return;
   }
@@ -473,12 +490,14 @@ function applyReaction(state: MahjongState, action: MahjongReactionAction, chiTi
   const fromSeat = r.fromSeat;
 
   if (action === 'pass') {
+    // 這家不要，還要問後面順位的人；問完一圈都沒人要，resolve/offer 自己會收尾
+    state.reactionPassed.push(seat);
     if (r.source === 'kong') {
       const pending = state.pendingRobKong;
-      if (pending) completeJiaGang(state, pending.actingSeat, pending.tile);
+      if (pending) offerRobKong(state, pending.actingSeat, pending.tile);
       return;
     }
-    continueAfterNoReaction(state, fromSeat);
+    resolveDiscardReactions(state, fromSeat, tile);
     return;
   }
 

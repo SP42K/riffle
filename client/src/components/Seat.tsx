@@ -10,7 +10,7 @@ import {
   type SnakeSeatInfo,
 } from 'shared';
 import { MahjongTileIcon } from '../mahjong/MahjongTileIcon';
-import { useMahjongActionBanner } from '../mahjong/useMahjongActionBanner';
+import { MAHJONG_BANNER_TEXT_KEY, useMahjongActionBanner } from '../mahjong/useMahjongActionBanner';
 import { useSkin } from '../state/skinContext';
 import { CardBack } from './PlayingCard';
 import { SnakeColorDot } from './SnakeColorDot';
@@ -67,7 +67,11 @@ export function Seat({
         .filter(Boolean)
         .join(' ')}
     >
-      {mahjongBanner && <div className={`mahjong-banner mahjong-banner--${mahjongBanner.kind}`}>{mahjongBanner.text}</div>}
+      {mahjongBanner && (
+        <div className={`mahjong-banner mahjong-banner--${mahjongBanner.kind}`}>
+          {t(MAHJONG_BANNER_TEXT_KEY[mahjongBanner.kind])}
+        </div>
+      )}
       <div className="seat__name">
         {gameType === 'snake' && <SnakeColorDot seat={seat.seat} />}
         {seat.nickname}
@@ -337,8 +341,14 @@ function MahjongStatus({
           {info.melds.map((meld, index) => (
             <div key={index} className="seat__meld">
               <span className="seat__meld-label">{t(MELD_KIND_KEY[meld.type])}</span>
+              {/* 暗槓在真牌桌上是蓋著的，只有本人知道槓的是什麼；座位列只畫別人，所以直接蓋牌 */}
               {meld.tiles.map((tile, tileIndex) => (
-                <MahjongTileIcon key={`${tile}-${tileIndex}`} tile={tile} scale={0.7} />
+                <MahjongTileIcon
+                  key={`${tile}-${tileIndex}`}
+                  tile={tile}
+                  scale={0.7}
+                  faceDown={meld.concealed}
+                />
               ))}
             </div>
           ))}

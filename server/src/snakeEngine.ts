@@ -617,6 +617,11 @@ function dropAlternatingAsFood(state: SnakeState, cells: readonly SnakeCell[]): 
   cells.forEach((cell, i) => {
     if (i % 2 === 0) state.corpseFood.push({ ...cell });
   });
+  // 屍體果實不會過期，只會被吃掉。無限命模式下沒人吃的屍體會一路累積，最後把棋盤佔滿：
+  // spawnFood 補不到位置（場上果實愈來愈少），findSafeRespawn 也找不到重生點，連開了無限命
+  // 的人都會被當成沒地方重生而出局。上限抓棋盤格數的十分之一，超過就讓最舊的屍體消失。
+  const max = Math.max(1, Math.floor((state.width * state.height) / 10));
+  if (state.corpseFood.length > max) state.corpseFood.splice(0, state.corpseFood.length - max);
 }
 
 /** 死掉一次：命用完（或沒開無限命）就徹底出局，否則進入重生倒數。 */

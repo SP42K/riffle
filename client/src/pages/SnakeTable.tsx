@@ -13,7 +13,7 @@ import {
   type SnakeItemKind,
   type SnakeSeatInfo,
 } from 'shared';
-import { SnakeColorDot } from '../components/SnakeColorDot';
+import { SNAKE_SEAT_COLORS, SnakeColorDot } from '../components/SnakeColorDot';
 import { StartControls } from '../components/StartControls';
 import { useCountdown } from '../hooks/useCountdown';
 import { emitWithAck } from '../net/socket';
@@ -158,7 +158,7 @@ function cellClassName(cell: Cell): string {
       return [
         'snake-cell',
         'snake-cell--body',
-        `snake-cell--seat${cell.seat % 4}`,
+        `snake-cell--seat${cell.seat % SNAKE_SEAT_COLORS}`,
         cell.head ? 'snake-cell--head' : '',
         cell.dashState === 'charging' ? 'snake-cell--dash-charging' : '',
         cell.dashState === 'dashing' ? 'snake-cell--dash-dashing' : '',
@@ -169,7 +169,7 @@ function cellClassName(cell: Cell): string {
       return [
         'snake-cell',
         'snake-cell--ghost',
-        `snake-cell--seat${cell.seat % 4}`,
+        `snake-cell--seat${cell.seat % SNAKE_SEAT_COLORS}`,
         cell.head ? 'snake-cell--head' : '',
       ]
         .filter(Boolean)
@@ -178,7 +178,7 @@ function cellClassName(cell: Cell): string {
       return [
         'snake-cell',
         'snake-cell--mine',
-        `snake-cell--seat${cell.seat % 4}`,
+        `snake-cell--seat${cell.seat % SNAKE_SEAT_COLORS}`,
         cell.warning ? 'snake-cell--mine-warning' : 'snake-cell--mine-live',
       ].join(' ');
     case 'pickup':
@@ -547,7 +547,7 @@ export function SnakeRoom({ room }: { room: RoomView }) {
                         ))}
                       </span>
                     )}
-                    <span className={`snake-name-tag snake-cell--seat${seat % 4}`}>{nickname}</span>
+                    <span className={`snake-name-tag snake-cell--seat${seat % SNAKE_SEAT_COLORS}`}>{nickname}</span>
                   </span>
                 );
               })}
