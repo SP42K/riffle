@@ -248,6 +248,24 @@ function formatLog(event: LogEvent): string {
       return `trap ${event.player} (-${event.damage} HP)`;
     case 'dndMessage':
       return event.message;
+    case 'mahjongStart':
+      return `new job launched, ${event.players} workers`;
+    case 'mahjongRound':
+      return `pass ${event.round} started, lead ${event.banker}`;
+    case 'mahjongDiscard':
+      return `${event.player} emit ${event.tile}`;
+    case 'mahjongMeld':
+      return `${event.player} merge(${event.kind}) ${event.tiles.join(' ')}`;
+    case 'mahjongWin':
+      return event.winType === 'selfDraw'
+        ? `${event.player} exit 0 (solo), ${event.tai} pts`
+        : `${event.player} exit 0, ${event.tai} pts${event.from ? ` (segfault: ${event.from})` : ''}`;
+    case 'mahjongDraw':
+      return 'no exit — lead carries over';
+    case 'mahjongOver':
+      return `job finished: ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(' ')}`;
+    case 'timeoutMahjong':
+      return `${event.player} timeout — auto`;
   }
 }
 
@@ -294,9 +312,12 @@ const TEXT: TextTable = {
   'lobby.empty': 'no jobs queued.',
   'lobby.host': 'owner {name}',
   'lobby.playerCount': '{n}/{max} workers',
+  'lobby.playerNpcCount': '{human} workers + {npc} bots / {max}',
   'lobby.spectatorCount': '{n} tailing',
   'lobby.started': 'already running',
   'lobby.full': 'no free workers',
+  'lobby.requestJoin': 'request slot',
+  'lobby.requestJoinSent': 'request sent — waiting on owner',
   'lobby.spectate': 'tail',
   'lobby.status.waiting': 'queued',
   'lobby.status.playing': 'running',
@@ -518,6 +539,56 @@ const TEXT: TextTable = {
   'dndHint.yourTurn': 'your turn to act',
   'dndHint.spectating': 'read-only',
   'dnd.logTitle': 'tail -f dungeon.log',
+  'start.startTaiwanMahjong': 'launch',
+  'mahjong.idleTitle': 'waiting for owner to launch',
+  'mahjong.idleHint': 'needs exactly 4 workers, {n}/{max} now',
+  'mahjong.round': 'pass {n}',
+  'mahjong.banker': 'lead {name}',
+  'mahjong.wall': '{n} queued',
+  'mahjong.discard': 'emit',
+  'mahjong.hu': 'exit 0',
+  'mahjong.gang': 'merge x4',
+  'mahjong.peng': 'merge x3',
+  'mahjong.chi': 'merge run',
+  'mahjong.pass': 'skip',
+  'mahjong.none': 'noop',
+  'mahjong.lastDiscard': '{name} emitted {tile}',
+  'mahjong.selfDrawTitle': 'ready to exit — take an action?',
+  'mahjong.reactionTitle': '{name} emitted {tile}',
+  'mahjong.resultTitle': 'pass done',
+  'mahjong.winSelfDraw': '{name} exit 0 (solo), {n} pts',
+  'mahjong.winDiscard': '{name} exit 0, {n} pts',
+  'mahjong.drawResult': 'no exit — lead carries over',
+  'mahjong.nextRoundSoon': 'next pass waits for every ack — force-continues after 3min regardless',
+  'mahjong.matchEndingSoon': 'final pass in this run — results print automatically when it finishes',
+  'mahjong.revealedHandsTitle': 'diff --all-worktrees',
+  'mahjong.joinRequestText': '{name} wants in on this job, taking over a bot proc',
+  'mahjong.joinRequestAccept': 'accept',
+  'mahjong.joinRequestReject': 'reject',
+  'mahjong.winningHandLabel': 'exit 0 diff',
+  'mahjong.readyContinue': 'ack next pass',
+  'mahjong.readyWaiting': 'waiting on other procs…',
+  'mahjong.readyCount': '{n} / 4 acked',
+  'mahjong.matchOverTitle': 'job finished',
+  'mahjong.matchWinner': 'winner: {name}',
+  'mahjong.matchCompleteRanking': '{n} runs complete — final tally:',
+  'mahjong.playAgain': 'launch again',
+  'mahjong.waitHost': 'waiting for owner',
+  'mahjong.scoreLabel': '{n} pts',
+  'mahjong.myScoreLabel': 'my score: {n}',
+  'mahjong.flowerCount': '+{n} bonus',
+  'mahjong.handEmpty': 'waiting for input',
+  'mahjong.dealerTag': 'LEAD',
+  'mahjong.addNpc': 'spawn bots',
+  'mahjong.bankerDiceResult': '{name} got pid 1!',
+  'mahjong.dealing': 'booting…',
+  'mahjong.gameStartBanner': 'job launched!',
+  'mahjongHint.notPlaying': 'press ready, owner launches (exactly 4 workers)',
+  'mahjongHint.waitOthers': 'waiting on other workers',
+  'mahjongHint.yourTurnDiscard': 'your turn to emit',
+  'mahjongHint.selfDraw': 'ready to exit — choose an action',
+  'mahjongHint.reaction': 'you can merge or exit, or skip',
+  'mahjongHint.roundEnd': 'pass done — next one starts automatically',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -527,6 +598,9 @@ const ERRORS: Skin['errors'] = {
   IN_PROGRESS: 'already running — you can tail',
   ROOM_FULL: 'no free workers — you can tail',
   NOT_HOST: 'only the owner can run this',
+  NO_NPC_SEAT: 'no bot proc free to hand off to',
+  NO_REQUEST: 'no pending request in queue',
+  JOIN_REJECTED: 'owner sent SIGREJECT',
   NOT_READY: 'not enough workers ready',
   WRONG_GAME: 'wrong mode for this command',
   BAD_ACTION: 'unknown command',
@@ -602,7 +676,7 @@ export const terminalSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume', snake: 'watch', downstairs: 'descent', minesweeper: 'probe', dnd: 'dungeon' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'volume', snake: 'watch', downstairs: 'descent', minesweeper: 'probe', dnd: 'dungeon', taiwanMahjong: 'job' },
   bigTwoPreset: { taiwan: 'strict', classic: 'legacy', custom: 'custom' },
   bigTwoRule: {
     cuts: '--cut',

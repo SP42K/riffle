@@ -24,6 +24,9 @@ import {
   type HoldemSeatInfo,
   type JoinMode,
   type LogEvent,
+  type MahjongGameView,
+  type MahjongSeatInfo,
+  type MahjongTileId,
   type MonopolyEstateView,
   type MonopolyGameView,
   type MonopolyOptionKey,
@@ -54,6 +57,7 @@ import {
 } from 'shared';
 import { seatOfPlayer, type GameState, type Seats } from './gameEngine.js';
 import { actionsFor, type HoldemState } from './holdemEngine.js';
+import type { MahjongState } from './mahjongEngine.js';
 import {
   actionsForMonopoly,
   monopolyCashOf,
@@ -76,6 +80,11 @@ export interface Member {
   characterId: DownstairsCharacterId;
   /** 只有龍與地下城使用：當冒險者還是當操控怪物的魔王。 */
   dndRole: DndRole;
+  /**
+   * 電腦玩家（目前只有台灣麻將用得到，讓房主可以自己湊四人測試）。
+   * 沒有真的 socket，永遠 connected，也永遠不會觸發斷線流程。
+   */
+  isNpc?: boolean;
 }
 
 export interface PlayerMember extends Member {
@@ -93,7 +102,8 @@ export type RoomGame =
   | { type: 'downstairs'; state: DownstairsState }
   | { type: 'snake'; state: SnakeState }
   | { type: 'minesweeper'; state: MinesweeperState }
-  | { type: 'dnd'; state: DndState };
+  | { type: 'dnd'; state: DndState }
+  | { type: 'taiwanMahjong'; state: MahjongState };
 
 export interface Room {
   id: string;
@@ -114,6 +124,12 @@ export interface Room {
   spectators: Map<PlayerId, Member>;
   chat: ChatMessage[];
   log: LogEvent[];
+  /**
+   * 累計曾經 push 過的 log 事件數（不因 LOG_HISTORY 裁剪而減少）。
+   * 前端要靠這個而不是 log.length 來判斷「有沒有新事件」—— log 被裁剪到只剩
+   * LOG_HISTORY 筆之後，log.length 會停在定值，光看陣列長度會誤判成再也沒有新事件。
+   */
+  logSeq: number;
   game: RoomGame | null;
   /**
    * 德州撲克的房內籌碼表。房間活著就一直累積，離開再回來也保留，
@@ -129,6 +145,23 @@ export interface Room {
   gameTimer: NodeJS.Timeout | null;
   /** 貪吃蛇：即時 tick 迴圈，跟回合制的 turnTimer 是平行的兩套機制，互不相干。 */
   tickTimer: NodeJS.Timeout | null;
+  /** 台灣麻將：輪到電腦玩家時，短暫延遲後自動幫它出手的計時器。 */
+  npcTimer: NodeJS.Timeout | null;
+  /** 台灣麻將：房間滿位時有人申請頂替電腦座位，等房主接受或婉拒；同時最多一筆。 */
+  mahjongJoinRequest: MahjongJoinRequest | null;
+  /**
+   * 台灣麻將：開局擲骰動畫還沒播完的截止時間戳；在這之前電腦座位不能搶先出手，
+   * 免得畫面還在擲骰、蓋牌，牌局其實已經在電腦手裡跑掉好幾步。只在真正開新的一場比賽
+   * 時設定一次，同一場比賽裡續局不會重播動畫，也就不用重設。
+   */
+  mahjongDealUntil: number | null;
+}
+
+/** 台灣麻將加入申請：記著申請者的 socket，房主回應時才找得到人通知結果。 */
+export interface MahjongJoinRequest {
+  playerId: PlayerId;
+  nickname: string;
+  socketId: string;
 }
 
 /** 取出玩法無關的回合資訊。 */
@@ -241,6 +274,7 @@ export function createRoom(input: CreateRoomInput): Room {
     spectators: new Map(),
     chat: [],
     log: [],
+    logSeq: 0,
     game: null,
     chips: new Map(),
     buttonSeat: -1, // 還沒發過牌；第一手會往後推一位，也就是從座位 0 開始坐莊
@@ -248,6 +282,9 @@ export function createRoom(input: CreateRoomInput): Room {
     handTimer: null,
     gameTimer: null,
     tickTimer: null,
+    npcTimer: null,
+    mahjongJoinRequest: null,
+    mahjongDealUntil: null,
   };
   seatPlayer(room, host);
   return room;
@@ -289,6 +326,53 @@ export function addSpectator(room: Room, member: Member): void {
   room.spectators.set(member.playerId, member);
 }
 
+const NPC_NICKNAMES = ['電腦一', '電腦二', '電腦三'];
+
+/**
+ * 找一個房間裡現在還沒被用掉的電腦代號。不能只看「這次補了幾個」算，因為電腦座位
+ * 可能中途被真人頂替、之後又空出來再補一次——每次都要看房間目前實際還有誰，
+ * 不然會補出兩個「電腦二」。
+ */
+function nextNpcNickname(room: Room): string {
+  const used = new Set(
+    [...room.players.values()].filter((m) => m.isNpc).map((m) => m.nickname),
+  );
+  for (const name of NPC_NICKNAMES) {
+    if (!used.has(name)) return name;
+  }
+  let n = NPC_NICKNAMES.length + 1;
+  while (used.has(`電腦${n}`)) n += 1;
+  return `電腦${n}`;
+}
+
+/**
+ * 把台灣麻將房間剩下的空位補滿電腦玩家，方便一個人也能整桌測試。
+ * 回傳實際補了幾位；電腦一律自動準備，不用再按一次準備。
+ */
+export function fillMahjongNpcSeats(room: Room): number {
+  let added = 0;
+  let seat = room.seats.indexOf(null);
+  while (seat !== -1) {
+    const playerId = `npc:${room.id}:${seat}`;
+    const nickname = nextNpcNickname(room);
+    seatPlayer(room, {
+      playerId,
+      nickname,
+      socketId: null,
+      connected: true,
+      graceTimer: null,
+      characterId: 'brave',
+      dndRole: 'hero',
+      isNpc: true,
+    });
+    const seated = room.players.get(playerId);
+    if (seated) seated.ready = true;
+    added += 1;
+    seat = room.seats.indexOf(null);
+  }
+  return added;
+}
+
 /**
  * 把成員從房間移除。
  * 遊戲進行中的玩家會空出座位，但手牌留著 —— 引擎會把空位當成不存在的座位跳過。
@@ -320,8 +404,10 @@ export function modeOf(room: Room, playerId: PlayerId): JoinMode | null {
   return null;
 }
 
+/** 電腦玩家不算「有人在」——房主（唯一的真人）離開後，房間要能正常被回收，不會被殘留的電腦卡住。 */
 export function isEmpty(room: Room): boolean {
-  return room.players.size === 0 && room.spectators.size === 0;
+  const hasHumanPlayer = [...room.players.values()].some((p) => !p.isNpc);
+  return !hasHumanPlayer && room.spectators.size === 0;
 }
 
 export function seatedPlayers(room: Room): PlayerMember[] {
@@ -429,6 +515,7 @@ export function pushChat(history: ChatMessage[], message: ChatMessage): void {
 
 export function pushLog(room: Room, event: LogEvent): void {
   room.log.push(event);
+  room.logSeq += 1;
   if (room.log.length > LOG_HISTORY) room.log.splice(0, room.log.length - LOG_HISTORY);
 }
 
@@ -555,6 +642,7 @@ export function buildSummary(room: Room): RoomSummary {
     maxPlayers: room.maxPlayers,
     spectatorCount: room.spectators.size,
     status: statusOf(room),
+    npcCount: [...room.players.values()].filter((p) => p.isNpc).length,
   };
 }
 
@@ -817,6 +905,79 @@ function buildMinesweeperGameView(room: Room, game: MinesweeperState): Minesweep
   };
 }
 
+function buildMahjongGameView(room: Room, game: MahjongState, viewerId: PlayerId): MahjongGameView {
+  const seats: Record<number, MahjongSeatInfo> = {};
+  const viewerSeat = room.seats.indexOf(viewerId);
+  for (const [seat, playerId] of room.seats.entries()) {
+    if (!playerId || !room.players.has(playerId)) continue;
+    const p = game.players[seat];
+    if (!p) continue;
+    seats[seat] = {
+      handCount: p.hand.length,
+      melds: p.melds.map((m) => ({ ...m, tiles: m.tiles.slice() })),
+      discards: p.discards.slice(),
+      claimedDiscards: p.claimedDiscards.slice(),
+      discardOrder: p.discardOrder.slice(),
+      flowers: p.flowers.slice(),
+      score: p.score,
+      isDealer: seat === game.bankerSeat,
+    };
+  }
+
+  const turnPlayerId = game.matchOver ? null : (room.seats[game.turnSeat] ?? null);
+
+  return {
+    type: 'taiwanMahjong',
+    phase: game.phase,
+    round: game.round,
+    bankerSeat: game.bankerSeat,
+    bankerDice: game.bankerDice,
+    wallCount: game.wall.length,
+    turnPlayerId,
+    turnDeadline: game.turnDeadline,
+    over: game.matchOver,
+    matchWinnerSeat: game.matchWinnerSeat,
+    seats,
+    lastDiscard: game.lastDiscard,
+    mySelfDraw:
+      game.phase === 'selfDraw' && game.selfDraw && viewerSeat === game.turnSeat
+        ? { canHu: game.selfDraw.canHu, gangChoices: game.selfDraw.gangChoices.slice() }
+        : null,
+    myReaction:
+      game.phase === 'reaction' && game.reaction && viewerSeat === game.reaction.respondSeat
+        ? {
+            respondSeat: game.reaction.respondSeat,
+            options: game.reaction.options.slice(),
+            chiOptions: game.reaction.chiOptions.slice(),
+            discardedTile: game.reaction.discardedTile,
+            fromSeat: game.reaction.fromSeat,
+          }
+        : null,
+    myJustDrawn: game.justDrawn && viewerSeat === game.justDrawn.seat ? game.justDrawn.tile : null,
+    roundResult: game.roundResult,
+    allHands: mahjongRevealedHands(game),
+    roundReady: game.roundReady.slice(),
+    pendingMatchEnd: game.pendingMatchEnd,
+  };
+}
+
+/**
+ * 胡牌後（不是流局）公布所有座位的手牌給每個人看，不只觀戰者——讓玩家可以互相核對牌型。
+ * 平常回合進行中回 null，手牌只有本人看得到。
+ */
+function mahjongRevealedHands(game: MahjongState): Record<number, MahjongTileId[]> | null {
+  const shouldReveal =
+    (game.phase === 'roundEnd' || game.phase === 'matchEnd') &&
+    game.roundResult !== null &&
+    game.roundResult.winnerSeat !== null;
+  if (!shouldReveal) return null;
+  const table: Record<number, MahjongTileId[]> = {};
+  for (const [seat, p] of game.players.entries()) {
+    table[seat] = p.hand.slice();
+  }
+  return table;
+}
+
 function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
   const game = room.game;
   if (!game) return null;
@@ -835,6 +996,8 @@ function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
       return buildMinesweeperGameView(room, game.state);
     case 'dnd':
       return buildDndGameView(room, game.state);
+    case 'taiwanMahjong':
+      return buildMahjongGameView(room, game.state, viewerId);
     default:
       return assertNeverGame(game);
   }
@@ -883,9 +1046,20 @@ function handOf(game: RoomGame, playerId: PlayerId): Card[] | null {
     case 'minesweeper':
     case 'dnd':
       return null;
+    case 'taiwanMahjong':
+      return null; // 麻將的手牌走 mahjongHand 欄位，牌的資料結構跟 Card 不同
     default:
       return assertNeverGame(game);
   }
+}
+
+/** 台灣麻將專用的手牌欄位；其他玩法固定回 null。 */
+function mahjongHandOf(room: Room, playerId: PlayerId): MahjongTileId[] | null {
+  const game = room.game;
+  if (!game || game.type !== 'taiwanMahjong') return null;
+  const seat = room.seats.indexOf(playerId);
+  if (seat === -1) return null;
+  return game.state.players[seat]?.hand.slice() ?? null;
 }
 
 /**
@@ -898,18 +1072,32 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
 
   const game = room.game;
   let allHands: Record<PlayerId, Card[]> | null = null;
+  let mahjongAllHands: Record<PlayerId, MahjongTileId[]> | null = null;
   if (mode === 'spectate' && game) {
-    const table: Record<PlayerId, Card[]> = {};
-    let any = false;
-    for (const playerId of room.seats) {
-      if (!playerId || !room.players.has(playerId)) continue;
-      const cards = handOf(game, playerId);
-      if (!cards) continue; // 這個玩法沒有暗牌
-      table[playerId] = cards;
-      any = true;
+    if (game.type === 'taiwanMahjong') {
+      const table: Record<PlayerId, MahjongTileId[]> = {};
+      let any = false;
+      for (const playerId of room.seats) {
+        if (!playerId || !room.players.has(playerId)) continue;
+        const tiles = mahjongHandOf(room, playerId);
+        if (!tiles) continue;
+        table[playerId] = tiles;
+        any = true;
+      }
+      if (any) mahjongAllHands = table;
+    } else {
+      const table: Record<PlayerId, Card[]> = {};
+      let any = false;
+      for (const playerId of room.seats) {
+        if (!playerId || !room.players.has(playerId)) continue;
+        const cards = handOf(game, playerId);
+        if (!cards) continue; // 這個玩法沒有暗牌
+        table[playerId] = cards;
+        any = true;
+      }
+      // 全空就維持 null，觀戰面板才不會長出一個沒有內容的「上帝視角」標題
+      if (any) allHands = table;
     }
-    // 全空就維持 null，觀戰面板才不會長出一個沒有內容的「上帝視角」標題
-    if (any) allHands = table;
   }
 
   let chips: Record<PlayerId, number> | null = null;
@@ -939,9 +1127,16 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     me: { playerId: viewerId, mode },
     hand: mode === 'play' ? (game ? handOf(game, viewerId) : []) : null,
     allHands,
+    mahjongHand: mode === 'play' ? mahjongHandOf(room, viewerId) : null,
+    mahjongAllHands,
     chips,
     game: buildGameView(room, viewerId),
     log: room.log.slice(),
+    logSeq: room.logSeq,
+    mahjongJoinRequest:
+      room.gameType === 'taiwanMahjong' && room.mahjongJoinRequest
+        ? { nickname: room.mahjongJoinRequest.nickname }
+        : null,
   };
 }
 

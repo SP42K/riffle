@@ -13,6 +13,7 @@ const START_LABEL_KEY: Record<GameType, TextKey> = {
   snake: 'start.startSnake',
   minesweeper: 'start.startMinesweeper',
   dnd: 'start.startDnd',
+  taiwanMahjong: 'start.startTaiwanMahjong',
 };
 
 /** 開局前的準備 / 開始遊戲，兩種玩法共用。 */
@@ -36,6 +37,11 @@ export function StartControls({ room }: { room: RoomView }) {
       >
         {mySeat?.ready ? t('start.cancelReady') : t('start.ready')}
       </button>
+      {isHost && room.gameType === 'taiwanMahjong' && room.seats.length < room.maxPlayers && (
+        <button type="button" className="btn" onClick={() => run(() => emitWithAck('room:addNpc', {}))}>
+          {t('mahjong.addNpc')}
+        </button>
+      )}
       {isHost && (
         <button
           type="button"

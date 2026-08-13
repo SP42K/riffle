@@ -3,6 +3,7 @@ import {
   DISCONNECT_GRACE_MS,
   HOLDEM_SHOWDOWN_MS,
   HOLDEM_START_CHIPS,
+  MAHJONG_ACTION_KINDS,
   MONOPOLY_ACTION_KINDS,
   MONOPOLY_ESTATE_IDS,
   SEAT_LIMITS,
@@ -15,6 +16,11 @@ import {
   type ChatMessage,
   type ClientToServerEvents,
   type JoinMode,
+  type MahjongAction,
+  type MahjongReactionAction,
+  type MahjongRoundResult,
+  type MahjongSelfDrawAction,
+  type MahjongTileId,
   type MonopolyAction,
   type MonopolyEstateId,
   type PlayerId,
@@ -65,6 +71,22 @@ import {
   startHand,
   type HoldemState,
 } from './holdemEngine.js';
+import { aiChooseDiscard, aiRespond, aiSelfDrawAction } from './mahjongAi.js';
+import {
+  MAHJONG_ERROR_MESSAGE,
+  allMahjongRoundReady,
+  autoActMahjong,
+  chooseSelfDrawAction,
+  confirmMahjongRoundReady,
+  continueMahjongRound,
+  discardTile,
+  finalizeMahjongMatch,
+  rankMahjongSeats,
+  respondToReaction,
+  startMahjong,
+  type MahjongError,
+  type MahjongState,
+} from './mahjongEngine.js';
 import {
   MONOPOLY_ERROR_MESSAGE,
   applyMonopolyAction,
@@ -80,6 +102,7 @@ import {
   canStart,
   clampMaxPlayers,
   createRoom,
+  fillMahjongNpcSeats,
   fundedCount,
   generateRoomId,
   isEmpty,
@@ -126,6 +149,26 @@ const roomChannel = (roomId: string) => `room:${roomId}`;
 
 /** 斷線的人輪到時不用等滿 45 秒，短暫等一下就代打。 */
 const DISCONNECTED_TURN_MS = 3_000;
+
+/** 台灣麻將一局結束後，等大家在結算畫面按繼續；超過這個時間還沒按齊也會直接開下一局，不會踢人。 */
+const MAHJONG_ROUND_READY_MS = 3 * 60_000;
+
+/**
+ * 台灣麻將打完最後一局（pendingMatchEnd）後，結算畫面（胡牌牌型／台數）固定顯示這麼久，
+ * 不用等玩家按繼續——反正沒有下一局可以繼續，時間到就自動轉成整場比賽結束畫面。
+ */
+const MAHJONG_MATCH_END_DELAY_MS = 20_000;
+
+/** 電腦座位出手前的固定延遲。真人的思考時間在 mahjongEngine.ts 另外給 1 分鐘。 */
+const MAHJONG_NPC_DELAY_MS = 1_800;
+
+/**
+ * 開局擲骰動畫的總長度，要跟 MahjongTable.tsx 的 dealPhase 時間軸（擲骰 3s、蓋牌 3s、
+ * 翻牌 1.5s，滿 7.5s 才顯示「遊戲開始」）對齊——不然電腦座位可能在畫面還在擲骰、蓋牌時
+ * 就搶先出手，等動畫播完畫面一翻牌，牌局其實已經跑掉好幾步了。多留 0.75 秒緩衝，
+ * 讓玩家看完「遊戲開始」的字樣再開始動作，不會一翻牌電腦就立刻打牌。
+ */
+const MAHJONG_DEAL_MS = 7_500 + 750;
 
 const BET_ACTIONS: readonly BetAction[] = ['fold', 'check', 'call', 'raise', 'allin'];
 
@@ -224,6 +267,78 @@ function parseMonopolyAction(value: unknown): MonopolyAction | null {
   }
 }
 
+/**
+ * 把來路不明的 payload 收成 MahjongAction。
+ * 認不得的 kind、缺欄位 —— 一律回 null，由呼叫端吐 BAD_ACTION。
+ */
+function parseMahjongAction(value: unknown): MahjongAction | null {
+  const input = (value ?? {}) as { kind?: unknown };
+  const kind = MAHJONG_ACTION_KINDS.find((k) => k === input.kind);
+  if (!kind) return null;
+
+  switch (kind) {
+    case 'discard': {
+      const tile = (input as { tile?: unknown }).tile;
+      return typeof tile === 'string' && tile ? { kind, tile } : null;
+    }
+    case 'selfDraw': {
+      const raw = input as { action?: unknown; tile?: unknown };
+      const action = raw.action as MahjongSelfDrawAction;
+      if (action !== 'hu' && action !== 'gang' && action !== 'none') return null;
+      const tile = typeof raw.tile === 'string' ? raw.tile : undefined;
+      return { kind, action, tile };
+    }
+    case 'respond': {
+      const raw = input as { action?: unknown; chiTiles?: unknown };
+      const action = raw.action as MahjongReactionAction;
+      if (action !== 'hu' && action !== 'peng' && action !== 'gang' && action !== 'chi' && action !== 'pass') {
+        return null;
+      }
+      let chiTiles: [MahjongTileId, MahjongTileId] | undefined;
+      const rawChi = raw.chiTiles;
+      if (Array.isArray(rawChi) && rawChi.length === 2 && typeof rawChi[0] === 'string' && typeof rawChi[1] === 'string') {
+        chiTiles = [rawChi[0], rawChi[1]];
+      }
+      return { kind, action, chiTiles };
+    }
+    case 'continueRound':
+      return { kind };
+  }
+}
+
+/**
+ * 每個座位目前手上的槓（暗槓／加槓／明槓皆算）用到的牌，供 gangLogDiff 比對用。
+ * 加槓是把既有的碰 meld 原地改成槓（tiles/type 變了，陣列長度不變），暗槓則是整組新增，
+ * 兩種都要能抓到，所以比對的是「每家有哪些槓用的牌」而不是 meld 陣列長度。
+ */
+function gangTileSnapshot(state: MahjongState): MahjongTileId[][] {
+  return state.players.map((p) => p.melds.filter((m) => m.type === 'gang').map((m) => m.tiles[0]!));
+}
+
+/**
+ * 自摸階段宣告暗槓／加槓，跟反應階段有人放棄搶槓後補完的加槓，都不會經過
+ * respondToReaction 裡「明槓」那個既有的 pushLog 分支（那支只認「吃碰別人棄牌」），
+ * 所以用動作前後的槓牌快照比對，抓出這次呼叫新完成的槓，逐一補上戰報。
+ */
+function pushMahjongGangLogs(room: Room, before: MahjongTileId[][], state: MahjongState): void {
+  state.players.forEach((player, seat) => {
+    const remaining = [...before[seat]!];
+    for (const meld of player.melds) {
+      if (meld.type !== 'gang') continue;
+      const tile = meld.tiles[0]!;
+      const idx = remaining.indexOf(tile);
+      if (idx !== -1) {
+        remaining.splice(idx, 1);
+        continue;
+      }
+      const gangPlayerId = room.seats[seat];
+      if (gangPlayerId) {
+        pushLog(room, { t: 'mahjongMeld', player: nicknameOf(room, gangPlayerId), kind: 'gang', tiles: [tile] });
+      }
+    }
+  });
+}
+
 function reply<T>(ack: unknown, payload: Parameters<Ack<T>>[0]): void {
   if (typeof ack === 'function') (ack as Ack<T>)(payload);
 }
@@ -268,6 +383,10 @@ export class GameServer {
     socket.on('room:dndDifficulty', (payload) => this.onDndDifficulty(socket, payload));
     socket.on('room:dndRole', (payload) => this.onDndRole(socket, payload));
     socket.on('room:dndNpcControl', (payload) => this.onDndNpcControl(socket, payload));
+    socket.on('game:mahjong', (payload, ack) => this.onMahjong(socket, payload, ack));
+    socket.on('room:addNpc', (_payload, ack) => this.onAddNpc(socket, ack));
+    socket.on('room:requestJoin', (payload, ack) => this.onMahjongRequestJoin(socket, payload, ack));
+    socket.on('room:respondJoinRequest', (payload, ack) => this.onMahjongRespondJoinRequest(socket, payload, ack));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -571,10 +690,17 @@ export class GameServer {
       if (room.handTimer) clearTimeout(room.handTimer);
       if (room.gameTimer) clearInterval(room.gameTimer);
       if (room.tickTimer) clearTimeout(room.tickTimer);
+      if (room.npcTimer) clearTimeout(room.npcTimer);
       this.rooms.delete(room.id);
       this.loggedHand.delete(room.id);
       this.broadcastLobby();
       return;
+    }
+
+    // 麻將牌局進行到一半有人離開，座位空出來後馬上補電腦代打，牌局不中斷、不判整場比賽結束。
+    const game = room.game;
+    if (room.gameType === 'taiwanMahjong' && game?.type === 'taiwanMahjong' && !game.state.matchOver) {
+      fillMahjongNpcSeats(room);
     }
 
     this.systemNotice(room, { t: reason, player: nickname });
@@ -607,6 +733,10 @@ export class GameServer {
       case 'dnd':
         // 魔王中離會代打完一整輪怪物行動，那些事件要寫進戰報
         for (const ev of removePlayerFromDnd(room.seats, game.state, playerId)) pushLog(room, ev);
+        return;
+      case 'taiwanMahjong':
+        // 麻將座位一走，dropFromRoom 會在座位真的空出來後補電腦代打接手，牌局不中斷——
+        // 不像其他玩法要在這裡動引擎狀態，麻將什麼都不用做，等電腦補位就好。
         return;
       default:
         assertNeverGame(game);
@@ -715,6 +845,29 @@ export class GameServer {
     this.broadcastRoom(room);
   }
 
+  /** 房主把台灣麻將房間剩下的空位一次補滿電腦玩家，方便自己一個人也能整桌測試。 */
+  private onAddNpc(socket: GameSocket, ack: unknown): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return reply(ack, { ok: false, error: { code: 'NO_ROOM', message: '你不在房間裡' } });
+    const room = this.rooms.get(session.roomId);
+    if (!room) return reply(ack, { ok: false, error: { code: 'NO_ROOM', message: '找不到房間' } });
+    if (room.hostId !== session.playerId) {
+      return reply(ack, { ok: false, error: { code: 'NOT_HOST', message: '只有房主可以補電腦玩家' } });
+    }
+    if (room.gameType !== 'taiwanMahjong') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個玩法不支援電腦玩家' } });
+    }
+    if (statusOf(room) === 'playing') {
+      return reply(ack, { ok: false, error: { code: 'IN_PROGRESS', message: '這局還在進行中' } });
+    }
+
+    const added = fillMahjongNpcSeats(room);
+    if (added > 0) this.systemNotice(room, { t: 'joined', player: `${added} 位電腦玩家` });
+    this.broadcastRoom(room);
+    this.broadcastLobby();
+    reply(ack, { ok: true, data: null });
+  }
+
   // -------------------------------------------------------------------------
   // 遊戲
   // -------------------------------------------------------------------------
@@ -806,6 +959,13 @@ export class GameServer {
         pushLog(room, { t: 'dndStart', players: seatedPlayers(room).length });
         // 第一棒可能是 NPC（單人魔王模式下整隊都是），先把隊伍跑到該輪到真人／魔王為止
         for (const ev of openingDndTurn(room.seats, state)) pushLog(room, ev);
+        break;
+      }
+      case 'taiwanMahjong': {
+        const state = startMahjong(room.seats);
+        room.game = { type: 'taiwanMahjong', state };
+        room.mahjongDealUntil = Date.now() + MAHJONG_DEAL_MS;
+        pushLog(room, { t: 'mahjongStart', players: seatedPlayers(room).length });
         break;
       }
       default:
@@ -1090,6 +1250,74 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
+  private onMahjong(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
+    const action = parseMahjongAction(payload?.action);
+    if (!action) {
+      return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的動作' } });
+    }
+
+    // 結算畫面按繼續：這時 state.over 是 true，會被 gameContext 擋掉，所以另外走一條路。
+    if (action.kind === 'continueRound') {
+      this.onMahjongContinueRound(socket, ack);
+      return;
+    }
+
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { room, game, playerId } = context;
+    if (game.type !== 'taiwanMahjong') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間玩的不是台灣麻將' } });
+    }
+
+    const before = game.state.roundResult;
+    let result: { ok: true } | { ok: false; error: MahjongError };
+    switch (action.kind) {
+      case 'discard':
+        result = discardTile(room.seats, game.state, playerId, action.tile);
+        if (result.ok) {
+          pushLog(room, { t: 'mahjongDiscard', player: nicknameOf(room, playerId), tile: action.tile });
+        }
+        break;
+      case 'selfDraw': {
+        const gangsBefore = gangTileSnapshot(game.state);
+        result = chooseSelfDrawAction(room.seats, game.state, playerId, action.action, action.tile);
+        if (result.ok) pushMahjongGangLogs(room, gangsBefore, game.state);
+        break;
+      }
+      case 'respond': {
+        // 戰報要記的是實際被吃／碰／槓掉的那張棄牌，不是手上湊組合用的那兩張——
+        // 這張要在呼叫 respondToReaction 之前先拿，因為成功後 reaction 就被引擎清掉了。
+        const eatenTile = game.state.reaction?.discardedTile;
+        const gangsBefore = gangTileSnapshot(game.state);
+        result = respondToReaction(room.seats, game.state, playerId, action.action, action.chiTiles);
+        if (result.ok && action.action !== 'pass' && action.action !== 'hu' && eatenTile) {
+          pushLog(room, {
+            t: 'mahjongMeld',
+            player: nicknameOf(room, playerId),
+            kind: action.action,
+            tiles: [eatenTile],
+          });
+        } else if (result.ok && action.action === 'pass') {
+          // PASS 有可能是放棄搶槓，讓別人剛剛宣告的加槓補完——那組槓要記在「加槓的人」身上，
+          // 不是這個按 PASS 的人，所以不能用 playerId，得靠槓牌快照比對抓出真正補完的座位。
+          pushMahjongGangLogs(room, gangsBefore, game.state);
+        }
+        break;
+      }
+    }
+
+    if (!result.ok) {
+      return reply(ack, {
+        ok: false,
+        error: { code: result.error, message: MAHJONG_ERROR_MESSAGE[result.error] },
+      });
+    }
+
+    this.logMahjongRoundEnd(room, game.state, before);
+    this.afterGameAction(room);
+    reply(ack, { ok: true, data: null });
+  }
+
   private onDnd(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
     const context = this.gameContext(socket, ack);
     if (!context) return;
@@ -1136,6 +1364,82 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
+  /**
+   * 結算畫面按「繼續」。這時 game.state.over 一定是 true，所以不能走 gameContext（會被擋掉），
+   * 另外自己找房間跟座位。全部座位都按過才馬上開下一局，不然就先廣播讓大家看到目前確認進度，
+   * 等 scheduleNextMahjongRound 排的 20 秒逾時計時器自然到期。
+   */
+  private onMahjongContinueRound(socket: GameSocket, ack: unknown): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) {
+      return reply(ack, { ok: false, error: { code: 'NO_ROOM', message: '你不在房間裡' } });
+    }
+    const room = this.rooms.get(session.roomId);
+    const game = room?.game;
+    if (!room || !game || game.type !== 'taiwanMahjong') {
+      return reply(ack, { ok: false, error: { code: 'GAME_NOT_RUNNING', message: '遊戲尚未開始' } });
+    }
+    if (!room.players.has(session.playerId)) {
+      return reply(ack, { ok: false, error: { code: 'SPECTATOR', message: '觀戰者不能操作' } });
+    }
+    // 最後一局的結算畫面沒有下一局可以繼續，不接受這個動作——client 也不會顯示按鈕，
+    // 這裡只是防呆，避免萬一還是收到這個事件而多開出一局。
+    if (game.state.pendingMatchEnd) {
+      return reply(ack, { ok: false, error: { code: 'WRONG_PHASE', message: MAHJONG_ERROR_MESSAGE.WRONG_PHASE } });
+    }
+
+    const result = confirmMahjongRoundReady(room.seats, game.state, session.playerId);
+    if (!result.ok) {
+      return reply(ack, {
+        ok: false,
+        error: { code: result.error, message: MAHJONG_ERROR_MESSAGE[result.error] },
+      });
+    }
+
+    if (allMahjongRoundReady(room.seats, game.state)) {
+      this.advanceMahjongRound(room, game.state);
+    } else {
+      this.broadcastRoom(room);
+    }
+    reply(ack, { ok: true, data: null });
+  }
+
+  /** 一局結束（贏牌／流局）或整場比賽結束時寫戰報，只在真的產生新結果時才寫。 */
+  private logMahjongRoundEnd(room: Room, state: MahjongState, before: MahjongRoundResult | null): void {
+    const result = state.roundResult;
+    if (!result || result === before) return;
+
+    if (result.winType === 'draw') {
+      pushLog(room, { t: 'mahjongDraw' });
+    } else if (result.winnerSeat !== null) {
+      const winnerId = room.seats[result.winnerSeat];
+      if (winnerId) {
+        // 放槍者：discard 胡的賠付只有一家出全額，找那個負數座位就是點炮的人；
+        // 自摸是三家均攤都是負數，不會湊巧只有一個，所以只有 discard 才會找到人。
+        let from: string | undefined;
+        if (result.winType === 'discard') {
+          const payerSeat = result.payments.findIndex((amount) => amount < 0);
+          const payerId = payerSeat !== -1 ? room.seats[payerSeat] : null;
+          if (payerId) from = nicknameOf(room, payerId);
+        }
+        pushLog(room, {
+          t: 'mahjongWin',
+          player: nicknameOf(room, winnerId),
+          winType: result.winType,
+          tai: result.tai,
+          from,
+        });
+      }
+    }
+
+    if (state.matchOver) {
+      const ranking = rankMahjongSeats(state)
+        .map((seat) => room.seats[seat])
+        .filter((id): id is PlayerId => !!id);
+      pushLog(room, { t: 'mahjongOver', ranking: ranking.map((id) => nicknameOf(room, id)) });
+    }
+  }
+
   private gameContext(socket: GameSocket, ack: unknown) {
     const session = this.sessions.get(socket.id);
     if (!session?.roomId) {
@@ -1160,6 +1464,8 @@ export class GameServer {
     this.broadcastLobby();
     this.scheduleTurn(room);
     this.scheduleNextHand(room);
+    this.scheduleNextMahjongRound(room);
+    this.scheduleMahjongNpc(room);
   }
 
   /**
@@ -1210,6 +1516,16 @@ export class GameServer {
       case 'dnd': {
         if (!game.state.over) return;
         const ranking = game.state.ranking;
+        this.emitRanking(room, ranking);
+        return;
+      }
+      case 'taiwanMahjong': {
+        // state.over 每一局結束都會短暫為 true（比照德州撲克的 hand-over），
+        // 只有 matchOver（達到 20000 分或有人中途離開）才是真正的終局
+        if (!game.state.matchOver) return;
+        const ranking = rankMahjongSeats(game.state)
+          .map((seat) => room.seats[seat])
+          .filter((id): id is PlayerId => !!id);
         this.emitRanking(room, ranking);
         return;
       }
@@ -1366,6 +1682,13 @@ export class GameServer {
         }
         break;
       }
+      case 'taiwanMahjong': {
+        const before = game.state.roundResult;
+        const acted = autoActMahjong(game.state);
+        if (acted) pushLog(room, { t: 'timeoutMahjong', player: nickname });
+        this.logMahjongRoundEnd(room, game.state, before);
+        break;
+      }
       default:
         assertNeverGame(game);
     }
@@ -1451,5 +1774,267 @@ export class GameServer {
       return;
     }
     this.scheduleSnakeTick(room);
+  }
+
+  /**
+   * 台灣麻將：一局結束（state.over）但整場比賽還沒結束（!matchOver）時，停在結算畫面。
+   *
+   * 如果這局是 pendingMatchEnd（分數已達門檻或局數已打滿），結算畫面沒有「下一局」可以
+   * 繼續，就不等玩家按繼續了，固定顯示 MAHJONG_MATCH_END_DELAY_MS 之後直接收尾成整場
+   * 比賽結束畫面——胡牌牌型／台數還是完整秀過一輪，只是不需要玩家確認。
+   *
+   * 不然（還有下一局）就照原本的方式：電腦座位自動視為已按，全部按完就馬上開下一局；
+   * 逾時 MAHJONG_ROUND_READY_MS 還沒按也不會把人踢出房間，直接照樣開下一局，
+   * 真人這局就跟著留在原位繼續打，只是少按了一次確認。
+   */
+  private scheduleNextMahjongRound(room: Room): void {
+    if (room.handTimer) {
+      clearTimeout(room.handTimer);
+      room.handTimer = null;
+    }
+
+    const game = room.game;
+    if (game?.type !== 'taiwanMahjong' || !game.state.over || game.state.matchOver) return;
+    if (game.state.phase !== 'roundEnd') return;
+
+    if (game.state.pendingMatchEnd) {
+      room.handTimer = setTimeout(() => {
+        room.handTimer = null;
+        if (this.rooms.get(room.id) !== room) return; // 房間已經被砍掉了
+        if (room.game !== game) return; // 這一局已經被別的事件換掉了
+        this.finalizeMahjongMatchEnd(room, game.state);
+      }, MAHJONG_MATCH_END_DELAY_MS);
+      return;
+    }
+
+    this.autoConfirmMahjongNpcSeats(room, game.state);
+    if (allMahjongRoundReady(room.seats, game.state)) {
+      this.advanceMahjongRound(room, game.state);
+      return;
+    }
+
+    room.handTimer = setTimeout(() => {
+      room.handTimer = null;
+      if (this.rooms.get(room.id) !== room) return; // 房間已經被砍掉了
+      if (room.game !== game) return; // 這一局已經被別的事件換掉了
+      this.advanceMahjongRound(room, game.state);
+    }, MAHJONG_ROUND_READY_MS);
+  }
+
+  /** 真的推進到下一局：清掉等待計時器、重置局面、寫戰報、廣播。 */
+  private advanceMahjongRound(room: Room, state: MahjongState): void {
+    if (room.handTimer) {
+      clearTimeout(room.handTimer);
+      room.handTimer = null;
+    }
+    continueMahjongRound(state);
+    const bankerId = room.seats[state.bankerSeat];
+    if (bankerId) {
+      pushLog(room, { t: 'mahjongRound', round: state.round, banker: nicknameOf(room, bankerId) });
+    }
+    this.afterGameAction(room);
+  }
+
+  /** 結算畫面顯示夠久了：真正把整場比賽收尾，afterGameAction 會接著推名次、停計時器。 */
+  private finalizeMahjongMatchEnd(room: Room, state: MahjongState): void {
+    if (room.handTimer) {
+      clearTimeout(room.handTimer);
+      room.handTimer = null;
+    }
+    finalizeMahjongMatch(state);
+    this.afterGameAction(room);
+  }
+
+  /** 結算畫面的電腦座位不用真的等它「思考」，直接視為已按繼續。 */
+  private autoConfirmMahjongNpcSeats(room: Room, state: MahjongState): void {
+    for (let seat = 0; seat < 4; seat++) {
+      if (state.roundReady[seat]) continue;
+      const playerId = room.seats[seat];
+      const member = playerId ? room.players.get(playerId) : undefined;
+      if (member?.isNpc) state.roundReady[seat] = true;
+    }
+  }
+
+  /**
+   * 大廳裡有人申請加入這個已經滿位、但還有電腦座位的麻將房間，記下申請，
+   * 等房主用 room:respondJoinRequest 接受或婉拒——同時只留最新一筆申請。
+   */
+  private onMahjongRequestJoin(
+    socket: GameSocket,
+    payload: { roomId?: unknown },
+    ack: unknown,
+  ): void {
+    const session = this.sessions.get(socket.id);
+    if (!session) return reply(ack, { ok: false, error: { code: 'BAD_SESSION', message: '請先連線' } });
+
+    const roomId = cleanText(payload?.roomId, 16).toUpperCase();
+    const room = this.rooms.get(roomId);
+    if (!room) return reply(ack, { ok: false, error: { code: 'NO_ROOM', message: '找不到這個房間' } });
+    if (room.gameType !== 'taiwanMahjong') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '只有台灣麻將房支援申請加入' } });
+    }
+    const isFull = room.seats.every((id) => id !== null);
+    const hasNpcSeat = room.seats.some((id) => (id ? room.players.get(id)?.isNpc : false));
+    if (!isFull || !hasNpcSeat) {
+      return reply(ack, { ok: false, error: { code: 'NO_NPC_SEAT', message: '這個房間沒有電腦座位可以頂替' } });
+    }
+
+    room.mahjongJoinRequest = { playerId: session.playerId, nickname: session.nickname, socketId: socket.id };
+    this.broadcastRoom(room);
+    reply(ack, { ok: true, data: null });
+  }
+
+  /** 房主接受或婉拒目前待處理的加入申請。 */
+  private onMahjongRespondJoinRequest(
+    socket: GameSocket,
+    payload: { accept?: unknown },
+    ack: unknown,
+  ): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return reply(ack, { ok: false, error: { code: 'NO_ROOM', message: '你不在房間裡' } });
+    const room = this.rooms.get(session.roomId);
+    if (!room) return reply(ack, { ok: false, error: { code: 'NO_ROOM', message: '找不到這個房間' } });
+    if (room.hostId !== session.playerId) {
+      return reply(ack, { ok: false, error: { code: 'NOT_HOST', message: '只有房主能處理加入申請' } });
+    }
+    const request = room.mahjongJoinRequest;
+    if (!request) return reply(ack, { ok: false, error: { code: 'NO_REQUEST', message: '目前沒有待處理的申請' } });
+    room.mahjongJoinRequest = null;
+
+    const accept = payload?.accept === true;
+    const requesterSocket = this.io.sockets.sockets.get(request.socketId);
+    const requesterSession = requesterSocket ? this.sessions.get(requesterSocket.id) : undefined;
+    const stillWaiting = Boolean(requesterSession && requesterSession.playerId === request.playerId);
+
+    const npcSeat = room.seats.findIndex((id) => (id ? room.players.get(id)?.isNpc : false));
+
+    if (!accept || !stillWaiting || npcSeat === -1) {
+      if (stillWaiting && requesterSocket) {
+        requesterSocket.emit('error', {
+          code: !accept ? 'JOIN_REJECTED' : 'NO_NPC_SEAT',
+          message: !accept ? '房主婉拒了你的加入申請' : '座位已經被別人補走了',
+        });
+      }
+      this.broadcastRoom(room);
+      reply(ack, { ok: true, data: null });
+      return;
+    }
+
+    const npcId = room.seats[npcSeat]!;
+    removeMember(room, npcId);
+
+    const member: Member = {
+      playerId: request.playerId,
+      nickname: request.nickname,
+      socketId: requesterSocket!.id,
+      connected: true,
+      graceTimer: null,
+      characterId: 'brave',
+      dndRole: 'hero',
+    };
+    seatPlayer(room, member);
+    requesterSession!.roomId = room.id;
+    this.playerRoom.set(request.playerId, room.id);
+    requesterSocket!.leave(LOBBY);
+    requesterSocket!.join(roomChannel(room.id));
+    requesterSocket!.emit('room:chat', { messages: room.chat });
+    this.systemNotice(room, { t: 'joined', player: request.nickname });
+
+    this.broadcastRoom(room);
+    this.broadcastLobby();
+    reply(ack, { ok: true, data: null });
+  }
+
+  /**
+   * 台灣麻將：輪到電腦座位（不管是要出牌、自摸決策、還是回應吃碰槓胡）時，
+   * 固定延遲 MAHJONG_NPC_DELAY_MS 後自動幫它做決定，遠比真人的 1 分鐘思考時間短，
+   * 不然補電腦玩家測試會卡在每一步都要等真人的逾時時間。
+   */
+  private scheduleMahjongNpc(room: Room): void {
+    if (room.npcTimer) {
+      clearTimeout(room.npcTimer);
+      room.npcTimer = null;
+    }
+
+    const game = room.game;
+    if (game?.type !== 'taiwanMahjong' || game.state.over) return;
+    const { phase } = game.state;
+    if (phase !== 'discard' && phase !== 'selfDraw' && phase !== 'reaction') return;
+
+    const actingSeat = phase === 'reaction' ? (game.state.reaction?.respondSeat ?? null) : game.state.turnSeat;
+    if (actingSeat === null) return;
+    const playerId = room.seats[actingSeat];
+    const member = playerId ? room.players.get(playerId) : undefined;
+    if (!member?.isNpc) return;
+
+    // 開局擲骰動畫還沒播完的話，電腦座位要跟真人一樣等，不能搶在畫面翻牌前就出手。
+    const dealRemaining = room.mahjongDealUntil ? Math.max(0, room.mahjongDealUntil - Date.now()) : 0;
+    const delay = Math.max(MAHJONG_NPC_DELAY_MS, dealRemaining);
+
+    room.npcTimer = setTimeout(() => {
+      room.npcTimer = null;
+      if (this.rooms.get(room.id) !== room || room.game !== game) return; // 房間或這一局已經被換掉了
+      this.runMahjongNpcAction(room, game.state);
+    }, delay);
+  }
+
+  private runMahjongNpcAction(room: Room, state: MahjongState): void {
+    const context = {
+      allDiscards: state.players.map((p) => p.discards),
+      allMeldsPublic: state.players.map((p, seat) => ({ seat, melds: p.melds })),
+      wallCount: state.wall.length,
+      bankerSeat: state.bankerSeat,
+    };
+
+    if (state.phase === 'discard') {
+      const seat = state.turnSeat;
+      const playerId = room.seats[seat];
+      const player = state.players[seat];
+      if (playerId && player) {
+        const tile = aiChooseDiscard(player, context);
+        const result = discardTile(room.seats, state, playerId, tile);
+        if (result.ok) pushLog(room, { t: 'mahjongDiscard', player: nicknameOf(room, playerId), tile });
+      }
+    } else if (state.phase === 'selfDraw' && state.selfDraw) {
+      const seat = state.turnSeat;
+      const playerId = room.seats[seat];
+      const player = state.players[seat];
+      if (playerId && player) {
+        const before = state.roundResult;
+        const decision = aiSelfDrawAction(player, state.selfDraw);
+        const gangsBefore = gangTileSnapshot(state);
+        const result = chooseSelfDrawAction(room.seats, state, playerId, decision.action, decision.tile);
+        if (result.ok) pushMahjongGangLogs(room, gangsBefore, state);
+        this.logMahjongRoundEnd(room, state, before);
+      }
+    } else if (state.phase === 'reaction' && state.reaction) {
+      const reaction = state.reaction;
+      const playerId = room.seats[reaction.respondSeat];
+      const player = state.players[reaction.respondSeat];
+      if (playerId && player) {
+        const before = state.roundResult;
+        const decision = aiRespond(player, reaction.options, {
+          ...context,
+          discardedTile: reaction.discardedTile,
+          chiOptions: reaction.chiOptions,
+        });
+        const gangsBefore = gangTileSnapshot(state);
+        const result = respondToReaction(room.seats, state, playerId, decision.action, decision.chiTiles);
+        if (result.ok && decision.action !== 'pass' && decision.action !== 'hu') {
+          pushLog(room, {
+            t: 'mahjongMeld',
+            player: nicknameOf(room, playerId),
+            kind: decision.action,
+            tiles: [reaction.discardedTile],
+          });
+        } else if (result.ok && decision.action === 'pass') {
+          // 同上：電腦放棄搶槓，可能是幫別人（也可能是另一個電腦）補完加槓。
+          pushMahjongGangLogs(room, gangsBefore, state);
+        }
+        this.logMahjongRoundEnd(room, state, before);
+      }
+    }
+
+    this.afterGameAction(room);
   }
 }

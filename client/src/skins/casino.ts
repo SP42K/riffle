@@ -15,6 +15,7 @@ import {
   SUIT_SYMBOL,
   describeHoldemCategory,
   describeHoldemHand,
+  mahjongTileLabel,
   parseCardId,
   type Card,
   type LogEvent,
@@ -248,6 +249,26 @@ function formatLog(event: LogEvent): string {
     // undefined，戰報整排變空白
     case 'dndMessage':
       return event.message;
+    case 'mahjongStart':
+      return `新的一局開始，共 ${event.players} 人`;
+    case 'mahjongRound':
+      return `第 ${event.round} 局開始，莊家 ${event.banker}`;
+    case 'mahjongDiscard':
+      return `${event.player} 打出 ${mahjongTileLabel(event.tile)}`;
+    case 'mahjongMeld':
+      return `${event.player} ${event.kind === 'chi' ? '吃' : event.kind === 'peng' ? '碰' : '槓'} ${event.tiles
+        .map(mahjongTileLabel)
+        .join(' ')}`;
+    case 'mahjongWin':
+      return event.winType === 'selfDraw'
+        ? `${event.player} 自摸，${event.tai} 台`
+        : `${event.player} 胡牌，${event.tai} 台${event.from ? `（${event.from} 放槍）` : ''}`;
+    case 'mahjongDraw':
+      return '流局，莊家連莊';
+    case 'mahjongOver':
+      return `整場比賽結束：${event.ranking.map((n, i) => `第 ${i + 1} 名 ${n}`).join('、')}`;
+    case 'timeoutMahjong':
+      return `${event.player} 逾時，自動處理`;
   }
 }
 

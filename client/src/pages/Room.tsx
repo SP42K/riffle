@@ -1,6 +1,7 @@
 import type { RoomView } from 'shared';
 import { BigTwoRoom } from './BigTwoTable';
 import { HoldemRoom } from './HoldemTable';
+import { MahjongRoom } from './MahjongTable';
 import { MonopolyRoom } from './MonopolyTable';
 import { DownstairsRoom } from './DownstairsTable';
 import { SnakeRoom } from './SnakeTable';
@@ -25,5 +26,7 @@ export function Room({ room }: { room: RoomView }) {
       return <MinesweeperRoom room={room} />;
     case 'dnd':
       return <DndRoom room={room} />;
+    case 'taiwanMahjong':
+      return <MahjongRoom room={room} />;
   }
 }

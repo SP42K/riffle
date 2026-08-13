@@ -1,4 +1,5 @@
 import type { HoldemCategory, HoldemGameView, HoldemStreet } from './holdem.js';
+import type { MahjongAction, MahjongGameView, MahjongTileId } from './mahjong.js';
 import type {
   MonopolyAction,
   MonopolyCardId,
@@ -134,7 +135,15 @@ export interface Combo {
 export type PlayerId = string;
 
 /** 一個房間只玩一種玩法，建房時決定。 */
-export type GameType = 'bigTwo' | 'holdem' | 'monopoly' | 'downstairs' | 'snake' | 'minesweeper' | 'dnd';
+export type GameType =
+  | 'bigTwo'
+  | 'holdem'
+  | 'monopoly'
+  | 'downstairs'
+  | 'snake'
+  | 'minesweeper'
+  | 'dnd'
+  | 'taiwanMahjong';
 
 export const GAME_TYPES: readonly GameType[] = [
   'bigTwo',
@@ -144,6 +153,7 @@ export const GAME_TYPES: readonly GameType[] = [
   'snake',
   'minesweeper',
   'dnd',
+  'taiwanMahjong',
 ];
 
 export const GAME_TYPE_LABEL: Record<GameType, string> = {
@@ -154,6 +164,7 @@ export const GAME_TYPE_LABEL: Record<GameType, string> = {
   snake: '貪吃蛇',
   minesweeper: '踩地雷',
   dnd: '龍與地下城',
+  taiwanMahjong: '台灣麻將',
 };
 
 /**
@@ -250,6 +261,8 @@ export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
   minesweeper: { min: 1, max: 4 },
   // 第 5 個座位是魔王專用（4 個冒險者位 + 1 個魔王位）
   dnd: { min: 1, max: 5 },
+  /** 台灣十六張麻將固定四人，空位補電腦。 */
+  taiwanMahjong: { min: 4, max: 4 },
 };
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -290,6 +303,8 @@ export interface RoomSummary {
   maxPlayers: number;
   spectatorCount: number;
   status: RoomStatus;
+  /** 只有台灣麻將房會 > 0：playerCount 裡面有幾席是電腦代打，其他玩法固定 0。 */
+  npcCount: number;
 }
 
 /**
@@ -379,7 +394,8 @@ export type GameView =
   | DownstairsGameView
   | SnakeGameView
   | MinesweeperGameView
-  | DndGameView;
+  | DndGameView
+  | MahjongGameView;
 
 // ---------------------------------------------------------------------------
 // 戰報
@@ -463,7 +479,17 @@ export type LogEvent =
   | { t: 'timeoutDnd'; player: string }
   | { t: 'dndLevelUp'; level: number }
   | { t: 'dndTrap'; player: string; damage: number }
-  | { t: 'dndMessage'; message: string };
+  | { t: 'dndMessage'; message: string }
+  // 台灣麻將。牌一律送 tile id，前端照牌面規則自己還原文字。
+  | { t: 'mahjongStart'; players: number }
+  | { t: 'mahjongRound'; round: number; banker: string }
+  | { t: 'mahjongDiscard'; player: string; tile: MahjongTileId }
+  | { t: 'mahjongMeld'; player: string; kind: 'chi' | 'peng' | 'gang'; tiles: MahjongTileId[] }
+  // from 只有 winType === 'discard' 才有值：放槍（點炮）的那個人。
+  | { t: 'mahjongWin'; player: string; winType: 'selfDraw' | 'discard'; tai: number; from?: string }
+  | { t: 'mahjongDraw' }
+  | { t: 'mahjongOver'; ranking: string[] }
+  | { t: 'timeoutMahjong'; player: string };
 
 /**
  * 一次下注動作的結構化描述。座位上的「最近動作」與戰報共用。
@@ -500,6 +526,10 @@ export interface RoomView {
   hand: Card[] | null;
   /** 只有觀戰者、而且這個玩法有暗牌時才拿得到（上帝視角）。 */
   allHands: Record<PlayerId, Card[]> | null;
+  /** 台灣麻將的手牌；其他玩法一律為 null（牌的資料結構跟 Card 不同，另開一個欄位）。 */
+  mahjongHand: MahjongTileId[] | null;
+  /** 觀戰台灣麻將時的上帝視角（四家的手牌）；非觀戰或非麻將一律為 null。 */
+  mahjongAllHands: Record<PlayerId, MahjongTileId[]> | null;
   /**
    * 德州撲克的房內籌碼，其他玩法為 null。
    * 這是房間層的狀態（跨手累積），所以不放在單手的 GameView 裡。
@@ -507,6 +537,17 @@ export interface RoomView {
   chips: Record<PlayerId, number> | null;
   game: GameView | null;
   log: LogEvent[];
+  /**
+   * 累計曾經 push 過的 log 事件數，不受 LOG_HISTORY 裁剪影響（只增不減）。
+   * 用來判斷「log 是否有新事件」——log 陣列本身被裁剪過，陣列長度會停在
+   * LOG_HISTORY 不再變化，不能拿來偵測新事件。
+   */
+  logSeq: number;
+  /**
+   * 台灣麻將專用：房間滿位時有人申請加入頂替電腦座位，等房主接受或婉拒。
+   * 只有房主的畫面會出現操作按鈕，但每個人都看得到申請者是誰。非麻將房固定 null。
+   */
+  mahjongJoinRequest: { nickname: string } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -566,6 +607,20 @@ export interface ClientToServerEvents {
   'game:minesweeper': (p: { action: MinesweeperAction }, ack: Ack<null>) => void;
   /** 龍與地下城專用。 */
   'game:dnd': (p: { action: DndAction }, ack: Ack<null>) => void;
+  /** 台灣麻將專用。摸牌後出牌／自摸決策／吃碰槓胡反應走同一個事件，靠 action.kind 收窄。 */
+  'game:mahjong': (p: { action: MahjongAction }, ack: Ack<null>) => void;
+  /**
+   * 台灣麻將專用。房主在開局前把剩下的空位一次補滿電腦玩家，方便一個人也能整桌測試。
+   * 只有台灣麻將支援，其他玩法沒有電腦玩家的概念。
+   */
+  'room:addNpc': (p: Record<string, never>, ack: Ack<null>) => void;
+  /**
+   * 台灣麻將專用。房間滿位但還有電腦座位時，大廳裡的玩家可以申請加入頂替電腦，
+   * 送出後要等房主用 room:respondJoinRequest 接受。
+   */
+  'room:requestJoin': (p: { roomId: string }, ack: Ack<null>) => void;
+  /** 台灣麻將專用。房主接受或婉拒目前待處理的加入申請。 */
+  'room:respondJoinRequest': (p: { accept: boolean }, ack: Ack<null>) => void;
 }
 
 export interface MinesweeperAction {

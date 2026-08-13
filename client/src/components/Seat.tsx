@@ -3,10 +3,14 @@ import {
   type GameType,
   type GameView,
   type HoldemSeatInfo,
+  type LogEvent,
+  type MahjongSeatInfo,
   type MonopolySeatInfo,
   type SeatView,
   type SnakeSeatInfo,
 } from 'shared';
+import { MahjongTileIcon } from '../mahjong/MahjongTileIcon';
+import { useMahjongActionBanner } from '../mahjong/useMahjongActionBanner';
 import { useSkin } from '../state/skinContext';
 import { CardBack } from './PlayingCard';
 import { SnakeColorDot } from './SnakeColorDot';
@@ -24,15 +28,25 @@ interface Props {
   game: GameView | null;
   /** 德州撲克的房內籌碼，開局前也看得到。 */
   chips?: number;
+  /** 戰報，只有台灣麻將用來抓「剛剛誰吃碰槓胡了」，蓋出 2 秒的大字提示。 */
+  log?: readonly LogEvent[];
+  /** log 的累計 seq；log 陣列本身會被裁剪，偵測「有沒有新事件」要靠這個而非 log.length。 */
+  logSeq?: number;
 }
 
-export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Props) {
+export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips, log, logSeq }: Props) {
   const { skin, t } = useSkin();
   const holdem = game?.type === 'holdem' ? game.seats[seat.seat] : undefined;
   const monopoly = game?.type === 'monopoly' ? game.seats[seat.seat] : undefined;
   const snake = game?.type === 'snake' ? game.seats[seat.seat] : undefined;
+  const mahjong = game?.type === 'taiwanMahjong' ? game.seats[seat.seat] : undefined;
   // 蓋牌、破產、蛇死掉都是「還在座位上但已經出局」，共用同一個淡出樣式
   const folded = (holdem?.folded ?? false) || (monopoly?.bankrupt ?? false) || snake?.alive === false;
+  const mahjongBanner = useMahjongActionBanner(
+    gameType === 'taiwanMahjong' ? (log ?? []) : [],
+    logSeq ?? 0,
+    seat.nickname,
+  );
 
   return (
     <div
@@ -40,6 +54,7 @@ export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Pro
         .filter(Boolean)
         .join(' ')}
     >
+      {mahjongBanner && <div className={`mahjong-banner mahjong-banner--${mahjongBanner.kind}`}>{mahjongBanner.text}</div>}
       <div className="seat__name">
         {gameType === 'snake' && <SnakeColorDot seat={seat.seat} />}
         {seat.nickname}
@@ -49,6 +64,7 @@ export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Pro
         {holdem?.isButton && <span className="tag tag--button">{t('seat.button')}</span>}
         {holdem?.blind === 'sb' && <span className="tag tag--blind">{t('seat.sb')}</span>}
         {holdem?.blind === 'bb' && <span className="tag tag--blind">{t('seat.bb')}</span>}
+        {mahjong?.isDealer && <span className="tag tag--button">{t('mahjong.dealerTag')}</span>}
       </div>
 
       <div className="seat__status">
@@ -60,6 +76,7 @@ export function Seat({ seat, isTurn, isMe, playing, gameType, game, chips }: Pro
           holdem={holdem}
           monopoly={monopoly}
           snake={snake}
+          mahjong={mahjong}
           chips={chips}
         />
       </div>
@@ -82,6 +99,7 @@ function SeatStatus({
   holdem,
   monopoly,
   snake,
+  mahjong,
   chips,
 }: {
   gameType: GameType;
@@ -91,6 +109,7 @@ function SeatStatus({
   holdem: HoldemSeatInfo | undefined;
   monopoly: MonopolySeatInfo | undefined;
   snake: SnakeSeatInfo | undefined;
+  mahjong: MahjongSeatInfo | undefined;
   chips: number | undefined;
 }) {
   switch (gameType) {
@@ -106,6 +125,8 @@ function SeatStatus({
       return <DownstairsStatus game={game} seat={seat} playing={playing} ready={seat.ready} />;
     case 'snake':
       return <SnakeStatus info={snake} playing={playing} ready={seat.ready} />;
+    case 'taiwanMahjong':
+      return <MahjongStatus info={mahjong} playing={playing} ready={seat.ready} />;
   }
 }
 
@@ -243,6 +264,52 @@ function SnakeStatus({
       <span className="seat__chips">{t('snake.lives', { n: info.lives })}</span>
       {info.respawning && <span className="tag tag--waiting">{t('snake.respawning')}</span>}
       {!info.alive && <span className="tag tag--offline">{t('snake.dead')}</span>}
+    </>
+  );
+}
+
+const MELD_KIND_KEY = { chi: 'mahjong.chi', peng: 'mahjong.peng', gang: 'mahjong.gang' } as const;
+
+function MahjongStatus({
+  info,
+  playing,
+  ready,
+}: {
+  info: MahjongSeatInfo | undefined;
+  playing: boolean;
+  ready: boolean;
+}) {
+  const { t } = useSkin();
+  if (!playing || !info) {
+    return (
+      <span className={ready ? 'tag tag--ready' : 'tag tag--waiting'}>
+        {ready ? t('seat.ready') : t('seat.notReady')}
+      </span>
+    );
+  }
+  return (
+    <>
+      <span className="seat__chips">{t('mahjong.scoreLabel', { n: info.score })}</span>
+      {info.flowers.length > 0 && (
+        <div className="seat__flowers">
+          {info.flowers.map((tile, index) => (
+            <MahjongTileIcon key={`${tile}-${index}`} tile={tile} scale={0.7} />
+          ))}
+        </div>
+      )}
+      <CardBack count={info.handCount} />
+      {info.melds.length > 0 && (
+        <div className="seat__melds">
+          {info.melds.map((meld, index) => (
+            <div key={index} className="seat__meld">
+              <span className="seat__meld-label">{t(MELD_KIND_KEY[meld.type])}</span>
+              {meld.tiles.map((tile, tileIndex) => (
+                <MahjongTileIcon key={`${tile}-${tileIndex}`} tile={tile} scale={0.7} />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

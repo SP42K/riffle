@@ -530,6 +530,7 @@ select:focus {
   flex-direction: column;
   gap: 1rem;
   min-height: 100%;
+  position: relative;
 }
 .table__seats {
   display: flex;
@@ -678,6 +679,284 @@ select:focus {
 }
 .table__log p {
   margin: 0.15rem 0;
+}
+
+/* 台灣麻將：像素牌用 canvas 畫，這裡只排版 */
+.mahjong-meta {
+  gap: 0.35rem;
+  position: relative;
+  min-height: 2rem;
+}
+.mahjong-tile {
+  display: block;
+  image-rendering: pixelated;
+}
+.mahjong-tile--clickable {
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.mahjong-tile--clickable:hover {
+  transform: translateY(-4px);
+}
+.mahjong-hand-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  justify-content: center;
+}
+.mahjong-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+.table__prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+.mahjong-my-score {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--gold);
+}
+/* 碰／吃／胡是「你要不要吃下這張牌」的關鍵決定，放大加紅字讓人一眼看到別漏按 */
+.mahjong-action--claim {
+  font-size: 1.15rem;
+  font-weight: 800;
+  padding: 0.6rem 1.2rem;
+  color: #ff5252;
+  border-color: #ff5252;
+}
+.mahjong-action--claim.btn--primary {
+  background: #ff5252;
+  color: #fff;
+  border-color: #ff5252;
+}
+.mahjong-action--claim:hover:not(:disabled) {
+  background: #ff6b6b;
+  color: #fff;
+}
+.mahjong-chi-detail {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  opacity: 0.85;
+}
+/* 吃／碰／槓／自摸／胡／放槍：蓋在座位卡片正中央的紅色大字，2 秒後自動消失 */
+.mahjong-banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  font-weight: 900;
+  color: #ff3b3b;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.6), 0 0 14px rgba(255, 59, 59, 0.5);
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 8px;
+  z-index: 5;
+  pointer-events: none;
+  animation: mahjong-banner-pop 0.25s ease-out;
+}
+@keyframes mahjong-banner-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+/* 開局前 3 秒的蓋牌等待畫面，蓋住整張桌子（含座位），時間到換成「遊戲開始」再自己淡出 */
+.mahjong-deal-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 14px;
+  z-index: 10;
+  pointer-events: none;
+}
+.mahjong-deal-text {
+  margin: 0;
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: var(--gold);
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.7);
+  animation: mahjong-banner-pop 0.3s ease-out;
+}
+/* 開局擲骰決定莊家的三顆骰子 */
+.mahjong-dice-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.mahjong-die {
+  font-size: 3.5rem;
+  line-height: 1;
+  color: #fff;
+  animation: mahjong-banner-pop 0.3s ease-out;
+}
+.mahjong-flowers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  justify-content: center;
+  margin-bottom: 0.3rem;
+}
+.mahjong-melds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: center;
+  margin-bottom: 0.3rem;
+}
+.mahjong-meld {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+.mahjong-meld__label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.mahjong-meld__tiles {
+  display: flex;
+  gap: 0.15rem;
+}
+.seat__flowers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem;
+  margin-top: 0.2rem;
+}
+.seat__melds {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+.seat__meld {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.seat__meld-label {
+  color: var(--muted);
+}
+.mahjong-discards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem;
+  justify-content: center;
+}
+/* 四家的棄牌合併成一排，不塞進座位小卡片、也不標是誰打的，滿 10 張換行 */
+.mahjong-discard-board {
+  display: grid;
+  grid-template-columns: repeat(20, auto);
+  gap: 0.15rem;
+  justify-content: center;
+  padding: 0.5rem 0;
+}
+/* 胡牌後公布全場手牌，讓每個玩家（不只觀戰者）互相核對 */
+.mahjong-revealed-hands {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+.mahjong-revealed-hands__title {
+  margin: 0 0 0.4rem;
+  font-weight: 700;
+  color: var(--gold);
+}
+.mahjong-revealed-hands__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+.mahjong-revealed-hands__name {
+  min-width: 4.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.mahjong-revealed-hands__tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+}
+/* 吃／碰／槓的面子跟暗牌放在同一排，用一條左邊界隔開，方便一眼分清楚 */
+.mahjong-revealed-hands__meld {
+  display: flex;
+  gap: 0.1rem;
+  margin-left: 0.4rem;
+  padding-left: 0.4rem;
+  border-left: 1px solid var(--line);
+}
+/* 贏家實際胡的牌型，配合下面的台數清單一起看，才知道為什麼可以胡 */
+.mahjong-winning-hand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  margin: 0.4rem 0;
+}
+.mahjong-winning-hand__label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.mahjong-winning-hand__tiles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.15rem;
+}
+.mahjong-winning-hand__meld {
+  display: flex;
+  gap: 0.1rem;
+  margin-left: 0.4rem;
+  padding-left: 0.4rem;
+  border-left: 1px solid var(--line);
+}
+/* 結算畫面的「按繼續」區塊 */
+.mahjong-ready {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0.5rem 0;
+}
+/* 房主專屬：有人申請頂替電腦座位的提示卡 */
+.mahjong-join-request {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.6rem;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  background: rgba(227, 179, 65, 0.1);
+}
+.mahjong-join-request p {
+  margin: 0;
+  font-weight: 700;
+}
+.mahjong-join-request__actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .spectator__row {
