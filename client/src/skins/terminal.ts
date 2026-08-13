@@ -359,6 +359,8 @@ const TEXT: TextTable = {
   'room.turnTag': 'active',
   'room.spectators': 'tailing ({n})',
   'room.chatTitle': 'notes',
+  'room.chatToggle': 'notes',
+  'room.chatUnread': 'notes ({n})',
   'room.turnPrefix': 'waiting on',
   'room.turnMine': 'waiting on you',
 

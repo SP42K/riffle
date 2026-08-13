@@ -46,6 +46,19 @@ h2 {
   margin: 0.3rem 0;
 }
 
+/*
+ * 手指沒有 hover，title 提示在觸控裝置上等於不存在。
+ * 掛這個 class 的字平常不顯示，只有觸控裝置才把原本藏在 title 裡的理由攤開來講。
+ */
+.touch-only {
+  display: none;
+}
+@media (pointer: coarse) {
+  .touch-only {
+    display: inline;
+  }
+}
+
 input,
 select {
   background: rgba(0, 0, 0, 0.3);
@@ -526,6 +539,10 @@ select:focus {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
+}
+/* 側欄的摺疊開關：桌機根本不存在（display:none 也不佔 grid 格），只在窄螢幕出現 */
+.room__side-toggle {
+  display: none;
 }
 
 .table {
@@ -1546,6 +1563,16 @@ select:focus {
   .room-row__actions {
     grid-row: auto;
     grid-column: 1;
+  }
+  /* 聊天／觀戰側欄改成手動展開，收起來時牌桌下面直接接控制列。
+     這裡是單欄 grid，開關就讓它撐滿整行，手指比較好按 */
+  .room__side-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .room__side[data-collapsed='true'] {
+    display: none;
   }
   /* iOS 對 16px 以下的輸入框會在聚焦時自動放大整頁，body 是 15px 所以要逐個補回去 */
   input,

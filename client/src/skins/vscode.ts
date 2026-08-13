@@ -364,6 +364,8 @@ const TEXT: TextTable = {
   'room.turnTag': 'active',
   'room.spectators': 'Watching ({n})',
   'room.chatTitle': 'Comments',
+  'room.chatToggle': 'Comments',
+  'room.chatUnread': 'Comments ({n})',
   'room.turnPrefix': 'Assigned to',
   'room.turnMine': 'Assigned to you',
 

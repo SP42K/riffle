@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react';
 import { SkinSettings } from '../pages/SkinSettings';
 import { SKINS, fill, resolveSkin } from '../skins';
 import {
@@ -21,6 +29,25 @@ function loadPrefs(): Prefs {
     return DEFAULT_PREFS;
   }
 }
+
+/** 是不是用手指在操作。觸控裝置沒有鍵盤，老闆鍵得換成手勢。 */
+function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia('(pointer: coarse)');
+    const onChange = () => setCoarse(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
+  return coarse;
+}
+
+/** 兩次點擊之間超過這個時間就當成兩次單擊，不算連點。 */
+const DOUBLE_TAP_MS = 350;
 
 /** favicon 是動態插進去的：index.html 只放一個空殼，換外觀時改它的 href。 */
 function applyFavicon(href: string): void {
@@ -64,6 +91,31 @@ export function SkinProvider({ children }: { children: ReactNode }) {
   const toggleBoss = useCallback(() => {
     setBossHidden((prev) => !prev);
     setAutoHidden(false);
+  }, []);
+
+  /**
+   * 無條件解除遮蔽。連點遮蔽畫面要用這個而不是 toggleBoss：
+   * 如果現在是失焦自動遮蔽（bossHidden 還是 false），toggleBoss 會把它翻成 true，
+   * 點了畫面還是黑的——手機上沒有可靠的 focus 事件可以救回來。
+   */
+  const revealAll = useCallback(() => {
+    setBossHidden(false);
+    setAutoHidden(false);
+  }, []);
+
+  const coarsePointer = useCoarsePointer();
+  // 連點偵測：記住上一次 pointerdown 的時間，夠近就算連點
+  const lastTapRef = useRef(0);
+  const onDoubleTap = useCallback((run: () => void) => {
+    return (event: ReactPointerEvent) => {
+      const now = event.timeStamp || Date.now();
+      if (now - lastTapRef.current < DOUBLE_TAP_MS) {
+        lastTapRef.current = 0;
+        run();
+        return;
+      }
+      lastTapRef.current = now;
+    };
   }, []);
 
   // 外觀套用到 <html>，CSS 全靠這個屬性分支
@@ -188,8 +240,20 @@ export function SkinProvider({ children }: { children: ReactNode }) {
         </button>
       )}
 
+      {/* 觸控裝置的老闆鍵：右上角一塊看不見的熱區，連點兩下就遮蔽 */}
+      {coarsePointer && !hidden && (
+        <div className="touch-boss-corner" onPointerDown={onDoubleTap(toggleBoss)} />
+      )}
+
       {settingsOpen && !hidden && <SkinSettings />}
-      {hidden && <div className="boss-screen">{skin.Boss()}</div>}
+      {hidden && (
+        <div
+          className="boss-screen"
+          onPointerDown={coarsePointer ? onDoubleTap(revealAll) : undefined}
+        >
+          {skin.Boss()}
+        </div>
+      )}
     </SkinContext.Provider>
   );
 }

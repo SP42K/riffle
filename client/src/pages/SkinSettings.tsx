@@ -42,7 +42,7 @@ function HotkeyField({
 
 /** 外觀與隱匿設定。這一頁的字永遠是中文，但用詞刻意跟牌類無關。 */
 export function SkinSettings() {
-  const { prefs, setPrefs, setSettingsOpen } = useSkin();
+  const { prefs, setPrefs, setSettingsOpen, toggleBoss } = useSkin();
 
   return (
     <div className="skin-settings__backdrop" onClick={() => setSettingsOpen(false)}>
@@ -91,7 +91,14 @@ export function SkinSettings() {
               onChange={(combo) => setPrefs({ hotkeyBoss: combo })}
             />
           </label>
+          <label className="skin-settings__row">
+            <span>現在就遮起來</span>
+            <button type="button" className="btn" onClick={toggleBoss}>
+              立即遮蔽
+            </button>
+          </label>
           <p className="muted">在輸入框裡打字時不會觸發快捷鍵。</p>
+          <p className="muted">觸控裝置：連點右上角可遮蔽，連點遮蔽畫面可恢復。</p>
         </section>
 
         <section className="skin-settings__group">

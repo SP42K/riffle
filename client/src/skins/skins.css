@@ -135,10 +135,35 @@
 .skin-gear:hover {
   opacity: 0.75;
 }
+/* 觸控裝置沒有 hover 可以叫出齒輪，平常就淡淡地看得到，並把命中區撐到手指點得到 */
+@media (pointer: coarse) {
+  .skin-gear {
+    opacity: 0.35;
+  }
+  .skin-gear::after {
+    content: '';
+    position: absolute;
+    inset: -12px;
+  }
+}
 .skin-gear svg {
   width: 100%;
   height: 100%;
   fill: currentColor;
+}
+
+/*
+ * 觸控版老闆鍵的熱區：右上角一塊看不見的方形，連點兩下遮蔽。
+ * 只吃自己這 48px，不擋下面的畫面；壓在頁面之上、但在設定視窗（8500）與遮蔽層（9000）之下。
+ */
+.touch-boss-corner {
+  position: fixed;
+  top: env(safe-area-inset-top);
+  right: env(safe-area-inset-right);
+  width: 48px;
+  height: 48px;
+  z-index: 8400;
+  opacity: 0;
 }
 
 .skin-settings__backdrop {
@@ -312,6 +337,28 @@
 }
 .chrome__prompt {
   color: #4ee08a;
+}
+
+/*
+ * 窄螢幕的假視窗：活動列（46px）與分頁列在手機上只是白吃寬度跟高度，收掉。
+ * 選單那排 File/Edit/… 會跟置中的檔名疊在一起，也一起收掉，只留紅綠燈與檔名——
+ * 真的把 VS Code 視窗拉窄也是這個樣子。狀態列留著，那是最像的一條。
+ */
+@media (max-width: 640px) {
+  .chrome__activity,
+  .chrome__tabs,
+  .chrome__menu {
+    display: none;
+  }
+  .chrome__titlebar {
+    height: 28px;
+    font-size: 0.72rem;
+  }
+  .chrome__title {
+    max-width: 70%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /* 外框接手捲動之後，裡面的頁面就不該再各自撐滿一個畫面高 */

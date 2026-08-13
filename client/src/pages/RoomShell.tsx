@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   BIG_TWO_RULE_KEYS,
   MONOPOLY_OPTION_KEYS,
@@ -39,6 +39,16 @@ export function RoomShell({ room, center, footer, isMyTurn, showLog = true }: Pr
   const isSpectator = me.mode === 'spectate';
   const playing = room.status === 'playing';
   const allHands = room.allHands;
+
+  // 側欄在窄螢幕會夾在牌桌與控制列中間、把手牌擠到看不見，所以窄螢幕預設收起來。
+  // 桌機不受影響：開關本身 display:none，收合的 CSS 也只寫在 860px 以下。
+  const [chatOpen, setChatOpen] = useState(false);
+  // 未讀 = 目前訊息數 - 上次打開時的訊息數。聊天訊息只增不減，長度差就夠用了。
+  const [seenCount, setSeenCount] = useState(roomMessages.length);
+  useEffect(() => {
+    if (chatOpen) setSeenCount(roomMessages.length);
+  }, [chatOpen, roomMessages.length]);
+  const unread = Math.max(0, roomMessages.length - seenCount);
 
   const others = room.seats.filter((seat) => seat.playerId !== me.playerId);
   const rules = room.bigTwoRules;
@@ -148,7 +158,16 @@ export function RoomShell({ room, center, footer, isMyTurn, showLog = true }: Pr
           )}
         </div>
 
-        <aside className="room__side">
+        <button
+          type="button"
+          className="btn room__side-toggle"
+          aria-expanded={chatOpen}
+          onClick={() => setChatOpen((open) => !open)}
+        >
+          {unread > 0 ? t('room.chatUnread', { n: unread }) : t('room.chatToggle')}
+        </button>
+
+        <aside className="room__side" data-collapsed={chatOpen ? undefined : 'true'}>
           {isSpectator && allHands && (
             <section className="panel spectator">
               <h2>{t('room.godView')}</h2>

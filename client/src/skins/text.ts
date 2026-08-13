@@ -56,6 +56,9 @@ export const CASINO_TEXT = {
   'room.turnTag': '輪到',
   'room.spectators': '觀戰者（{n}）',
   'room.chatTitle': '房間聊天',
+  // 窄螢幕才看得到：側欄摺起來時的開關，帶未讀數
+  'room.chatToggle': '聊天',
+  'room.chatUnread': '聊天（{n}）',
   'room.turnPrefix': '輪到',
   'room.turnMine': '輪到你了',
 

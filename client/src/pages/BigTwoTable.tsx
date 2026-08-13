@@ -196,6 +196,10 @@ export function BigTwoRoom({ room }: { room: RoomView }) {
             <button type="button" className="btn" disabled={!isMyTurn} onClick={suggest}>
               {t('bigTwo.suggest')}
             </button>
+            {/* PASS 停用的理由本來只在 title 裡，觸控裝置看不到，另外掛一行提示 */}
+            {isMyTurn && !lastCombo && (
+              <span className="room__hint touch-only">{t('bigTwo.cannotPass')}</span>
+            )}
           </>
         )}
         <button

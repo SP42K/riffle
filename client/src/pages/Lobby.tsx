@@ -380,6 +380,12 @@ export function Lobby() {
                       {room.spectatorCount > 0 && (
                         <span>{t('lobby.spectatorCount', { n: room.spectatorCount })}</span>
                       )}
+                      {/* 加入鈕停用的理由本來只寫在 title 裡，觸控裝置看不到，攤到這一行來 */}
+                      {!canRequestJoin && (started || full) && (
+                        <span className="touch-only">
+                          {started ? t('lobby.started') : t('lobby.full')}
+                        </span>
+                      )}
                     </div>
                     <div className="room-row__actions">
                       {canRequestJoin ? (
