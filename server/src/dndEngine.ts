@@ -80,6 +80,7 @@ export type DndError =
   | 'MONSTER_ALREADY_ACTED'
   | 'MONSTER_ALREADY_MOVED'
   | 'MONSTER_RESTRAINED'
+  | 'MONSTER_CHARMED'
   | 'PLAYER_RESTRAINED'
   | 'TARGET_INVULNERABLE'
   | 'SUMMON_LIMIT'
@@ -100,6 +101,7 @@ export const DND_ERROR_MESSAGE: Record<DndError, string> = {
   MONSTER_ALREADY_ACTED: '這隻怪物這一輪已經行動過了',
   MONSTER_ALREADY_MOVED: '這隻怪物這一輪已經移動過了，只能選擇攻擊',
   MONSTER_RESTRAINED: '這隻怪物被網子纏住，這幾回合不能移動，但還可以攻擊',
+  MONSTER_CHARMED: '這隻怪物被【魅惑】了，這幾回合不聽你的指揮',
   PLAYER_RESTRAINED: '你被邪神分身的羅網纏住，這幾回合不能移動，但還可以攻擊或使用技能',
   // B6 的祭壇與大門也會擋下攻擊，訊息不能再寫死成邪神
   TARGET_INVULNERABLE: '你的攻擊被一層看不見的東西彈開了',
@@ -1046,7 +1048,7 @@ function equipmentEffectText(classId: DndClassId, tier: Exclude<DndDifficulty, '
       return `【堅韌】HP +${Math.round(spec.toughness * 100)}%、AC +${spec.bladeAc}，`
         + `休息時多回復 ${spec.restBonus} 點，【旋風】倍率提升到 ${spec.whirlwind}`;
     case 'archer':
-      return `【連射】一次【狙擊】射 ${spec.sniperShots} 箭，【放血】每回合多扣 ${spec.bleedBonus} 點，`
+      return `【連射】在【狙擊】窗口期間每次出手都射 ${spec.sniperShots} 箭，【放血】每回合多扣 ${spec.bleedBonus} 點，`
         + `受擊時 ${Math.round(spec.decoyChance * 100)}% 機率留下一個【殘影】替身`;
     case 'bard':
       return `全隊的 AC／傷害／命中常駐 +${spec.bardAura}，三首歌的效果也各再 +${spec.songBonus}`;
@@ -3836,6 +3838,11 @@ function applyBossAction(
   if (state.monsterActed.has(found.piece.id)) {
     return { ok: false, error: 'MONSTER_ALREADY_ACTED' };
   }
+  // 【魅惑】的怪不聽指揮 —— 連待命都不行，要讓牠掉進 runMonstersTurn 的亂晃分支，
+  // 不然魔王模式下魅惑等於沒有效果，而且 wanderTurns 永遠不會倒數。
+  if (found.piece.wanderTurns && found.piece.wanderTurns > 0) {
+    return { ok: false, error: 'MONSTER_CHARMED' };
+  }
 
   const mon = { piece: found.piece, r: found.r, c: found.c };
 
@@ -4708,6 +4715,9 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
   // 【狙擊】開著的時候，NPC 弓手一樣打得到整張地圖
   const sniperOpen = classId === 'archer' && (npcInfo.sniperTurns ?? 0) > 0;
   const maxRange = sniperOpen ? BOARD_SIZE * 2 : (DND_CLASS_RANGE[classId as DndClassId] ?? 1);
+  // 「該不該走近」一律看職業本來的射程。狙擊窗口把 maxRange 撐到整張地圖，
+  // 拿它當門檻的話弓手會在窗口開著的六輪（到期又立刻重開）站在原地不跟隊伍走。
+  const walkRange = DND_CLASS_RANGE[classId as DndClassId] ?? 1;
 
   /**
    * 受傷的 NPC 會撤退，而不是繼續往前送。
@@ -5049,6 +5059,12 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
 
   let found = scanTarget();
 
+  // 目標還在正常射程外就先走近（走完 scanTarget 會再掃一次，這一輪照樣射得到），
+  // 不然狙擊窗口一開，下面那段移動就再也不會執行。
+  if (found && sniperOpen && Math.abs(pr - found.r) + Math.abs(pc - found.c) > walkRange) {
+    found = null;
+  }
+
   // 射程內沒東西打就先走過去。走幾格照職業的移動力，不是固定一格 ——
   // 盜賊能衝 6 格卻跟法師一樣一輪挪一步，那條移動力等於沒有意義。
   if (!found) {
@@ -5108,7 +5124,7 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
       for (let step = 0; step < moveRange; step++) {
         const here = Math.abs(pr - targetMon.r) + Math.abs(pc - targetMon.c);
         // 進得了射程就停下來，剩下的步數留著 —— 再往前只是白白貼臉
-        if (!targetIsStairs && here <= maxRange) break;
+        if (!targetIsStairs && here <= walkRange) break;
 
         let bestMove: { r: number; c: number; dir: string } | null = null;
         let bestDist = here;
@@ -5250,6 +5266,39 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
         hit: false,
         damage: 0,
       });
+    }
+
+    /*
+     * 【狙擊】窗口期間的連射。真人那條在 applyDndAction 裡，NPC 這條是同一套規則的複寫 ——
+     * 少了它，同一把【地獄之弓】在 NPC 手上一輪只射一箭，開窗口那一輪等於白費。
+     * 第一箭走上面的一般流程，剩下的箭補在這裡，各自擲命中、各自算傷害。
+     */
+    if (classId === 'archer' && (equipmentOf(state, npcSeat)?.sniperShots ?? 1) > 1 && sniperOpen) {
+      const extra = (equipmentOf(state, npcSeat)?.sniperShots ?? 1) - 1;
+      for (let i = 0; i < extra; i++) {
+        const victim = findPieceById(state, targetGoblin.id);
+        if (!victim || !isHostile(victim.piece) || victim.piece.hp <= 0) break;
+        if (victim.piece.invulnerable) break;
+
+        const extraRoll = Math.floor(rng() * 20) + 1;
+        const extraHit = extraRoll + attackBonusOf(seats, state, npcSeat, classId) >= victim.piece.ac;
+        let extraDamage = 0;
+        if (extraHit) {
+          extraDamage = Math.floor(rng() * stats.dmgDice) + 1 + stats.dmgFlat + bardAuraOf(seats, state);
+          const extraMarch = damageBuffOf(state, npcSeat);
+          if (extraMarch > 0) extraDamage = Math.round(extraDamage * (1 + extraMarch));
+          victim.piece.hp = Math.max(0, victim.piece.hp - extraDamage);
+        }
+        events.push({
+          t: 'dndAttack',
+          player: npcName,
+          target: victim.piece.name,
+          roll: extraRoll,
+          hit: extraHit,
+          damage: extraDamage,
+        });
+        events.push(...sweepDeadMonsters(seats, state, rng));
+      }
     }
   }
 

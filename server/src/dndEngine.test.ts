@@ -3445,16 +3445,15 @@ describe('D&D Game Engine', () => {
     const { seats, state } = soloTable('archer', { tanky: true });
     const mon = {
       id: 'm-stack', type: 'goblin', name: 'Stacked', hp: 99, maxHp: 99, ac: 99,
-      trappedTurns: 2, acDebuffTurns: 2, atkDebuffTurns: 2, magicDebuffTurns: 2,
+      trappedTurns: 2, acDebuffTurns: 2, atkDebuffTurns: 2,
     };
     state.board[8][7].piece = mon;
 
     applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-stack' }, () => 0.4);
     const after = findPiece(state, (p) => p.id === 'm-stack').piece;
-    // 原本的四個減益都還在，放血（如果抽到）再疊上去
+    // 原本的三個減益都還在，放血（如果抽到）再疊上去
     expect(after.acDebuffTurns).toBeGreaterThan(0);
     expect(after.atkDebuffTurns).toBeGreaterThan(0);
-    expect(after.magicDebuffTurns).toBeGreaterThan(0);
     expect(after.trappedTurns).toBeGreaterThan(0);
   });
 
@@ -4231,5 +4230,76 @@ describe('D&D Game Engine', () => {
     // 沒有代打者的話，剩下的 NPC 沒有人能操作，那才是真的結束
     state.npcController = null;
     expect(checkDndGameOver(seats, state).over).toBe(true);
+  });
+
+  it('should keep a charmed monster out of the boss player hands', () => {
+    // 【魅惑】只寫在 AI 那條路上，魔王模式下沒有任何檢查 ——
+    // 被魅惑的怪照樣聽指揮，wanderTurns 也永遠不會倒數。
+    const seats: Seats = ['p1', null, null, null, 'boss'];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', 4);
+    state.traps = [];
+    clearGoblins(state);
+    state.board[8][10].piece = { id: 'm-charm', type: 'goblin', name: 'Charmed', hp: 40, maxHp: 40, ac: 11 };
+
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5); // 把怪物回合交給魔王
+    findPiece(state, (p) => p.id === 'm-charm').piece.wanderTurns = 2;
+
+    const move = applyDndAction(seats, state, 'boss', { kind: 'bossMove', monsterId: 'm-charm', r: 8, c: 9 });
+    expect(move.ok).toBe(false);
+    expect(move.error).toBe('MONSTER_CHARMED');
+
+    // 連待命都不行 —— 待命會記進 monsterActed，牠就再也跑不到亂晃那條分支
+    const hold = applyDndAction(seats, state, 'boss', { kind: 'bossHold', monsterId: 'm-charm' });
+    expect(hold.ok).toBe(false);
+    expect(hold.error).toBe('MONSTER_CHARMED');
+  });
+
+  /** 只留座位 1 的 NPC，指定職業，並把真人挪到角落不擋路。 */
+  function soloNpcTable(classId) {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'star' }, 'normal', null, null, () => 0);
+    state.traps = [];
+    clearGoblins(state);
+
+    const npc = findPiece(state, (p) => p.id === 'npc-1');
+    npc.piece.classId = classId;
+    state.seats[1].classId = classId;
+    state.board[npc.r][npc.c].piece = null;
+    state.board[8][2].piece = npc.piece;
+
+    for (const id of ['npc-2', 'npc-3']) {
+      const other = findPiece(state, (p) => p.id === id);
+      if (other) state.board[other.r][other.c].piece = null;
+    }
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    state.board[me.r][me.c].piece = null;
+    state.board[0][0].piece = me.piece;
+
+    return { seats, state, npc: npc.piece };
+  }
+
+  it('should let an NPC archer fire the whole volley during the snipe window', () => {
+    // 連射只補在真人那條路上，NPC 弓手拿同一把弓卻一輪只射一箭
+    const { seats, state, npc } = soloNpcTable('archer');
+    state.seats[1].equipment = { kind: 'archer', tier: 'hell' };
+    state.seats[1].sniperTurns = 5;
+    state.board[8][5].piece = { id: 'm-volley', type: 'goblin', name: 'Volley', hp: 999, maxHp: 999, ac: 1 };
+
+    const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    const shots = res.events.filter((e) => e.t === 'dndAttack' && e.player === npc.name);
+    expect(shots.length).toBeGreaterThan(1);
+  });
+
+  it('should still close the distance while the snipe window is open', () => {
+    // 窗口把 maxRange 撐到 32，掃描永遠有目標，下面那段移動就再也不會執行
+    const { seats, state, npc } = soloNpcTable('archer');
+    state.seats[1].sniperTurns = 5;
+    state.board[8][13].piece = { id: 'm-far', type: 'goblin', name: 'Far', hp: 999, maxHp: 999, ac: 99 };
+
+    const before = findPiece(state, (p) => p.id === npc.id);
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    const after = findPiece(state, (p) => p.id === npc.id);
+
+    expect(Math.abs(after.r - before.r) + Math.abs(after.c - before.c)).toBeGreaterThan(0);
   });
 });

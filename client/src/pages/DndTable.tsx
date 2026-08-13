@@ -836,10 +836,10 @@ export function DndRoom({ room }: { room: RoomView }) {
                             ) : null}
                           </span>
                           <span className={`party-member-status ${!alive ? 'dead' : seatInfo.banishedTurns ? 'banished' : 'alive'}`} style={seatInfo.banishedTurns ? { color: 'var(--gold)' } : {}}>
+                            {/* 負面狀態排在增益前面：這一格的底色是照 banished 上的，
+                                【狙擊】排最前面的話，被放逐的人會顯示成金色的「狙擊中」。 */}
                             {!alive
                               ? t('dnd.dead')
-                              : seatInfo.sniperTurns
-                              ? `🎯 狙擊 (${seatInfo.sniperTurns})`
                               : seatInfo.corruptedTurns
                               ? `🕳️ 聖物腐化 (${seatInfo.corruptedTurns})`
                               : seatInfo.banishedTurns
@@ -850,6 +850,8 @@ export function DndRoom({ room }: { room: RoomView }) {
                                     ? `🕸️ 被纏住 (${seatInfo.restrainedTurns})`
                                 : seatInfo.fearTurns
                                   ? `😱 恐懼 (${seatInfo.fearTurns})`
+                                  : seatInfo.sniperTurns
+                                    ? `🎯 狙擊 (${seatInfo.sniperTurns})`
                                   : seatInfo.damageCapTurns
                                     ? '🛡️ 極限防禦'
                                     : t('dnd.alive')}
