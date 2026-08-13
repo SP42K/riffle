@@ -1,7 +1,8 @@
 # riffle
 
-線上牌桌。大老二（2~4 人，五條規則各自可開關）、德州撲克（2~9 人）與大富翁（2~6 人，
-完整規則含蓋房、抵押、機會命運、監獄、拍賣與交易）共用同一層房間邏輯：
+線上牌桌。大老二（2~4 人，五條規則各自可開關）、德州撲克（2~9 人）、大富翁（2~6 人，
+完整規則含蓋房、抵押、機會命運、監獄、拍賣與交易）與貪吃蛇（2~4 人，即時制）
+共用同一層房間邏輯：
 開房、用房號加入、觀戰，大廳與房間各有獨立聊天室。伺服器持有權威狀態，
 所有出牌、下注與棋步都在後端驗證過才算數。
 
@@ -20,11 +21,23 @@ npm run dev
 
 | 指令 | 用途 |
 | --- | --- |
-| `npm run dev` | 同時啟動後端 (3001) 與前端 dev server (5173) |
+| `npm run dev` | 同時啟動後端 (3005) 與前端 dev server (5173) |
 | `npm test` | 規則引擎與遊戲流程的單元測試 |
 | `npm run typecheck` | 三個套件的型別檢查（沒有 linter，這個就是關卡） |
 | `npm run build` | 打包前端到 `client/dist` |
 | `npm run serve` | 打包後用單一服務跑在 `0.0.0.0:80` |
+
+## 下載發行版
+
+不想自己 build 的話，[Releases](https://github.com/SP42K/riffle/releases) 有打包好的 zip，
+前端已經是打包產物，解壓後只要裝執行期相依就能跑：
+
+```bash
+npm ci --omit=dev
+npm start -w server -- --port 8080
+```
+
+需要 Node 22 以上。解壓出來的目錄結構不要動 —— 後端是照相對路徑找 `client/dist` 的。
 
 ## 開在區網 / 換連接埠
 
@@ -43,6 +56,70 @@ npm run dev -w client -- --port 80        # dev server 也可以換埠（Vite �
 
 > Windows 的 80 埠常被 IIS 或 http.sys 占著。若出現 `EADDRINUSE` 就換一個埠，
 > `EACCES` 則需要用系統管理員身分執行。
+
+## 用 Docker 跑
+
+| 跑法 | 指令 | 用途 |
+|---|---|---|
+| 直接執行（現況，不變） | `npm run serve` | 區網開一局、release zip |
+| 容器全套 | `docker build -t riffle .` | 單一容器同源，等同 `npm run serve` |
+| 容器只跑 API | `docker build --target server .` | 前端另外部署（例如 Vercel），後端在常駐容器 |
+
+```bash
+docker build -t riffle .            # 全套（前端 + API）
+docker run -p 8080:3001 riffle
+
+docker build --target server -t riffle-api .   # 只跑 API
+docker run -p 3001:3001 -e CORS_ORIGIN=https://xxx.vercel.app riffle-api
+```
+
+狀態全在記憶體裡（rooms / sessions / playerRoom），所以只能跑單一 instance，不要加
+replicas 或開 autoscaling。前後端分家部署時才需要下面兩個設定，**兩個的時機不一樣**：
+
+- `CORS_ORIGIN`（執行期環境變數）：後端允許的前端來源，逗號分隔；沒設就沿用同源部署的
+  寬鬆預設。有設卻解析不出任何來源（例如只打了逗號）伺服器會直接不啟動，免得靜靜退回全開。
+- `VITE_SERVER_URL`（**build 參數**）：前端要打的後端網域；沒設就走同源。vite 是在打包當下
+  把它寫死進 bundle 的，執行期再設沒有作用，所以要在 build 時帶：
+
+  ```bash
+  docker build --build-arg VITE_SERVER_URL=https://api.example.com -t riffle .
+  ```
+
+  前端上 Vercel 時同理 —— 在 Vercel 的環境變數頁設好，它是在那邊 build 的。
+
+> `CORS_ORIGIN` 擋的是瀏覽器發起的跨站連線（polling 與 WebSocket 升級都會驗）。
+> 這個服務本來就沒有帳號密碼，白名單不等於存取控制，別拿它當權限用。
+
+## 部署到 Vercel + Render
+
+前端（`client/dist`）上 Vercel，後端上 Render 的常駐服務，兩個設定檔都在 repo root：
+`vercel.json` 與 `render.yaml`。遊戲邏輯完全不動。權衡與其他方案見
+[`docs/deployment.md`](docs/deployment.md)。
+
+第一次上線是雞生蛋順序，一定要來回兩趟：
+
+1. Render 接這個 repo 開 Web Service（會讀 `render.yaml`），拿到 `https://xxx.onrender.com`。
+2. Vercel 接這個 repo，**Root Directory 留 `./`**（`shared` 是 workspace 相依，必須在 root 安裝），
+   環境變數填 `VITE_SERVER_URL=https://xxx.onrender.com`，deploy 拿到 `https://xxx.vercel.app`。
+3. 回 Render 填 `CORS_ORIGIN=https://xxx.vercel.app`，重新 deploy。
+
+| 平台 | 變數 | 時機 | 備註 |
+|---|---|---|---|
+| Vercel | `VITE_SERVER_URL` | **build 時** | 寫死進 bundle，改值要重新 deploy 才生效 |
+| Render | `CORS_ORIGIN` | 執行期 | 逗號分隔可多個；設了卻解析不出來源，伺服器會直接不啟動 |
+| Render | `PORT` | — | **不要自己設**，Render 會注入 |
+
+其餘（`HOST`、`NODE_VERSION`）由 `render.yaml` 帶入。Render 走 Node 原生 runtime 而不是 Docker，
+因為 Render 沒有 `--target` 設定，會建到 Dockerfile 的最後一個 stage（含前端那個）；
+Node runtime 下沒有 `client/dist`，後端就只跑 API。
+
+兩件先知道比較好的事：
+
+- **Render free 方案閒置 15 分鐘會停機**，喚醒約 50 秒。狀態全在記憶體，停機一次所有房間與
+  牌局歸零，斷線寬限只有 30 秒，玩家一定被踢出座位。要能連著玩就把 `render.yaml` 的
+  `plan: free` 改成 `starter`。**每次 deploy 也一樣會清空**，這點付費方案不會變。
+- **Vercel 的 preview deployment 連不上後端**：preview 網址是隨機的，白名單是精確比對，
+  一律被拒。preview 只驗前端 build 得出來；真要測就把該網址手動加進 `CORS_ORIGIN`。
 
 ## 大老二
 
@@ -127,6 +204,24 @@ npm run dev -w client -- --port 80        # dev server 也可以換埠（Vite �
 每個階段的秒數不一樣：擲骰／獄中／償債／整理 45 秒，買地與喊價 20 秒，交易 30 秒。
 逾時一律有代打，而且**保證會讓局面前進**，不會卡住整桌。
 
+## 貪吃蛇
+
+2~4 人，20×20 格，**唯一的即時制玩法**：沒有輪流，所有蛇每 150ms 同時前進一格。
+開局先倒數 3 秒讓大家看清楚出生位置（四個角落各一），時間到才真的開始動。
+方向鍵與 WASD 都吃，但按下去只是寫進輸入緩衝，下一拍才套用，180° 迴轉會被忽略；
+焦點在聊天框裡時不吃按鍵。
+
+**死亡與重生**　撞牆、撞到任何蛇身（含自己）都算死。每人有兩條命：第一次死掉會在
+安全空位重生，原地閃爍 3 秒（幽靈狀態，不參與碰撞），命用完才徹底出局。
+同一拍兩顆頭要進同一格、或兩條蛇互穿，雙方這一拍原地不動而不是同歸於盡。
+
+**果實**　場上固定兩顆一般果實，吃到加一分、長一節。另外會輪流生出**帶顏色的地雷果實**：
+先閃爍 2 秒預警（這段時間吃不到也害不死人），生效後 5 秒沒人動就自然消失，
+消失之後隔 5 秒才生下一顆。本人吃到自己顏色的加 3 分並長一節，別人碰到直接死。
+
+**結束**　名次照分數排，同分時晚出局的排前面。所有人出局就結束；
+只剩一人且分數已經追不上任何出局者時提前收尾，不讓他一個人空跑。
+
 ## 外觀與隱匿模式
 
 這是拿來上班玩的，所以**沒有任何一句給使用者看的字寫死在元件裡**，全部走當前外觀的文案表。
@@ -156,6 +251,7 @@ npm run dev -w client -- --port 80        # dev server 也可以換埠（Vite �
 
 **斷線**　socket 斷掉只標記離線並保留座位與手牌 30 秒，重連就無縫接回。
 離線期間輪到他時把倒數縮到 3 秒後代打，不讓整桌乾等；超過 30 秒才真的移出房間。
+貪吃蛇沒有回合也就沒有代打：斷線期間蛇會照最後的方向繼續走，真的被移出房間時直接出局。
 中途離開是空出座位而不是把座位往前擠，所以座位編號始終穩定。
 房主離開時 host 自動轉給下一位在座玩家，房間空了就解散。
 
@@ -180,6 +276,8 @@ client/   Vite + React + TypeScript
 所以規則不會前後端各寫一套而走鐘。
 大富翁的動作太多也太看情境，所以合法性由伺服器逐觀看者算成 `myActions` 一併送出，
 前端只照著長按鈕，一行規則都不重算。
+貪吃蛇沒有「合法動作」這回事，`shared/src/snake.ts` 只放棋盤常數與型別，
+移動與碰撞全在伺服器的 tick 迴圈裡算，前端純粹畫出每一拍的快照。
 
 **狀態同步**　任何變更後由伺服器重算並推送完整快照，前端不做樂觀更新。
 `room:state` 是為每個連線各自產生的：玩家只拿得到自己的手牌（或底牌），其他人只有張數；

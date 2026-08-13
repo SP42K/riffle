@@ -89,6 +89,7 @@ export const CASINO_TEXT = {
   'start.startHoldem': '開始牌局',
   'start.startMonopoly': '開始遊戲',
   'start.startSnake': '開始遊戲',
+  'start.startDownstairs': '開始挑戰',
   'start.needPlayers': '需要至少 {min} 人，且所有人都已準備',
 
   // 大老二
@@ -253,10 +254,42 @@ export const CASINO_TEXT = {
   'snake.dashActive': '衝刺中',
   'snake.dashCooldown': '冷卻中',
   'snake.dashReady': '可用',
+  'downstairs.health': '❤ {n}',
+  'downstairs.depth': '深度 {n}m',
+  'downstairs.eliminated': '已出局',
 
   // 沒有偽裝的玩法：大廳提示。文案本身也要能見人，別直接寫「這個沒有偽裝」
   'lobby.noDisguise': '畫面明顯',
   'lobby.noDisguiseHint': '這個玩法是彩色格子畫面，換外觀也藏不住，請自行斟酌',
+
+  // 踩地雷
+  'start.startMinesweeper': '開始遊戲',
+  'minesweeper.idleTitle': '等待房主開始遊戲',
+  'minesweeper.idleHint': '目前 {n}/{max} 人，至少 {min} 人可開始',
+  'minesweeper.score': '得分 {n}',
+  'minesweeper.finalScore': '總分 {n}',
+  'minesweeper.remainingMines': '剩餘地雷：{n}',
+  'minesweeper.playAgain': '再來一局',
+  'minesweeper.waitHost': '等房主開下一局',
+  'minesweeperHint.notPlaying': '按下準備，等房主開局',
+  'minesweeperHint.waitOthers': '等待其他玩家',
+  'minesweeperHint.yourTurn': '輪到你了',
+  'minesweeperHint.spectating': '觀戰中',
+
+  // 龍與地下城
+  'start.startDnd': '開始探險',
+  'dnd.idleTitle': '等待房主開始探險',
+  'dnd.idleHint': '目前 {n}/{max} 人，至少 {min} 人可開始',
+  'dnd.hp': 'HP {hp}/{maxHp}',
+  'dnd.alive': '存活',
+  'dnd.dead': '死亡',
+  'dnd.playAgain': '再來一局',
+  'dnd.waitHost': '等房主重新開始',
+  'dndHint.notPlaying': '按下準備，等房主開局',
+  'dndHint.waitOthers': '等待其他冒險者行動',
+  'dndHint.yourTurn': '輪到你的回合，請選擇移動或攻擊',
+  'dndHint.spectating': '觀戰中',
+  'dnd.logTitle': '📜 即時戰報紀錄',
 } as const;
 
 export type TextKey = keyof typeof CASINO_TEXT;

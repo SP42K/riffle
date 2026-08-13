@@ -9,6 +9,7 @@ import type {
   MonopolyPhase,
   MonopolyTileId,
 } from './monopoly.js';
+import type { DownstairsCharacterId, DownstairsGameView } from './downstairs.js';
 import type { SnakeDirection, SnakeGameView, SnakeItemKind, SnakeOptions } from './snake.js';
 
 // ---------------------------------------------------------------------------
@@ -133,15 +134,26 @@ export interface Combo {
 export type PlayerId = string;
 
 /** 一個房間只玩一種玩法，建房時決定。 */
-export type GameType = 'bigTwo' | 'holdem' | 'monopoly' | 'snake';
+export type GameType = 'bigTwo' | 'holdem' | 'monopoly' | 'downstairs' | 'snake' | 'minesweeper' | 'dnd';
 
-export const GAME_TYPES: readonly GameType[] = ['bigTwo', 'holdem', 'monopoly', 'snake'];
+export const GAME_TYPES: readonly GameType[] = [
+  'bigTwo',
+  'holdem',
+  'monopoly',
+  'downstairs',
+  'snake',
+  'minesweeper',
+  'dnd',
+];
 
 export const GAME_TYPE_LABEL: Record<GameType, string> = {
   bigTwo: '大老二',
   holdem: '德州撲克',
   monopoly: '大富翁',
+  downstairs: '樓梯小勇者',
   snake: '貪吃蛇',
+  minesweeper: '踩地雷',
+  dnd: '龍與地下城',
 };
 
 /**
@@ -233,7 +245,11 @@ export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
   bigTwo: { min: 2, max: 4 },
   holdem: { min: 2, max: 9 },
   monopoly: { min: 2, max: 6 },
+  downstairs: { min: 1, max: 4 },
   snake: { min: 2, max: 6 },
+  minesweeper: { min: 1, max: 4 },
+  // 第 5 個座位是魔王專用（4 個冒險者位 + 1 個魔王位）
+  dnd: { min: 1, max: 5 },
 };
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -293,6 +309,10 @@ export interface SeatView {
   isHost: boolean;
   ready: boolean;
   connected: boolean;
+  /** 只有樓梯小勇者使用；其他玩法仍保留預設值但不呈現。 */
+  characterId: DownstairsCharacterId;
+  /** 只有龍與地下城使用：當冒險者還是當魔王。 */
+  dndRole: DndRole;
 }
 
 export interface SpectatorView {
@@ -332,8 +352,40 @@ export interface BigTwoGameView {
   seats: Record<number, BigTwoSeatInfo>;
 }
 
+export interface MinesweeperCellView {
+  r: number;
+  c: number;
+  revealed: boolean;
+  flaggedBy: PlayerId | null;
+  exploded: boolean;
+  adjacentMines: number | null;
+}
+
+export interface MinesweeperSeatInfo {
+  score: number;
+  finalScore: number | null;
+}
+
+export interface MinesweeperGameView {
+  type: 'minesweeper';
+  turnPlayerId: PlayerId | null;
+  turnDeadline: number;
+  over: boolean;
+  board: MinesweeperCellView[][];
+  seats: Record<number, MinesweeperSeatInfo>;
+  remainingMines: number;
+  ranking: PlayerId[];
+}
+
 /** 依 type 分派的玩法快照。前端用 game.type 收窄。 */
-export type GameView = BigTwoGameView | HoldemGameView | MonopolyGameView | SnakeGameView;
+export type GameView =
+  | BigTwoGameView
+  | HoldemGameView
+  | MonopolyGameView
+  | DownstairsGameView
+  | SnakeGameView
+  | MinesweeperGameView
+  | DndGameView;
 
 // ---------------------------------------------------------------------------
 // 戰報
@@ -406,10 +458,26 @@ export type LogEvent =
   /** 衝刺途中撞進別人身體、把對方截斷（只有衝刺會截斷，一般碰撞一律算自己死）。 */
   | { t: 'snakeCut'; attacker: string; victim: string }
   | { t: 'snakeOver'; ranking: string[] }
+  // 踩地雷
+  | { t: 'minesweeperStart'; players: number }
+  | { t: 'minesweeperReveal'; player: string; r: number; c: number; points: number }
+  | { t: 'minesweeperFlag'; player: string; r: number; c: number; flagged: boolean }
+  | { t: 'minesweeperOver'; ranking: string[] }
   // 逾時代打
   | { t: 'timeout'; player: string; auto: 'pass' | 'check' | 'fold' }
   | { t: 'timeoutPlay'; player: string; combo: ComboType; cards: string[] }
-  | { t: 'timeoutMonopoly'; player: string; phase: MonopolyPhase };
+  | { t: 'timeoutMonopoly'; player: string; phase: MonopolyPhase }
+  | { t: 'timeoutMinesweeper'; player: string }
+  // 龍與地下城
+  | { t: 'dndStart'; players: number }
+  | { t: 'dndMove'; player: string; dir: string }
+  | { t: 'dndAttack'; player: string; target: string; roll: number; hit: boolean; damage: number }
+  | { t: 'dndMonsterTurn' }
+  | { t: 'dndOver'; won: boolean }
+  | { t: 'timeoutDnd'; player: string }
+  | { t: 'dndLevelUp'; level: number }
+  | { t: 'dndTrap'; player: string; damage: number }
+  | { t: 'dndMessage'; message: string };
 
 /**
  * 一次下注動作的結構化描述。座位上的「最近動作」與戰報共用。
@@ -433,6 +501,10 @@ export interface RoomView {
   monopolyOptions: MonopolyOptions | null;
   /** 只有貪吃蛇房有值。 */
   snakeOptions: SnakeOptions | null;
+  /** 只有龍與地下城房有值。 */
+  dndDifficulty: DndDifficulty | null;
+  /** 只有龍與地下城房有值:NPC 隊友由 AI 還是房主操作。 */
+  dndNpcControl: DndNpcControl | null;
   hostId: PlayerId;
   maxPlayers: number;
   status: RoomStatus;
@@ -483,6 +555,13 @@ export interface ClientToServerEvents {
   'room:leave': (p: Record<string, never>, ack: Ack<null>) => void;
   'room:chat': (p: { text: string }) => void;
   'room:ready': (p: { ready: boolean }) => void;
+  'room:character': (p: { characterId: DownstairsCharacterId }) => void;
+  /** 龍與地下城：房主在開局前選難度。 */
+  'room:dndDifficulty': (p: { difficulty: DndDifficulty }) => void;
+  /** 龍與地下城：開局前選要當冒險者還是魔王。 */
+  'room:dndRole': (p: { role: DndRole }) => void;
+  /** 龍與地下城：房主在開局前決定 NPC 隊友要不要自己手動操作。 */
+  'room:dndNpcControl': (p: { control: DndNpcControl }) => void;
   'game:start': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 大老二專用。 */
   'game:play': (p: { cardIds: string[] }, ack: Ack<null>) => void;
@@ -492,6 +571,9 @@ export interface ClientToServerEvents {
   'game:action': (p: { action: BetAction; amount?: number }, ack: Ack<null>) => void;
   /** 大富翁專用。17 種動作走同一個事件，靠 action.kind 收窄。 */
   'game:monopoly': (p: { action: MonopolyAction }, ack: Ack<null>) => void;
+  /** 小朋友下樓梯只傳方向意圖，位置與結果由 server authoritative simulation 決定。 */
+  'game:downstairs': (p: { direction: -1 | 0 | 1 }) => void;
+  'game:downstairsSkill': (p: Record<string, never>) => void;
   /**
    * 貪吃蛇專用。只是把方向意圖寫進緩衝，下一拍 tick 才會真的套用 ——
    * 跟其他玩法的「這一手就是這一手」不同，這裡送出不代表這一拍已經轉向。
@@ -501,6 +583,16 @@ export interface ClientToServerEvents {
   'game:snakeItem': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 貪吃蛇專用：觸發衝刺截斷技能（X 鍵）。房間沒開 cutting 選項或還在冷卻時無效。 */
   'game:snakeDash': (p: Record<string, never>, ack: Ack<null>) => void;
+  /** 踩地雷專用。 */
+  'game:minesweeper': (p: { action: MinesweeperAction }, ack: Ack<null>) => void;
+  /** 龍與地下城專用。 */
+  'game:dnd': (p: { action: DndAction }, ack: Ack<null>) => void;
+}
+
+export interface MinesweeperAction {
+  kind: 'reveal' | 'flag' | 'chord';
+  r: number;
+  c: number;
 }
 
 export type BetAction = 'fold' | 'check' | 'call' | 'raise' | 'allin';
@@ -512,6 +604,8 @@ export interface ServerToClientEvents {
   'room:state': (p: RoomView | null) => void;
   'room:chat': (p: { messages: ChatMessage[] }) => void;
   'game:over': (p: { ranking: Array<{ playerId: PlayerId; nickname: string }> }) => void;
+  /** 高頻、輕量的下樓梯快照；避免重送完整 RoomView。 */
+  'game:downstairsState': (p: DownstairsGameView) => void;
   error: (p: ErrorPayload) => void;
 }
 
@@ -525,3 +619,237 @@ export const TURN_MS = 45_000;
 export const DISCONNECT_GRACE_MS = 30_000;
 export const CHAT_HISTORY = 100;
 export const LOG_HISTORY = 60;
+
+// ---------------------------------------------------------------------------
+// 龍與地下城
+// ---------------------------------------------------------------------------
+
+/**
+ * 龍與地下城的難度。乘數同時套在怪物的 HP、傷害與 AC 上，
+ * 開局前由房主決定，開打之後整局固定。
+ */
+export type DndDifficulty = 'easy' | 'normal' | 'hard' | 'hell';
+
+/**
+ * 龍與地下城的位置：冒險者，或是操控怪物的魔王。
+ * 一間房最多一位魔王，而且固定坐在最後一個座位（DND_BOSS_SEAT），
+ * 這樣引擎裡「隊伍就是座位 0~3」的假設一行都不用改。
+ */
+export type DndRole = 'hero' | 'boss';
+
+/**
+ * 空位補上的 NPC 隊友由誰操作：AI 自動行動，或是交給房主手動指揮。
+ * 開局前決定，整局固定。
+ */
+export type DndNpcControl = 'auto' | 'host';
+
+export const DND_NPC_CONTROLS: readonly DndNpcControl[] = ['auto', 'host'];
+
+export const DND_NPC_CONTROL_LABEL: Record<DndNpcControl, string> = {
+  auto: 'AI 自動',
+  host: '真人手動',
+};
+
+/**
+ * 護送關的獎勵裝備。每個職業一件，數值分三級 —— 簡單難度不發裝備，
+ * 所以 tier 只會是 normal / hard / hell。
+ */
+export interface DndEquipment {
+  kind: DownstairsCharacterId;
+  tier: Exclude<DndDifficulty, 'easy'>;
+}
+
+export const DND_EQUIPMENT_NAME: Record<DownstairsCharacterId, string> = {
+  brave: '反射盾',
+  tangerine: '魔法珠',
+  star: '法杖',
+  bubble: '骰子匕首',
+};
+
+/**
+ * 三級裝備的數值。
+ * `stat` 是共通的 防禦／HP／命中 加值，其餘欄位各職業自己用。
+ */
+export const DND_EQUIPMENT_SPEC: Record<
+  Exclude<DndDifficulty, 'easy'>,
+  {
+    stat: number;
+    /** 戰士：額外反射比例，疊加在基礎的 1/3 上 */
+    reflect: number;
+    /** 戰士：【鎖鏈】改成把這個範圍內的怪物全部拉到身邊 */
+    chainRange: number;
+    /** 法師：火牆邊長與額外傷害 */
+    fireWallSize: number;
+    fireWallDamage: number;
+    /** 牧師：主治療量、「除目標外每人」的治療量，以及攻擊命中後回復自身的量 */
+    healMain: number;
+    healSplash: number;
+    healSelfOnAttack: number;
+    /** 盜賊：命中骰乘上這個比例當作追加傷害，未命中也算 */
+    diceRatio: number;
+    /** 盜賊：【撒網】多綁幾輪、每輪多扣幾點 */
+    netBonusTurns: number;
+    netBonusDamage: number;
+  }
+> = {
+  normal: { stat: 2, reflect: 0.2, chainRange: 2, fireWallSize: 2, fireWallDamage: 1, healMain: 5, healSplash: 1, healSelfOnAttack: 2, diceRatio: 0.3, netBonusTurns: 1, netBonusDamage: 1 },
+  hard: { stat: 4, reflect: 0.4, chainRange: 3, fireWallSize: 3, fireWallDamage: 2, healMain: 6, healSplash: 2, healSelfOnAttack: 3, diceRatio: 0.6, netBonusTurns: 2, netBonusDamage: 2 },
+  hell: { stat: 6, reflect: 0.6, chainRange: 4, fireWallSize: 4, fireWallDamage: 3, healMain: 7, healSplash: 3, healSelfOnAttack: 4, diceRatio: 0.9, netBonusTurns: 3, netBonusDamage: 3 },
+};
+
+export const DND_BOSS_SEAT = 4;
+
+export const DND_DIFFICULTIES: readonly DndDifficulty[] = ['easy', 'normal', 'hard', 'hell'];
+
+export const DND_DIFFICULTY_LABEL: Record<DndDifficulty, string> = {
+  easy: '簡單',
+  normal: '一般',
+  hard: '困難',
+  hell: '地獄',
+};
+
+export const DND_DIFFICULTY_MULTIPLIER: Record<DndDifficulty, number> = {
+  easy: 0.7,
+  normal: 1,
+  hard: 1.2,
+  hell: 1.5,
+};
+
+export interface DndPiece {
+  id: string;
+  type: 'player' | 'goblin' | 'staircase' | 'trap' | 'villager';
+  playerId?: PlayerId;
+  name: string;
+  hp: number;
+  maxHp: number;
+  ac: number;
+  classId?: DownstairsCharacterId;
+  damagedByRogue?: boolean;
+  /** 被戰士被動【暈眩】命中時，剩餘無法行動的回合數 */
+  stunnedTurns?: number;
+  /** 被盜賊【撒網】纏住後，剩餘無法移動且每回合持續受傷的回合數 */
+  trappedTurns?: number;
+  /** 這張網每回合扣幾點 HP（跟著撒網的人的裝備走），沒填是 1 */
+  netDamage?: number;
+  /** 怪物一回合能走幾步，沒填是 2（哥布林盜賊是 5） */
+  speed?: number;
+  /** 怪物的攻擊距離（曼哈頓），沒填是 1（哥布林法師是 3） */
+  range?: number;
+  /** 怪物的擲骰加值，沒填走預設值 */
+  attackBonus?: number;
+  /** 怪物的傷害骰面數，沒填走預設值 */
+  dmgDice?: number;
+  /** 中了盜賊被動【破甲】前的原始 AC，債清了要還回去 */
+  acBase?: number;
+  /** 【破甲】：剩餘幾回合 AC 只有原本的 60% */
+  acDebuffTurns?: number;
+  /** 【削弱】：剩餘幾回合造成的傷害只有原本的 60% */
+  atkDebuffTurns?: number;
+  /** 邪神分身複製的職業 —— 分身會用這個職業的技能 */
+  copyClass?: DownstairsCharacterId;
+  /** 這隻怪目前免疫傷害（邪神有分身護體時） */
+  invulnerable?: boolean;
+}
+
+export interface DndCellView {
+  r: number;
+  c: number;
+  piece: DndPiece | null;
+  trapTriggered?: boolean;
+}
+
+export interface DndSeatInfo {
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  isNpc?: boolean;
+  name?: string;
+  banishedTurns?: number;
+  piece?: DndPiece;
+  /** B2-3：主動技能冷卻，>0 代表這名玩家自己的下一輪還不能再用技能 */
+  skillCooldown?: number;
+  /** 放逐到期後要回到的格子；沒填就回場中央（陷阱放逐是這種） */
+  banishCell?: { r: number; c: number };
+  /** 中了虛空酋長【恐懼】，剩餘幾回合的移動方向會被反轉 */
+  fearTurns?: number;
+  /** 戰士被動【極限防禦】：剩餘幾回合受到的單次傷害會被壓到 damageCap 以下 */
+  damageCapTurns?: number;
+  /** 【極限防禦】的傷害上限值 */
+  damageCap?: number;
+  /** 被邪神分身（盜賊）撒網纏住，剩餘幾回合不能移動 */
+  restrainedTurns?: number;
+  /** 被邪神打暈，剩餘幾回合不能行動 */
+  stunnedTurns?: number;
+  /** 護送關拿到的裝備；沒拿到就是 undefined */
+  equipment?: DndEquipment;
+}
+
+export interface DndGameView {
+  type: 'dnd';
+  turnPlayerId: PlayerId | null;
+  turnDeadline: number;
+  over: boolean;
+  board: DndCellView[][];
+  seats: Record<number, DndSeatInfo>;
+  ranking: PlayerId[];
+  level: number;
+  /**
+   * 火牆。turns 是還會燒幾回合、dmg 是每回合燒多少；
+   * hostile 為 true 代表這是敵方（邪神分身）鋪的，燒的是冒險者而不是怪物。
+   */
+  fireWalls: Array<{ r: number; c: number; turns: number; dmg: number; hostile?: boolean }>;
+  /** 這一局的難度，開局時定案 */
+  difficulty: DndDifficulty;
+  /** 目前輪到的這位玩家，本回合是否已經移動過（決定前端要顯示「移動」還是只剩「攻擊/技能/休息」） */
+  turnHasMoved: boolean;
+  /** 操控怪物的玩家；沒有人當魔王時為 null，怪物全部由 AI driving */
+  bossPlayerId: PlayerId | null;
+  /** 這一局的勝負；over 為 false 時是 null。ranking 勝敗都有值，不能拿它判斷輸贏。 */
+  won: boolean | null;
+  /** 現在是冒險者的回合還是魔王的怪物回合 */
+  phase: 'party' | 'boss';
+  /**
+   * 現在輪到第幾個座位。turnPlayerId 對「房主代打的 NPC 座位」是 null，
+   * 前端要靠這個才知道正在操作誰。
+   */
+  turnSeat: number;
+  /** NPC 隊友由誰操作；null 代表 AI 自動行動。 */
+  npcControllerId: PlayerId | null;
+  /** 這一輪已經行動完的怪物（攻擊過／被自動結算），魔王端據此把牠們畫成已用過 */
+  actedMonsterIds: string[];
+  /** 這一輪已經移動過的怪物，還可以攻擊一次 */
+  movedMonsterIds: string[];
+  /** 已經跑到地圖頂端獲救的村民數（護送關用） */
+  villagersRescued: number;
+  /** 半路陣亡的村民數（護送關用） */
+  villagersLost: number;
+  /** 這一局進行到第幾輪 */
+  roundCount: number;
+}
+
+export interface DndAction {
+  kind:
+    | 'move'
+    | 'attack'
+    | 'moveTo'
+    | 'rest'
+    | 'skill'
+    | 'turnCombo'
+    // 魔王回合專用：指揮某一隻怪物，或結束怪物回合（沒動過的怪交給 AI）
+    | 'bossMove'
+    | 'bossAttack'
+    | 'bossHold'
+    | 'bossEnd';
+  dir?: 'up' | 'down' | 'left' | 'right';
+  targetId?: string;
+  r?: number;
+  c?: number;
+  move?: { r: number; c: number } | null;
+  /**
+   * turnCombo 的終結招式。刻意不寫成 `any` —— 這個 union 就是「送錯動作會在呼叫端
+   * 編譯不過」的唯一保障，開一個 any 進來等於兩端都失去檢查。
+   */
+  action?: DndAction | null;
+  /** 魔王要指揮的那隻怪物 */
+  monsterId?: string;
+}

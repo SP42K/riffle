@@ -116,6 +116,8 @@ function SeatStatus({
       );
     case 'monopoly':
       return <MonopolyStatus info={monopoly} playing={playing} ready={seat.ready} />;
+    case 'downstairs':
+      return <DownstairsStatus game={game} seat={seat} playing={playing} ready={seat.ready} />;
     case 'snake':
       return (
         <SnakeStatus
@@ -126,6 +128,35 @@ function SeatStatus({
         />
       );
   }
+}
+
+function DownstairsStatus({
+  game,
+  seat,
+  playing,
+  ready,
+}: {
+  game: GameView | null;
+  seat: SeatView;
+  playing: boolean;
+  ready: boolean;
+}) {
+  const { t } = useSkin();
+  const me = game?.type === 'downstairs' ? game.players[seat.playerId] : undefined;
+  if (!playing || !me) {
+    return (
+      <span className={ready ? 'tag tag--ready' : 'tag tag--waiting'}>
+        {ready ? t('seat.ready') : t('seat.notReady')}
+      </span>
+    );
+  }
+  if (!me.alive) return <span className="tag tag--waiting">{t('downstairs.eliminated')}</span>;
+  return (
+    <>
+      <span className="seat__chips">{t('downstairs.health', { n: me.health })}</span>
+      <span className="seat__chips">{t('downstairs.depth', { n: Math.floor(me.depth) })}</span>
+    </>
+  );
 }
 
 function BigTwoStatus({

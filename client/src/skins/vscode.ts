@@ -240,6 +240,36 @@ function formatLog(event: LogEvent): string {
       return `${event.attacker} force-pushed over ${event.victim}'s branch`;
     case 'snakeOver':
       return `watch stopped: ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(', ')}`;
+    case 'minesweeperStart':
+      return `debugger started · ${event.players} members`;
+    case 'minesweeperReveal':
+      return `${event.player} inspected (${event.r + 1}, ${event.c + 1}) — ${event.points > 0 ? 'clean (+1)' : 'exception (-1)'}`;
+    case 'minesweeperFlag':
+      return `${event.player} toggled breakpoint at (${event.r + 1}, ${event.c + 1}) — ${event.flagged ? 'enabled' : 'disabled'}`;
+    case 'minesweeperOver':
+      return `debugging finished: ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(', ')}`;
+    case 'timeoutMinesweeper':
+      return `${event.player} timed out — auto inspect dispatched`;
+    case 'dndStart':
+      return `dungeon instance started · ${event.players} party members`;
+    case 'dndMove':
+      return `${event.player} shifted position ${event.dir}`;
+    case 'dndAttack':
+      return event.damage < 0
+        ? `[HEAL] ${event.player} executed recovery on ${event.target} (+${-event.damage} hp)`
+        : `${event.player} executed attack on ${event.target} (Roll: ${event.roll}) — ${event.hit ? `HIT! (${event.damage} dmg)` : 'MISS'}`;
+    case 'dndMonsterTurn':
+      return `goblins turn executing...`;
+    case 'dndOver':
+      return `dungeon execution ${event.won ? 'SUCCESS' : 'FAILED'}`;
+    case 'timeoutDnd':
+      return `${event.player} execution timed out — auto action dispatched`;
+    case 'dndLevelUp':
+      return `[LEVEL] transitioned to dungeon floor ${event.level} (party healed by 50% max HP)`;
+    case 'dndTrap':
+      return `[TRAP] ${event.player} triggered a hidden trap and suffered ${event.damage} dmg`;
+    case 'dndMessage':
+      return event.message;
   }
 }
 
@@ -344,6 +374,7 @@ const TEXT: TextTable = {
   'start.startBigTwo': 'Run task',
   'start.startHoldem': 'Start run',
   'start.startSnake': 'Start watch',
+  'start.startDownstairs': 'Start descent',
   'start.needPlayers': 'Needs {min}+ members, all ready',
 
   'bigTwo.idleTitle': 'Waiting for the owner to run the task',
@@ -504,9 +535,41 @@ const TEXT: TextTable = {
   'snake.resultTitle': 'Watch stopped',
   'snake.playAgain': 'Restart watch',
   'snake.waitHost': 'Waiting for the owner',
+  'downstairs.health': 'retries {n}',
+  'downstairs.depth': 'line {n}',
+  'downstairs.eliminated': 'exited',
 
   'lobby.noDisguise': 'GUI',
   'lobby.noDisguiseHint': 'This task renders a graphical preview — it will not look like an editor.',
+
+  // 踩地雷
+  'start.startMinesweeper': 'Run Debugger',
+  'minesweeper.idleTitle': 'Waiting to start debugging',
+  'minesweeper.idleHint': '{n}/{max} members, {min} required',
+  'minesweeper.score': 'fixed {n}',
+  'minesweeper.finalScore': 'total {n}',
+  'minesweeper.remainingMines': 'bugs remaining: {n}',
+  'minesweeper.playAgain': 'Re-run pipeline',
+  'minesweeper.waitHost': 'Waiting for pipeline restart',
+  'minesweeperHint.notPlaying': 'Press Ready, then the owner starts',
+  'minesweeperHint.waitOthers': 'Analyzing code...',
+  'minesweeperHint.yourTurn': 'Your turn to inspect',
+  'minesweeperHint.spectating': 'Read-only mode',
+
+  // 龍與地下城
+  'start.startDnd': 'Execute Dungeon',
+  'dnd.idleTitle': 'Waiting for host to start dungeon',
+  'dnd.idleHint': '{n}/{max} members, {min} required',
+  'dnd.hp': 'HP {hp}/{maxHp}',
+  'dnd.alive': 'ALIVE',
+  'dnd.dead': 'DEAD',
+  'dnd.playAgain': 'Re-run dungeon',
+  'dnd.waitHost': 'Waiting for host to restart',
+  'dndHint.notPlaying': 'Press Ready, then the owner starts',
+  'dndHint.waitOthers': 'Waiting for other developers...',
+  'dndHint.yourTurn': 'Your turn to execute actions',
+  'dndHint.spectating': 'Read-only mode',
+  'dnd.logTitle': 'OUTPUT — dungeon',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -559,6 +622,23 @@ const ERRORS: Skin['errors'] = {
   TRADES_DISABLED: 'Transfers are off in this run',
   BAD_TRADE: 'That transfer is not valid',
   CAN_STILL_PAY: 'You can still cover this',
+  INVALID_CELL: 'Invalid block index',
+  CELL_REVEALED: 'This block has already been scanned',
+  CELL_FLAGGED: 'Breakmarked! Remove the breakpoint first',
+  CANNOT_FLAG_REVEALED: 'Cannot place breakpoint on a scanned block',
+  INVALID_CHORD: 'Breakpoint count does not match — cannot expand',
+  CELL_OCCUPIED: 'That block is already taken',
+  TARGET_OUT_OF_RANGE: 'Target is out of scope',
+  TARGET_NOT_FOUND: 'No such target',
+  ALREADY_MOVED: 'Already relocated this pass — finish with an action',
+  SKILL_ON_COOLDOWN: 'Still on cooldown this pass',
+  NOT_BOSS_TURN: 'Not the maintainer pass right now',
+  MONSTER_NOT_FOUND: 'No such worker process',
+  MONSTER_ALREADY_ACTED: 'That worker already ran this pass',
+  MONSTER_ALREADY_MOVED: 'That worker already relocated this pass — it can only run a task',
+  MONSTER_RESTRAINED: 'That worker is pinned to its slot for a few passes — it can still run tasks',
+  PLAYER_RESTRAINED: 'Your process is pinned to its slot for a few passes — you can still run tasks',
+  TARGET_INVULNERABLE: 'That target is shielded by its replicas — clear them first',
 };
 
 /** 偽裝成編輯器：牌變成檔案、出牌變成 commit、戰報變成輸出面板。 */
@@ -573,7 +653,7 @@ export const vscodeSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace', snake: 'watch' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace', snake: 'watch', downstairs: 'descent.ts', minesweeper: 'debug', dnd: 'dungeon' },
   bigTwoPreset: { taiwan: 'strict', classic: 'default', custom: 'custom' },
   bigTwoRule: {
     cuts: 'override',

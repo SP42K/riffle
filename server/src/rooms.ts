@@ -42,6 +42,20 @@ import {
   type SnakeOptions,
   type SnakeSeatInfo,
   type SystemNotice,
+  type DownstairsGameView,
+  type DownstairsState,
+  type DownstairsCharacterId,
+  DND_BOSS_SEAT,
+  DND_DIFFICULTIES,
+  DND_NPC_CONTROLS,
+  type DndDifficulty,
+  type DndNpcControl,
+  type DndRole,
+  downstairsView,
+  type MinesweeperGameView,
+  type MinesweeperSeatInfo,
+  type MinesweeperCellView,
+  type DndGameView,
 } from 'shared';
 import { seatOfPlayer, type GameState, type Seats } from './gameEngine.js';
 import { actionsFor, type HoldemState } from './holdemEngine.js';
@@ -54,6 +68,8 @@ import {
 } from './monopolyEngine.js';
 import type { SnakeEvent, SnakeState } from './snakeEngine.js';
 import { assertNeverGame, type TurnBased } from './turnBased.js';
+import { type MinesweeperState, countAdjacentMines } from './minesweeperEngine.js';
+import { type DndState } from './dndEngine.js';
 
 export interface Member {
   playerId: PlayerId;
@@ -62,18 +78,27 @@ export interface Member {
   connected: boolean;
   /** 斷線寬限計時器，重新連上時要清掉。 */
   graceTimer: NodeJS.Timeout | null;
+  characterId: DownstairsCharacterId;
+  /** 只有龍與地下城使用：當冒險者還是當操控怪物的魔王。 */
+  dndRole: DndRole;
 }
 
 export interface PlayerMember extends Member {
   ready: boolean;
 }
 
-/** 依玩法分派的牌局。四種 state 都滿足 TurnBased，計時與狀態判斷不必分支。 */
+/**
+ * 依玩法分派的牌局。除了 downstairs 之外都滿足 TurnBased，計時與狀態判斷不必分支；
+ * downstairs 是 authoritative fixed tick，沒有「輪到誰」，由 turnStateOf 擋掉。
+ */
 export type RoomGame =
   | { type: 'bigTwo'; state: GameState }
   | { type: 'holdem'; state: HoldemState }
   | { type: 'monopoly'; state: MonopolyState }
-  | { type: 'snake'; state: SnakeState };
+  | { type: 'downstairs'; state: DownstairsState }
+  | { type: 'snake'; state: SnakeState }
+  | { type: 'minesweeper'; state: MinesweeperState }
+  | { type: 'dnd'; state: DndState };
 
 export interface Room {
   id: string;
@@ -85,6 +110,10 @@ export interface Room {
   monopolyOptions: MonopolyOptions;
   /** 貪吃蛇的規則開關。建房時決定，其他玩法用不到但一律有值。 */
   snakeOptions: SnakeOptions;
+  /** 龍與地下城的難度。房主在開局前決定，開打之後整局固定。 */
+  dndDifficulty: DndDifficulty;
+  /** 龍與地下城：NPC 隊友由 AI 自動行動，還是交給房主手動操作。 */
+  dndNpcControl: DndNpcControl;
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -103,13 +132,16 @@ export interface Room {
   turnTimer: NodeJS.Timeout | null;
   /** 德州撲克：攤牌後自動發下一手的計時器，跟 turnTimer 分開才不會被清掉。 */
   handTimer: NodeJS.Timeout | null;
+  /** 小朋友下樓梯 authoritative fixed tick。 */
+  gameTimer: NodeJS.Timeout | null;
   /** 貪吃蛇：即時 tick 迴圈，跟回合制的 turnTimer 是平行的兩套機制，互不相干。 */
   tickTimer: NodeJS.Timeout | null;
 }
 
 /** 取出玩法無關的回合資訊。 */
 export function turnStateOf(room: Room): TurnBased | null {
-  return room.game?.state ?? null;
+  if (!room.game || room.game.type === 'downstairs') return null;
+  return room.game.state;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +228,16 @@ export function normalizeSnakeOptions(value: unknown): SnakeOptions {
   return options;
 }
 
+/** 只收認得的 NPC 操作方式，其他一律吃 AI 自動。 */
+export function normalizeDndNpcControl(value: unknown): DndNpcControl {
+  return DND_NPC_CONTROLS.find((control) => control === value) ?? 'auto';
+}
+
+/** 只收認得的難度，其他一律吃一般模式。 */
+export function normalizeDndDifficulty(value: unknown): DndDifficulty {
+  return DND_DIFFICULTIES.find((difficulty) => difficulty === value) ?? 'normal';
+}
+
 export function clampMaxPlayers(value: unknown, gameType: GameType): number {
   const limits = SEAT_LIMITS[gameType];
   const n = Math.floor(Number(value));
@@ -223,6 +265,8 @@ export function createRoom(input: CreateRoomInput): Room {
     bigTwoRules,
     monopolyOptions,
     snakeOptions,
+    dndDifficulty: 'normal',
+    dndNpcControl: 'auto',
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -235,15 +279,35 @@ export function createRoom(input: CreateRoomInput): Room {
     buttonSeat: -1, // 還沒發過牌；第一手會往後推一位，也就是從座位 0 開始坐莊
     turnTimer: null,
     handTimer: null,
+    gameTimer: null,
     tickTimer: null,
   };
   seatPlayer(room, host);
   return room;
 }
 
+/**
+ * 下一個可以自動入座的座位；沒有空位回 -1。
+ *
+ * 龍與地下城要特別處理：`DND_BOSS_SEAT` 是魔王專用位，只能透過 `room:dndRole` 認領 ——
+ * 讓自動入座撿走的話，那個人整局都不會有棋子（`dealDnd` 只發座位 0~3）也輪不到回合。
+ * 冒險者位另外照 `maxPlayers` 算額度，這樣「2 人房 + 一位魔王」不會偷偷變成 3 個人。
+ */
+export function freeSeatOf(room: Room): number {
+  if (room.gameType !== 'dnd') return room.seats.indexOf(null);
+
+  const budget = room.maxPlayers - (room.seats[DND_BOSS_SEAT] ? 1 : 0);
+  let taken = 0;
+  for (let i = 0; i < DND_BOSS_SEAT; i++) if (room.seats[i]) taken++;
+  if (taken >= budget) return -1;
+
+  for (let i = 0; i < DND_BOSS_SEAT; i++) if (!room.seats[i]) return i;
+  return -1;
+}
+
 /** 讓成員入座，回傳座位編號；沒有空位回 null。 */
 export function seatPlayer(room: Room, member: Member): number | null {
-  const seat = room.seats.indexOf(null);
+  const seat = freeSeatOf(room);
   if (seat === -1) return null;
   room.seats[seat] = member.playerId;
   room.players.set(member.playerId, { ...member, ready: false });
@@ -266,6 +330,10 @@ export function addSpectator(room: Room, member: Member): void {
 export function removeMember(room: Room, playerId: PlayerId): void {
   const seat = room.seats.indexOf(playerId);
   if (seat !== -1) room.seats[seat] = null;
+  // 離開座位就不再是魔王。改觀戰再改回來時 Member 物件是同一個，不清掉的話那面
+  // 'boss' 旗子會跟著他坐到冒險者位上，之後房裡就再也沒有人能認領魔王。
+  const member = room.players.get(playerId) ?? room.spectators.get(playerId);
+  if (member) member.dndRole = 'hero';
   room.players.delete(playerId);
   room.spectators.delete(playerId);
 
@@ -302,6 +370,46 @@ export function canStart(room: Room): boolean {
   if (players.length < SEAT_LIMITS[room.gameType].min) return false;
   return players.every((p) => p.ready || p.playerId === room.hostId);
 }
+
+/**
+ * 對調兩個座位。魔王一定要坐在最後一個座位，所以認領／放棄角色時用它搬人；
+ * 只在開局前呼叫 —— 遊戲進行中換座位會把手牌與棋子對應弄壞。
+ */
+export function swapSeats(room: Room, a: number, b: number): void {
+  if (a === b) return;
+  // 房間可能是用小於 DND_BOSS_SEAT+1 的人數開的，直接寫 seats[4] 會留下「洞」——
+  // every/indexOf/filter 對洞的行為各不相同，先補成 null 才不會踩到。
+  for (let i = room.seats.length; i <= Math.max(a, b); i++) room.seats[i] = null;
+  const holder = room.seats[a] ?? null;
+  room.seats[a] = room.seats[b] ?? null;
+  room.seats[b] = holder;
+}
+
+/**
+ * NPC 隊友交給誰操作。設成 AI 自動就回 null。
+ * 手動時優先給房主，但**房主自己是魔王的話不能操作冒險者隊伍** ——
+ * 那種情況改交給第一位真人冒險者；連一位都沒有就退回 AI。
+ */
+export function npcControllerOf(room: Room): PlayerId | null {
+  if (room.gameType !== 'dnd' || room.dndNpcControl !== 'host') return null;
+
+  const isHero = (playerId: PlayerId) => room.players.get(playerId)?.dndRole !== 'boss';
+  if (room.players.has(room.hostId) && isHero(room.hostId)) return room.hostId;
+
+  for (let seat = 0; seat < DND_BOSS_SEAT; seat++) {
+    const playerId = room.seats[seat];
+    if (playerId && room.players.has(playerId) && isHero(playerId)) return playerId;
+  }
+  return null;
+}
+
+/** 這間房的魔王坐在哪個座位；沒有人當魔王就回 null。 */
+export function bossSeatOf(room: Room): number | null {
+  const playerId = room.seats[DND_BOSS_SEAT];
+  if (!playerId) return null;
+  return room.players.get(playerId)?.dndRole === 'boss' ? DND_BOSS_SEAT : null;
+}
+
 
 /** 德州撲克：把籌碼歸零的人補回起始籌碼，回傳補了哪些人。 */
 export function refillChips(room: Room): PlayerId[] {
@@ -505,6 +613,8 @@ function buildSeats(room: Room): SeatView[] {
         isHost: playerId === room.hostId,
         ready: player.ready,
         connected: player.connected,
+        characterId: player.characterId,
+        dndRole: player.dndRole,
       } satisfies SeatView,
     ];
   });
@@ -709,6 +819,59 @@ function buildSnakeGameView(game: SnakeState): SnakeGameView {
   };
 }
 
+function buildMinesweeperGameView(room: Room, game: MinesweeperState): MinesweeperGameView {
+  const board: MinesweeperCellView[][] = [];
+  for (let r = 0; r < game.board.length; r++) {
+    const gameRow = game.board[r]!;
+    const row: MinesweeperCellView[] = [];
+    for (let c = 0; c < gameRow.length; c++) {
+      const cell = gameRow[c]!;
+      const adjacentMines = cell.revealed && !cell.hasMine ? countAdjacentMines(game.board, r, c) : null;
+      row.push({
+        r,
+        c,
+        revealed: cell.revealed,
+        flaggedBy: cell.flaggedBy,
+        exploded: cell.exploded,
+        adjacentMines,
+      });
+    }
+    board.push(row);
+  }
+
+  const seats: Record<number, MinesweeperSeatInfo> = {};
+  for (const [seat, playerId] of room.seats.entries()) {
+    if (!playerId || !room.players.has(playerId)) continue;
+    seats[seat] = {
+      score: game.scores[playerId] ?? 0,
+      finalScore: game.finalScores ? (game.finalScores[playerId] ?? null) : null,
+    };
+  }
+
+  let foundMines = 0;
+  for (let r = 0; r < game.board.length; r++) {
+    const gameRow = game.board[r]!;
+    for (let c = 0; c < gameRow.length; c++) {
+      const cell = gameRow[c]!;
+      if (cell.hasMine && (cell.exploded || cell.flaggedBy !== null)) {
+        foundMines++;
+      }
+    }
+  }
+  const remainingMines = Math.max(0, 15 - foundMines);
+
+  return {
+    type: 'minesweeper',
+    turnPlayerId: game.over ? null : (room.seats[game.turnSeat] ?? null),
+    turnDeadline: game.turnDeadline,
+    over: game.over,
+    board,
+    seats,
+    remainingMines,
+    ranking: game.ranking.slice(),
+  };
+}
+
 function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
   const game = room.game;
   if (!game) return null;
@@ -719,11 +882,43 @@ function buildGameView(room: Room, viewerId: PlayerId): GameView | null {
       return buildHoldemGameView(room, game.state, viewerId);
     case 'monopoly':
       return buildMonopolyGameView(room, game.state, viewerId);
+    case 'downstairs':
+      return downstairsView(game.state) satisfies DownstairsGameView;
     case 'snake':
       return buildSnakeGameView(game.state);
+    case 'minesweeper':
+      return buildMinesweeperGameView(room, game.state);
+    case 'dnd':
+      return buildDndGameView(room, game.state);
     default:
       return assertNeverGame(game);
   }
+}
+
+function buildDndGameView(room: Room, game: DndState): DndGameView {
+  return {
+    type: 'dnd',
+    turnPlayerId: game.over ? null : (room.seats[game.turnSeat] ?? null),
+    turnDeadline: game.turnDeadline,
+    over: game.over,
+    board: game.board,
+    seats: game.seats,
+    ranking: game.ranking.slice(),
+    level: game.level || 1,
+    fireWalls: game.fireWalls ? game.fireWalls.map((wall) => ({ ...wall })) : [],
+    difficulty: game.difficulty ?? 'normal',
+    bossPlayerId: game.bossSeat === null ? null : (room.seats[game.bossSeat] ?? null),
+    won: game.over ? game.won : null,
+    turnSeat: game.turnSeat,
+    villagersRescued: game.villagersRescued,
+    villagersLost: game.villagersLost,
+    roundCount: game.roundCount,
+    npcControllerId: game.npcController,
+    phase: game.phase,
+    actedMonsterIds: [...game.monsterActed],
+    movedMonsterIds: [...game.monsterMoved],
+    turnHasMoved: !!game.turnHasMoved,
+  };
 }
 
 /**
@@ -738,7 +933,10 @@ function handOf(game: RoomGame, playerId: PlayerId): Card[] | null {
       return game.state.hole.get(playerId)?.slice() ?? [];
     case 'monopoly':
       return null;
+    case 'downstairs':
     case 'snake':
+    case 'minesweeper':
+    case 'dnd':
       return null;
     default:
       return assertNeverGame(game);
@@ -784,6 +982,8 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     bigTwoRules: room.gameType === 'bigTwo' ? room.bigTwoRules : null,
     monopolyOptions: room.gameType === 'monopoly' ? room.monopolyOptions : null,
     snakeOptions: room.gameType === 'snake' ? room.snakeOptions : null,
+    dndDifficulty: room.gameType === 'dnd' ? room.dndDifficulty : null,
+    dndNpcControl: room.gameType === 'dnd' ? room.dndNpcControl : null,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),

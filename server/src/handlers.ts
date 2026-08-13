@@ -22,6 +22,18 @@ import {
   type PlayerId,
   type ServerToClientEvents,
   type SystemNotice,
+  activateDownstairsSkill,
+  advanceDownstairs,
+  downstairsView,
+  removeDownstairsPlayer,
+  setDownstairsDirection,
+  startDownstairs,
+  DOWNSTAIRS_CHARACTERS,
+  DOWNSTAIRS_TICK_MS,
+  type MinesweeperAction,
+  type DndAction,
+  type DndRole,
+  DND_BOSS_SEAT,
 } from 'shared';
 import {
   PLAY_ERROR_MESSAGE,
@@ -31,6 +43,21 @@ import {
   playCards,
   removePlayerFromGame,
 } from './gameEngine.js';
+import {
+  MINESWEEPER_ERROR_MESSAGE,
+  applyMinesweeperAction,
+  autoActMinesweeper,
+  dealMinesweeper,
+  removePlayerFromMinesweeper,
+} from './minesweeperEngine.js';
+import {
+  DND_ERROR_MESSAGE,
+  applyDndAction,
+  autoActDnd,
+  dealDnd,
+  openingDndTurn,
+  removePlayerFromDnd,
+} from './dndEngine.js';
 import {
   BET_ERROR_MESSAGE,
   applyBet,
@@ -66,6 +93,12 @@ import {
   nicknameOf,
   normalizeBigTwoRules,
   normalizeGameType,
+  bossSeatOf,
+  freeSeatOf,
+  swapSeats,
+  normalizeDndDifficulty,
+  normalizeDndNpcControl,
+  npcControllerOf,
   normalizeMonopolyOptions,
   normalizeSnakeOptions,
   pushChat,
@@ -226,14 +259,22 @@ export class GameServer {
     socket.on('room:leave', (_payload, ack) => this.onLeaveRoom(socket, ack));
     socket.on('room:chat', (payload) => this.onRoomChat(socket, payload));
     socket.on('room:ready', (payload) => this.onReady(socket, payload));
+    socket.on('room:character', (payload) => this.onCharacter(socket, payload));
     socket.on('game:start', (_payload, ack) => this.onStartGame(socket, ack));
     socket.on('game:play', (payload, ack) => this.onPlay(socket, payload, ack));
     socket.on('game:pass', (_payload, ack) => this.onPass(socket, ack));
     socket.on('game:action', (payload, ack) => this.onAction(socket, payload, ack));
     socket.on('game:monopoly', (payload, ack) => this.onMonopoly(socket, payload, ack));
+    socket.on('game:downstairs', (payload) => this.onDownstairs(socket, payload));
+    socket.on('game:downstairsSkill', () => this.onDownstairsSkill(socket));
     socket.on('game:snake', (payload, ack) => this.onSnake(socket, payload, ack));
     socket.on('game:snakeItem', (_payload, ack) => this.onSnakeItem(socket, ack));
     socket.on('game:snakeDash', (_payload, ack) => this.onSnakeDash(socket, ack));
+    socket.on('game:minesweeper', (payload, ack) => this.onMinesweeper(socket, payload, ack));
+    socket.on('game:dnd', (payload, ack) => this.onDnd(socket, payload, ack));
+    socket.on('room:dndDifficulty', (payload) => this.onDndDifficulty(socket, payload));
+    socket.on('room:dndRole', (payload) => this.onDndRole(socket, payload));
+    socket.on('room:dndNpcControl', (payload) => this.onDndNpcControl(socket, payload));
     socket.on('disconnect', () => this.onDisconnect(socket));
   }
 
@@ -303,7 +344,7 @@ export class GameServer {
 
     // 斷線時把回合縮短成 3 秒，回來了要把整個回合還給他，否則一重整就被自動代打
     const game = room.game;
-    if (game && !game.state.over && room.seats[game.state.turnSeat] === playerId) {
+    if (game && game.type !== 'downstairs' && !game.state.over && room.seats[game.state.turnSeat] === playerId) {
       game.state.turnDeadline = Date.now() + TURN_MS;
     }
 
@@ -392,6 +433,8 @@ export class GameServer {
       socketId: null,
       connected: true,
       graceTimer: null,
+      characterId: 'brave',
+      dndRole: 'hero',
     };
   }
 
@@ -472,7 +515,8 @@ export class GameServer {
           error: { code: 'IN_PROGRESS', message: '這局已經開打了，可以先觀戰' },
         });
       }
-      if (room.seats.every((seat) => seat !== null)) {
+      // 用 freeSeatOf 而不是「座位陣列填滿了沒」—— 龍與地下城的魔王位不開放自動入座
+      if (freeSeatOf(room) === -1) {
         return reply(ack, { ok: false, error: { code: 'ROOM_FULL', message: '房間已滿，可以先觀戰' } });
       }
     }
@@ -535,6 +579,7 @@ export class GameServer {
     if (isEmpty(room)) {
       if (room.turnTimer) clearTimeout(room.turnTimer);
       if (room.handTimer) clearTimeout(room.handTimer);
+      if (room.gameTimer) clearInterval(room.gameTimer);
       if (room.tickTimer) clearTimeout(room.tickTimer);
       this.rooms.delete(room.id);
       this.loggedHand.delete(room.id);
@@ -560,8 +605,18 @@ export class GameServer {
       case 'monopoly':
         this.logMonopoly(room, removePlayerFromMonopoly(room.seats, game.state, playerId));
         return;
+      case 'downstairs':
+        removeDownstairsPlayer(game.state, playerId);
+        return;
       case 'snake':
         this.logSnake(room, removePlayerFromSnake(game.state, playerId));
+        return;
+      case 'minesweeper':
+        removePlayerFromMinesweeper(room.seats, game.state, playerId);
+        return;
+      case 'dnd':
+        // 魔王中離會代打完一整輪怪物行動，那些事件要寫進戰報
+        for (const ev of removePlayerFromDnd(room.seats, game.state, playerId)) pushLog(room, ev);
         return;
       default:
         assertNeverGame(game);
@@ -598,6 +653,75 @@ export class GameServer {
     if (!room || !player) return;
 
     player.ready = payload?.ready === true;
+    this.broadcastRoom(room);
+  }
+
+  private onCharacter(socket: GameSocket, payload: { characterId?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    const player = room?.players.get(session.playerId);
+    if (!room || !player || (room.gameType !== 'downstairs' && room.gameType !== 'dnd') || statusOf(room) === 'playing') return;
+    const characterId = DOWNSTAIRS_CHARACTERS.find((id) => id === payload?.characterId);
+    if (!characterId) return;
+    player.characterId = characterId;
+    this.broadcastRoom(room);
+  }
+
+  /**
+   * 選擇當冒險者還是魔王。一間房最多一位魔王，而且會被換到最後一個座位 ——
+   * 引擎裡「隊伍就是座位 0~3」的假設靠這個維持。
+   */
+  private onDndRole(socket: GameSocket, payload: { role?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    const player = room?.players.get(session.playerId);
+    if (!room || !player || room.gameType !== 'dnd' || statusOf(room) === 'playing') return;
+
+    const role: DndRole = payload?.role === 'boss' ? 'boss' : 'hero';
+    if (role === player.dndRole) return;
+
+    const seat = room.seats.indexOf(session.playerId);
+    if (seat === -1) return;
+
+    if (role === 'boss') {
+      // 已經有人當魔王就不受理。認的是「座位」不是旗子 —— bossSeatOf 才是唯一的真相
+      if (bossSeatOf(room) !== null) return;
+      swapSeats(room, seat, DND_BOSS_SEAT);
+    } else {
+      // 放回前面第一個空的冒險者位。沒有空位就不能放棄魔王 ——
+      // 讓他留在 DND_BOSS_SEAT 卻標成冒險者的話，dealDnd 不會發給他棋子，整局都輪不到他。
+      const free = room.seats.findIndex((id, idx) => idx < DND_BOSS_SEAT && !id);
+      if (free === -1) return;
+      swapSeats(room, seat, free);
+    }
+
+    player.dndRole = role;
+    this.broadcastRoom(room);
+  }
+
+  /** NPC 隊友要不要由房主親自操作，也是房主的決定，只能在開局前改。 */
+  private onDndNpcControl(socket: GameSocket, payload: { control?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room || room.gameType !== 'dnd') return;
+    if (room.hostId !== session.playerId || statusOf(room) === 'playing') return;
+
+    room.dndNpcControl = normalizeDndNpcControl(payload?.control);
+    this.broadcastRoom(room);
+  }
+
+  /** 難度是房主的決定，而且只能在開局前改。 */
+  private onDndDifficulty(socket: GameSocket, payload: { difficulty?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room || room.gameType !== 'dnd') return;
+    if (room.hostId !== session.playerId || statusOf(room) === 'playing') return;
+
+    room.dndDifficulty = normalizeDndDifficulty(payload?.difficulty);
     this.broadcastRoom(room);
   }
 
@@ -650,6 +774,19 @@ export class GameServer {
         });
         break;
       }
+      case 'downstairs': {
+        const players = seatedPlayers(room);
+        const state = startDownstairs(
+          players.map((player) => player.playerId),
+          Date.now(),
+          Object.fromEntries(players.map((player) => [player.playerId, player.characterId])),
+          'pve',
+        );
+        room.game = { type: 'downstairs', state };
+        this.startDownstairsLoop(room);
+        break;
+      }
+
       case 'snake': {
         const scale = room.snakeOptions.largeMap ? SNAKE_LARGE_MAP_SCALE : 1;
         const size = SNAKE_GRID_SIZE * scale;
@@ -657,6 +794,30 @@ export class GameServer {
         room.game = { type: 'snake', state };
         pushLog(room, { t: 'snakeStart', players: seatedPlayers(room).length });
         this.scheduleSnakeStart(room);
+        break;
+      }
+      case 'minesweeper': {
+        const state = dealMinesweeper(room.seats);
+        room.game = { type: 'minesweeper', state };
+        pushLog(room, { t: 'minesweeperStart', players: seatedPlayers(room).length });
+        break;
+      }
+      case 'dnd': {
+        const players = seatedPlayers(room);
+        const characterIds = Object.fromEntries(
+          players.map((player) => [player.playerId, player.characterId])
+        );
+        const state = dealDnd(
+          room.seats,
+          characterIds,
+          room.dndDifficulty,
+          bossSeatOf(room),
+          npcControllerOf(room),
+        );
+        room.game = { type: 'dnd', state };
+        pushLog(room, { t: 'dndStart', players: seatedPlayers(room).length });
+        // 第一棒可能是 NPC（單人魔王模式下整隊都是），先把隊伍跑到該輪到真人／魔王為止
+        for (const ev of openingDndTurn(room.seats, state)) pushLog(room, ev);
         break;
       }
       default:
@@ -828,6 +989,49 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
+
+  private onDownstairs(socket: GameSocket, payload: { direction?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room?.game || room.game.type !== 'downstairs' || room.game.state.over) return;
+    if (!room.players.has(session.playerId)) return;
+    setDownstairsDirection(room.game.state, session.playerId, Number(payload?.direction));
+  }
+
+  private onDownstairsSkill(socket: GameSocket): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room?.game || room.game.type !== 'downstairs' || room.game.state.over) return;
+    if (!room.players.has(session.playerId)) return;
+    activateDownstairsSkill(room.game.state, session.playerId);
+  }
+
+  private startDownstairsLoop(room: Room): void {
+    if (room.gameTimer) clearInterval(room.gameTimer);
+    let previous = Date.now();
+    room.gameTimer = setInterval(() => {
+      const game = room.game;
+      if (!game || game.type !== 'downstairs') {
+        if (room.gameTimer) clearInterval(room.gameTimer);
+        room.gameTimer = null;
+        return;
+      }
+      const now = Date.now();
+      advanceDownstairs(game.state, now - previous);
+      previous = now;
+      this.io.to(roomChannel(room.id)).emit('game:downstairsState', downstairsView(game.state));
+      if (game.state.over) {
+        if (room.gameTimer) clearInterval(room.gameTimer);
+        room.gameTimer = null;
+        this.checkGameOver(room);
+        this.broadcastRoom(room);
+        this.broadcastLobby();
+      }
+    }, DOWNSTAIRS_TICK_MS);
+  }
+
   /**
    * 貪吃蛇專用：只把方向意圖寫進緩衝就回覆，不走 afterGameAction ——
    * 移動、碰撞判定與廣播全部發生在 tick 迴圈，按方向鍵不該立刻重播一次整包快照。
@@ -873,6 +1077,55 @@ export class GameServer {
     reply(ack, { ok: true, data: null });
   }
 
+  private onMinesweeper(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { room, game, playerId } = context;
+    if (game.type !== 'minesweeper') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間玩的不是踩地雷' } });
+    }
+
+    const rawAction = payload?.action as Partial<MinesweeperAction>;
+    if (!rawAction || typeof rawAction.r !== 'number' || typeof rawAction.c !== 'number' || (rawAction.kind !== 'reveal' && rawAction.kind !== 'flag' && rawAction.kind !== 'chord')) {
+      return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的動作' } });
+    }
+    const action: MinesweeperAction = {
+      kind: rawAction.kind,
+      r: Math.floor(rawAction.r),
+      c: Math.floor(rawAction.c),
+    };
+
+    const result = applyMinesweeperAction(room.seats, game.state, playerId, action);
+    if (!result.ok) {
+      return reply(ack, {
+        ok: false,
+        error: { code: result.error, message: MINESWEEPER_ERROR_MESSAGE[result.error] },
+      });
+    }
+
+    const nickname = nicknameOf(room, playerId);
+    if (result.result.kind === 'reveal' || result.result.kind === 'chord') {
+      pushLog(room, {
+        t: 'minesweeperReveal',
+        player: nickname,
+        r: result.result.r,
+        c: result.result.c,
+        points: result.result.points,
+      });
+    } else {
+      pushLog(room, {
+        t: 'minesweeperFlag',
+        player: nickname,
+        r: result.result.r,
+        c: result.result.c,
+        flagged: result.result.flagged,
+      });
+    }
+
+    this.afterGameAction(room);
+    reply(ack, { ok: true, data: null });
+  }
+
   /**
    * X 鍵：觸發衝刺截斷技能。沒開 cutting 選項、還在冷卻、或已經在充能/衝刺中，引擎會回空陣列，
    * 這裡就當作無事發生（不報錯，跟按空白鍵但道具欄是空的一樣靜默忽略）。
@@ -893,6 +1146,52 @@ export class GameServer {
         this.systemNotice(room, { t: 'snakeDash', player: nicknameOf(room, event.player) });
       }
     }
+    this.afterGameAction(room);
+    reply(ack, { ok: true, data: null });
+  }
+
+  private onDnd(socket: GameSocket, payload: { action?: unknown }, ack: unknown): void {
+    const context = this.gameContext(socket, ack);
+    if (!context) return;
+    const { room, game, playerId } = context;
+    if (game.type !== 'dnd') {
+      return reply(ack, { ok: false, error: { code: 'WRONG_GAME', message: '這個房間玩的不是龍與地下城' } });
+    }
+
+    const rawAction = payload?.action as Partial<DndAction>;
+    // 修正這裡：把 rest, skill, turnCombo 放進白名單
+    const KINDS = ['move', 'attack', 'moveTo', 'rest', 'skill', 'turnCombo', 'bossMove', 'bossAttack', 'bossHold', 'bossEnd'];
+    if (!rawAction || !KINDS.includes(rawAction.kind!)) {
+      return reply(ack, { ok: false, error: { code: 'BAD_ACTION', message: '不支援的動作' } });
+    }
+
+    const action: DndAction = {
+      kind: rawAction.kind as any,
+      dir: rawAction.dir,
+      targetId: rawAction.targetId,
+      r: rawAction.r,
+      c: rawAction.c,
+      move: rawAction.move,     // 支援組合動作的移動座標
+      action: rawAction.action, // 支援組合動作的終結招式
+      monsterId: rawAction.monsterId, // 魔王要指揮的那隻怪
+    };
+
+    const result = applyDndAction(room.seats, game.state, playerId, action);
+    if (!result.ok) {
+      // turnCombo 是「先走再打」：移動已經寫進 state 之後，終結招式才可能因為
+      // SKILL_ON_COOLDOWN／TARGET_NOT_FOUND 這類理由被擋下來。這時候不重推快照的話，
+      // 客戶端會停在移動前的棋盤，跟伺服器一路歪到下一次有人成功行動為止。
+      this.broadcastRoom(room);
+      return reply(ack, {
+        ok: false,
+        error: { code: result.error, message: DND_ERROR_MESSAGE[result.error] },
+      });
+    }
+
+    for (const ev of result.events) {
+      pushLog(room, ev);
+    }
+
     this.afterGameAction(room);
     reply(ack, { ok: true, data: null });
   }
@@ -950,10 +1249,28 @@ export class GameServer {
         this.emitRanking(room, game.state.result?.ranking ?? []);
         return;
       }
+      case 'downstairs':
+        if (game.state.over) this.emitRanking(room, game.state.ranking);
+        return;
+
       case 'snake': {
         if (!game.state.over) return;
-        // 跟大富翁一樣，snakeOver 那行戰報已經在 tick 迴圈裡由引擎事件帶出來了
         this.emitRanking(room, game.state.ranking);
+        return;
+      }
+      case 'minesweeper': {
+        if (!game.state.over) return;
+        const ranking = game.state.ranking;
+        if (ranking.length > 0) {
+          pushLog(room, { t: 'minesweeperOver', ranking: ranking.map((id) => nicknameOf(room, id)) });
+        }
+        this.emitRanking(room, ranking);
+        return;
+      }
+      case 'dnd': {
+        if (!game.state.over) return;
+        const ranking = game.state.ranking;
+        this.emitRanking(room, ranking);
         return;
       }
       default:
@@ -1012,8 +1329,12 @@ export class GameServer {
 
     const game = room.game;
     if (!game || game.state.over) return;
+
+    if (game.type === 'downstairs') return;
+
     // 貪吃蛇是即時制，沒有「輪到誰」——回合計時器對它沒有意義，交給 scheduleSnakeTick
     if (game.type === 'snake') return;
+
 
     const playerId = room.seats[game.state.turnSeat];
     const player = playerId ? room.players.get(playerId) : undefined;
@@ -1040,6 +1361,7 @@ export class GameServer {
   private runAutoAct(room: Room): void {
     const game = room.game;
     if (!game || game.state.over) return;
+    if (game.type === 'downstairs') return;
 
     const playerId = room.seats[game.state.turnSeat];
     const nickname = playerId ? nicknameOf(room, playerId) : '';
@@ -1078,6 +1400,32 @@ export class GameServer {
       case 'snake':
         // scheduleTurn 對貪吃蛇一律提早 return，這裡永遠不會被排到；留著只是為了窮盡檢查
         break;
+      case 'minesweeper': {
+        const acted = autoActMinesweeper(room.seats, game.state);
+        if (acted && acted.ok) {
+          pushLog(room, { t: 'timeoutMinesweeper', player: nickname });
+          if (acted.result.kind === 'reveal') {
+            pushLog(room, {
+              t: 'minesweeperReveal',
+              player: nickname,
+              r: acted.result.r,
+              c: acted.result.c,
+              points: acted.result.points,
+            });
+          }
+        }
+        break;
+      }
+      case 'dnd': {
+        const acted = autoActDnd(room.seats, game.state);
+        if (acted && acted.ok) {
+          pushLog(room, { t: 'timeoutDnd', player: nickname });
+          for (const ev of acted.events) {
+            pushLog(room, ev);
+          }
+        }
+        break;
+      }
       default:
         assertNeverGame(game);
     }
