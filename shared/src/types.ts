@@ -463,7 +463,12 @@ export type LogEvent =
   | { t: 'timeoutDnd'; player: string }
   | { t: 'dndLevelUp'; level: number }
   | { t: 'dndTrap'; player: string; damage: number }
-  | { t: 'dndMessage'; message: string };
+  /**
+   * 自由文字的戰報。`kind: 'skill'` 代表這是職業技能或被動的敘述 ——
+   * 前端據此把它分到「技能與被動」那一欄；沒標的（生怪、死亡、換層、撿裝備…）
+   * 留在戰鬥紀錄裡。標在事件上而不是讓前端比對字串，是因為字串一改分類就會失準。
+   */
+  | { t: 'dndMessage'; message: string; kind?: 'skill' };
 
 /**
  * 一次下注動作的結構化描述。座位上的「最近動作」與戰報共用。
@@ -770,7 +775,6 @@ export type DndFxKind =
   | 'net'        // 撒網
   | 'bind'       // 法師束縛
   | 'acDown'     // 盜賊破甲（降 AC）
-  | 'magicDown'  // 法師破魔（降魔防）
   | 'weaken'     // 削弱
   | 'judge'      // 神聖判官
   | 'heal'       // 治療
@@ -788,7 +792,8 @@ export type DndFxKind =
   | 'empower'    // 打倒酋長的強化
   | 'song'       // 吟遊詩人的歌
   | 'charm'      // 洗腦
-  | 'rage'       // 嗜魔鬥志
+  | 'wander'     // 魅惑：漫無目的地遊蕩
+  | 'transmute'  // 魂體轉化
   | 'doom'       // 惡魔之卵
   | 'execute'    // 鬥士致命斬殺
   | 'whirlwind'  // 鬥士旋風
@@ -836,8 +841,6 @@ export interface DndPiece {
   trappedTurns?: number;
   /** 這張網每回合扣幾點 HP（跟著撒網的人的裝備走），沒填是 1 */
   netDamage?: number;
-  /** 中了法師【破魔】，剩餘幾回合火焰傷害會被放大（只影響魔法傷害，不動 AC） */
-  magicDebuffTurns?: number;
   /** 中了弓手【放血】，剩餘幾回合每回合流血 */
   bleedTurns?: number;
   /** 這道傷口每回合流幾點（跟著射出這一箭的人的裝備走），沒填是 1 */
@@ -849,6 +852,8 @@ export interface DndPiece {
   ally?: boolean;
   /** 中了召喚術士【惡魔之卵】，剩幾回合必死（頭目免疫） */
   doomTurns?: number;
+  /** 中了召喚術士【魅惑】，剩幾回合只會漫無目的地遊蕩、不會攻擊 */
+  wanderTurns?: number;
   /**
    * 怪物的攻擊被動。用旗標而不是 id 判斷 —— B6 的異界大門會一直生出新的虛空酋長，
    * id 每隻都不同，硬判 'boss-3' 的話新生的那些就沒有放逐／召喚／恐懼。
@@ -920,6 +925,8 @@ export interface DndSeatInfo {
   statBonus?: number;
   /** 召喚術士這一層樓已經召喚過幾次（每層有次數上限，換層歸零） */
   summonsUsed?: number;
+  /** 弓手【狙擊】的窗口：剩幾回合可以無視射程、並且一次射多箭 */
+  sniperTurns?: number;
   /** 吟遊詩人【進擊之歌】：剩幾回合傷害提升，以及提升的比例 */
   dmgBuffTurns?: number;
   dmgBuffRatio?: number;

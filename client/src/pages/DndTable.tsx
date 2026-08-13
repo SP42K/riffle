@@ -21,24 +21,24 @@ import {
 /** 技能發動時冒出來的圖示。用一眼能聯想到技能的符號 —— 反射就是鏡子。 */
 const DND_FX_ICON: Record<DndFxKind, string> = {
   reflect: '🪞', guard: '🛡️', stun: '💫', knockback: '💨',
-  net: '🕸️', bind: '🪢', acDown: '🗡️', magicDown: '🔮', weaken: '🩸',
+  net: '🕸️', bind: '🪢', acDown: '🗡️', weaken: '🩸',
   judge: '⚖️', heal: '✨', dice: '🎲', fire: '🔥',
   chain: '⛓️', banish: '🌌', fear: '😱', summon: '🧿',
   swap: '🌀', possess: '👁️', stealth: '🌫️',
   corrupt: '🕳️', altarBreak: '💥', empower: '⬆️',
   execute: '🩸', whirlwind: '🌀', bleed: '💧', pierce: '➶', snipe: '🎯', decoy: '👥',
-  song: '🎵', charm: '💞', rage: '🔺', doom: '🥚',
+  song: '🎵', charm: '💞', wander: '😵', transmute: '🔺', doom: '🥚',
 };
 
 const DND_FX_LABEL: Record<DndFxKind, string> = {
   reflect: '反射', guard: '極限防禦', stun: '暈眩', knockback: '擊退',
-  net: '撒網', bind: '束縛', acDown: '破甲', magicDown: '破魔', weaken: '削弱',
+  net: '撒網', bind: '束縛', acDown: '破甲', weaken: '削弱',
   judge: '神聖判官', heal: '治療', dice: '骰子匕首', fire: '火牆',
   chain: '鎖鏈', banish: '放逐', fear: '恐懼', summon: '召喚',
   swap: '錯位', possess: '奪舍', stealth: '匿蹤',
   corrupt: '聖物腐化', altarBreak: '祭壇碎裂', empower: '強化',
   execute: '致命斬殺', whirlwind: '旋風', bleed: '放血', pierce: '穿刺', snipe: '狙擊', decoy: '殘影',
-  song: '吟唱', charm: '洗腦', rage: '嗜魔鬥志', doom: '惡魔之卵',
+  song: '吟唱', charm: '洗腦', wander: '魅惑', transmute: '魂體轉化', doom: '惡魔之卵',
 };
 import { PixelSprite, spriteFor, LEVEL_DECOR, type SpriteKey } from './dndSprites';
 import { DndGuide, DND_CLASS_LINE } from './DndGuide';
@@ -189,10 +189,11 @@ export function DndRoom({ room }: { room: RoomView }) {
 
   /**
    * 這個職業的技能要不要選目標。
-   * 吟遊詩人的【進擊之歌】與召喚術士的【魔物召喚】都是對自己／對全隊發動 ——
+   * 吟遊詩人的【進擊之歌】、召喚術士的【魔物召喚】、弓手的【狙擊】都是對自己／對全隊發動 ——
    * 送進瞄準模式的話畫面只會把怪物點亮，看起來像「非得點一隻怪不可」。
    */
-  const skillNeedsTarget = (classId: string) => classId !== 'bard' && classId !== 'summoner';
+  const skillNeedsTarget = (classId: string) =>
+    classId !== 'bard' && classId !== 'summoner' && classId !== 'archer';
 
   const getSkillName = (classId: string) => {
     switch (classId) {
@@ -273,7 +274,10 @@ export function DndRoom({ room }: { room: RoomView }) {
     } else if (turnPhase === 'targeting_attack') {
       const attackRange = DND_CLASS_RANGE[classId as DndClassId] ?? 1;
       const hittable = (cell.piece?.type === 'goblin' && !cell.piece.ally) || cell.piece?.type === 'altar';
-      if (cell.piece && hittable && dist <= attackRange) {
+      // 【狙擊】開著的時候不看距離
+      const sniperOpen = classId === 'archer'
+        && (mySeat >= 0 ? (game.seats[mySeat]?.sniperTurns ?? 0) : 0) > 0;
+      if (cell.piece && hittable && (dist <= attackRange || sniperOpen)) {
         executeTurn({ kind: 'attack', targetId: cell.piece.id });
       }
     } else if (turnPhase === 'targeting_skill') {
@@ -367,18 +371,18 @@ export function DndRoom({ room }: { room: RoomView }) {
   };
 
   /**
-   * 戰報拆成兩欄：右邊只留「誰打了誰、幾點」，左邊放技能與被動的敘述。
-   * 混在一起時傷害會被大量的技能訊息沖掉，反過來也一樣。
+   * 戰報拆成兩欄：右邊是戰鬥的來龍去脈，左邊只放職業技能與被動。
    *
-   * 依事件型別分：dndAttack 是傷害交換，dndMessage 是所有技能／被動／狀態的敘述。
-   * 其餘（換層、開場、結束…）留在右欄，它們是整局的節點，不該被埋進技能紀錄裡。
+   * 分法看的是事件上的 `kind: 'skill'` 標記，不是字串比對 ——
+   * 「隨從動了起來」「又一隻盜賊追了上來」這種生怪與流程訊息雖然也是 dndMessage，
+   * 但它們不是技能，混進來會把真正想看的東西沖掉。
    */
-  const damageLog = useMemo(
-    () => room.log.filter((item) => item.t !== 'dndMessage'),
+  const skillLog = useMemo(
+    () => room.log.filter((item) => item.t === 'dndMessage' && item.kind === 'skill'),
     [room.log],
   );
-  const skillLog = useMemo(
-    () => room.log.filter((item) => item.t === 'dndMessage'),
+  const damageLog = useMemo(
+    () => room.log.filter((item) => item.t !== 'dndMessage' || item.kind !== 'skill'),
     [room.log],
   );
 
@@ -512,13 +516,12 @@ export function DndRoom({ room }: { room: RoomView }) {
           <PixelSprite name={spriteFor(piece)} className="token-icon" />
           <span className="token-label">{piece.ally ? `🤝${piece.name.split(' ')[0]}` : piece.name.split(' ')[0]}</span>
           {renderFx(piece.id)}
-          {(piece.invulnerable || piece.stunnedTurns || piece.trappedTurns || piece.acDebuffTurns || piece.magicDebuffTurns || piece.atkDebuffTurns) ? (
+          {(piece.invulnerable || piece.stunnedTurns || piece.trappedTurns || piece.acDebuffTurns || piece.atkDebuffTurns) ? (
             <span className="token-label" style={{ color: 'var(--gold)', fontSize: '0.6rem' }}>
               {piece.invulnerable ? '🛡️無敵'
                 : piece.stunnedTurns ? '💫暈眩'
                 : piece.trappedTurns ? '🪤受困'
                 : piece.acDebuffTurns ? '🗡️破甲'
-                : piece.magicDebuffTurns ? '🔮破魔'
                 : '🩸削弱'}
             </span>
           ) : null}
@@ -826,6 +829,8 @@ export function DndRoom({ room }: { room: RoomView }) {
                           <span className={`party-member-status ${!alive ? 'dead' : seatInfo.banishedTurns ? 'banished' : 'alive'}`} style={seatInfo.banishedTurns ? { color: 'var(--gold)' } : {}}>
                             {!alive
                               ? t('dnd.dead')
+                              : seatInfo.sniperTurns
+                              ? `🎯 狙擊 (${seatInfo.sniperTurns})`
                               : seatInfo.corruptedTurns
                               ? `🕳️ 聖物腐化 (${seatInfo.corruptedTurns})`
                               : seatInfo.banishedTurns
@@ -935,8 +940,10 @@ export function DndRoom({ room }: { room: RoomView }) {
                         const landingCell = game.board[landing.r]?.[landing.c];
                         const isMoveable = distFromOriginal > 0 && distFromOriginal <= moveRange
                           && !!landingCell && (!landingCell.piece || landingCell.piece.type === 'staircase');
-                        // B6 的祭壇也是打擊目標
-                        const isAttackable = myPosition && dist <= attackRange
+                        // B6 的祭壇也是打擊目標；弓手開著【狙擊】時整張地圖都在射程內
+                        const sniperOpen = classId === 'archer'
+                          && (mySeat >= 0 ? (game.seats[mySeat]?.sniperTurns ?? 0) : 0) > 0;
+                        const isAttackable = myPosition && (dist <= attackRange || sniperOpen)
                           && ((cell.piece?.type === 'goblin' && !cell.piece.ally) || cell.piece?.type === 'altar');
                         const myEquip = mySeat >= 0 ? game.seats[mySeat]?.equipment : undefined;
                         const chainRange = myEquip && classId === 'brave'
