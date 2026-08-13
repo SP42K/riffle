@@ -117,8 +117,9 @@
 
 .skin-gear {
   position: fixed;
-  right: 10px;
-  bottom: 10px;
+  /* 避開手勢條與圓角，桌機 env() 是 0，位置不變 */
+  right: calc(10px + env(safe-area-inset-right));
+  bottom: calc(10px + env(safe-area-inset-bottom));
   z-index: 8000;
   width: 26px;
   height: 26px;
@@ -202,6 +203,8 @@
 
 .chrome {
   min-height: 100vh;
+  /* 手機瀏覽器的網址列會伸縮，dvh 才是真正看得到的高度；不支援的瀏覽器留在上面那行 */
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -968,4 +971,24 @@
 [data-skin='terminal'] .seat__tile {
   font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
   font-size: 0.72rem;
+}
+
+/* ---------------------------------------------------------- 窄螢幕：偽裝外觀
+ * 兩套偽裝外觀的牌是橫向的檔名列／短代號，各自把 --card-w 訂得比 styles.css 的
+ * 860px 版（44px）大，層疊上又贏過它，所以窄螢幕要在這裡各自再收一次。
+ * 只覆寫變數，width/min-width 那些宣告維持原樣。
+ */
+@media (max-width: 860px) {
+  [data-skin='vscode'] .card {
+    --card-w: 46px;
+  }
+  [data-skin='vscode'] .card--small {
+    --card-w: 40px;
+  }
+  [data-skin='terminal'] .card {
+    --card-w: 30px;
+  }
+  [data-skin='terminal'] .card--small {
+    --card-w: 26px;
+  }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   SEAT_LIMITS,
   SNAKE_DASH_COOLDOWN_MS,
@@ -519,7 +519,11 @@ export function SnakeRoom({ room }: { room: RoomView }) {
               {t('snake.startingIn', { n: Math.ceil(remainingMs / 1000) })}
             </p>
           )}
-          <div className="snake-board-wrap">
+          {/* --snake-cols 給 CSS 算窄螢幕的格子大小用：一般地圖 20、大地圖 40 */}
+          <div
+            className="snake-board-wrap"
+            style={{ '--snake-cols': game.width } as CSSProperties}
+          >
             <div className="snake-board" style={{ gridTemplateColumns: `repeat(${game.width}, 1fr)` }}>
               {grid.map((cell, index) => (
                 <span key={index} className={cellClassName(cell)}>

@@ -294,10 +294,12 @@ select:focus {
 
 /* --------------------------------------------------------------- 大廳 */
 
+/* 左右／下方留出瀏海與手勢條的安全區；桌機 env() 是 0，等同原本的 1rem */
 .lobby {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 1rem calc(1rem + env(safe-area-inset-right)) calc(1rem + env(safe-area-inset-bottom))
+    calc(1rem + env(safe-area-inset-left));
 }
 .lobby__header {
   display: flex;
@@ -336,6 +338,7 @@ select:focus {
 }
 .lobby__create-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 .lobby__create-row input {
@@ -485,7 +488,9 @@ select:focus {
 .room {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1rem;
+  /* 同 .lobby：左右下方避開安全區，桌機計算值不變 */
+  padding: 1rem calc(1rem + env(safe-area-inset-right)) calc(1rem + env(safe-area-inset-bottom))
+    calc(1rem + env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -864,7 +869,7 @@ select:focus {
   gap: 0.1rem;
   justify-content: center;
 }
-/* 四家的棄牌合併成一排，不塞進座位小卡片、也不標是誰打的，滿 10 張換行 */
+/* 四家的棄牌合併成一排，不塞進座位小卡片、也不標是誰打的：桌機每列 20 張，窄螢幕每列 10 張 */
 .mahjong-discard-board {
   display: grid;
   grid-template-columns: repeat(20, auto);
@@ -1542,6 +1547,48 @@ select:focus {
     grid-row: auto;
     grid-column: 1;
   }
+  /* iOS 對 16px 以下的輸入框會在聚焦時自動放大整頁，body 是 15px 所以要逐個補回去 */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  /* 控制列黏在底部，手牌不會被推到看不見的地方；底色要不透明才蓋得住牌桌 */
+  .room__footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    background: var(--felt);
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+  /* 加注列改成整行，滑桿吃剩下的寬度 */
+  .holdem__raise {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .holdem__raise input[type='range'] {
+    width: auto;
+    flex: 1 1 160px;
+  }
+  /* 觸控放大後一塊地旁邊四顆鈕會擠爆，讓它們自己折行 */
+  .monopoly__estates li,
+  .monopoly__estate-actions {
+    flex-wrap: wrap;
+  }
+  /* 棄牌堆每列從 20 張收成 10 張，整排才塞得進手機寬度 */
+  .mahjong-discard-board {
+    grid-template-columns: repeat(10, auto);
+  }
+}
+
+/* 觸控裝置：手指點得到的最小尺寸，滑鼠裝置完全不受影響 */
+@media (pointer: coarse) {
+  .btn {
+    min-height: 44px;
+  }
+  .btn--small {
+    min-height: 36px;
+  }
 }
 
 /* 貪吃蛇：單寬字元格棋盤，三套外觀共用同一個結構，只是顏色不同 */
@@ -1566,12 +1613,13 @@ select:focus {
   line-height: 1;
   user-select: none;
 }
+/* 格子大小走 --snake-cell，窄螢幕才會被覆寫成「照欄數算出來的寬度」；桌機仍是 1.1rem */
 .snake-cell {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.1rem;
-  height: 1.1rem;
+  width: var(--snake-cell, 1.1rem);
+  height: var(--snake-cell, 1.1rem);
   font-size: 0.95rem;
 }
 .snake-cell--empty {
@@ -2039,10 +2087,27 @@ select:focus {
 }
 
 @media (max-width: 720px) {
+  /*
+   * 格子寬度改成「照實際欄數算」：--snake-cols 由 SnakeTable 寫在 .snake-board-wrap 上（一般 20、大地圖 40）。
+   * 扣掉 .room 與 .table 各 1rem 的左右內距（共 4rem）再多留 0.5rem 給邊框，
+   * 以及 grid 的 gap（欄數 × 1px）。上限仍是原本的 0.85rem，一般地圖看起來跟以前一樣。
+   */
+  .snake-board {
+    --snake-cell: min(
+      0.85rem,
+      calc((100vw - 4.5rem - var(--snake-cols, 20) * 1px) / var(--snake-cols, 20))
+    );
+  }
+  /*
+   * 保險用的橫捲：偽裝外框自己還有內距，上面的估算會少算一點。
+   * 只放在窄螢幕，因為 overflow-x 一旦不是 visible，overflow-y 會跟著變成 auto，
+   * 桌機那樣會把浮在棋盤上緣的名牌切掉。
+   */
+  .snake-board-wrap {
+    overflow-x: auto;
+  }
   .snake-cell {
-    width: 0.85rem;
-    height: 0.85rem;
-    font-size: 0.75rem;
+    font-size: calc(var(--snake-cell, 0.85rem) * 0.86);
   }
   .snake-name-tag {
     font-size: 0.55rem;
