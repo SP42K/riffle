@@ -43,12 +43,16 @@ export function RoomShell({ room, center, footer, isMyTurn, showLog = true }: Pr
   // 側欄在窄螢幕會夾在牌桌與控制列中間、把手牌擠到看不見，所以窄螢幕預設收起來。
   // 桌機不受影響：開關本身 display:none，收合的 CSS 也只寫在 860px 以下。
   const [chatOpen, setChatOpen] = useState(false);
-  // 未讀 = 目前訊息數 - 上次打開時的訊息數。聊天訊息只增不減，長度差就夠用了。
-  const [seenCount, setSeenCount] = useState(roomMessages.length);
+  // 未讀不能用「訊息數的差」算：伺服器把歷史裁在 CHAT_HISTORY 則，滿了之後長度就不動了。
+  // 改記「最後看過那則的 id」，用它在目前陣列裡的位置算；找不到就代表看過的那則已被裁掉，整包都算未讀。
+  const [lastSeenId, setLastSeenId] = useState<string | null>(
+    () => roomMessages[roomMessages.length - 1]?.id ?? null,
+  );
   useEffect(() => {
-    if (chatOpen) setSeenCount(roomMessages.length);
-  }, [chatOpen, roomMessages.length]);
-  const unread = Math.max(0, roomMessages.length - seenCount);
+    if (chatOpen) setLastSeenId(roomMessages[roomMessages.length - 1]?.id ?? null);
+  }, [chatOpen, roomMessages]);
+  const seenIndex = lastSeenId === null ? -1 : roomMessages.findIndex((msg) => msg.id === lastSeenId);
+  const unread = chatOpen ? 0 : roomMessages.length - (seenIndex + 1);
 
   // 輪到自己時震一下：手機螢幕關著或在看別的 App 時，這是唯一叫得動人的提示。
   // 只認 false→true 那一次，同一個回合裡重畫幾次都不會再震；

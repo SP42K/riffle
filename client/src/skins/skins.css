@@ -152,20 +152,6 @@
   fill: currentColor;
 }
 
-/*
- * 觸控版老闆鍵的熱區：右上角一塊看不見的方形，連點兩下遮蔽。
- * 只吃自己這 48px，不擋下面的畫面；壓在頁面之上、但在設定視窗（8500）與遮蔽層（9000）之下。
- */
-.touch-boss-corner {
-  position: fixed;
-  top: env(safe-area-inset-top);
-  right: env(safe-area-inset-right);
-  width: 48px;
-  height: 48px;
-  z-index: 8400;
-  opacity: 0;
-}
-
 .skin-settings__backdrop {
   position: fixed;
   inset: 0;

@@ -27,6 +27,12 @@ body {
   color: var(--text);
   font-family: 'Noto Sans TC', 'Microsoft JhengHei', system-ui, sans-serif;
   font-size: 15px;
+  /*
+   * viewport 不再鎖 user-scalable 之後，iOS 的「連點兩下縮放」會回來，
+   * 跟老闆鍵熱區、遮蔽畫面連點恢復、麻將兩段式打牌這些連點互動打架。
+   * manipulation 只關連點縮放，雙指縮放照常保留。
+   */
+  touch-action: manipulation;
 }
 
 h1 {
@@ -1691,6 +1697,8 @@ select:focus {
 .snake-board {
   display: grid;
   gap: 1px;
+  /* 浮動覆蓋層（.snake-overlay）掛在棋盤裡面，inset:0 才會等於棋盤本身的大小 */
+  position: relative;
   font-family: ui-monospace, monospace;
   line-height: 1;
   user-select: none;

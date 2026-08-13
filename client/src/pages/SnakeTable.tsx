@@ -631,11 +631,11 @@ export function SnakeRoom({ room }: { room: RoomView }) {
                   {cellGlyph(cell)}
                 </span>
               ))}
-            </div>
-            {/* 其他人使用道具/衝刺的全域浮出通知 */}
-            <ItemToast roomMessages={roomMessages} myPlayerId={me.playerId} />
-            {/* 浮動覆蓋層：名牌跟自己的道具欄，用百分比座標疊在棋盤上，不佔用格子本身的空間 */}
-            <div className="snake-overlay">
+              {/* 浮動覆蓋層：名牌跟自己的道具欄，用百分比座標疊在棋盤上，不佔用格子本身的空間。
+                  放在 .snake-board「裡面」而不是 wrap 裡：棋盤寬過 wrap 而橫捲時，
+                  inset:0 跟的是棋盤本身的大小，百分比座標才對得準、也跟著一起捲。
+                  絕對定位的 grid 子元素不佔格，排版不受影響。 */}
+              <div className="snake-overlay">
               {heads.map(({ seat, x, y, badges }) => {
                 const nickname = room.seats.find((s) => s.seat === seat)?.nickname ?? '';
                 const left = `${((x + 0.5) / game.width) * 100}%`;
@@ -675,7 +675,10 @@ export function SnakeRoom({ room }: { room: RoomView }) {
                     ))}
                   </div>
                 )}
+              </div>
             </div>
+            {/* 其他人使用道具/衝刺的全域浮出通知：置中對齊可視範圍就好，留在 wrap 上 */}
+            <ItemToast roomMessages={roomMessages} myPlayerId={me.playerId} />
           </div>
         </>
       )}

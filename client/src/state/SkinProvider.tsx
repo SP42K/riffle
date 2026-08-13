@@ -103,6 +103,30 @@ export function SkinProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /**
+   * 觸控裝置的老闆鍵：右上角 48px 熱區連點兩下就遮蔽。
+   * 用 document 監聽而不是鋪一塊透明 div——透明 div 會把底下按鈕
+   * （離開房間、改當觀戰者這些就貼在右上角）的單擊整個吃掉；
+   * 座標判斷讓單擊照常穿透，只有連點才動作。計時器跟遮蔽畫面的分開，互不干擾。
+   */
+  const cornerTapRef = useRef(0);
+  useEffect(() => {
+    if (!coarsePointer || hidden) return;
+    const CORNER_PX = 48;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.clientX < window.innerWidth - CORNER_PX || event.clientY > CORNER_PX) return;
+      const now = event.timeStamp || Date.now();
+      if (now - cornerTapRef.current < DOUBLE_TAP_MS) {
+        cornerTapRef.current = 0;
+        toggleBoss();
+        return;
+      }
+      cornerTapRef.current = now;
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [coarsePointer, hidden, toggleBoss]);
+
   // 外觀套用到 <html>，CSS 全靠這個屬性分支
   useEffect(() => {
     document.documentElement.dataset.skin = skin.id;
@@ -223,11 +247,6 @@ export function SkinProvider({ children }: { children: ReactNode }) {
             <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9 4a9 9 0 0 0-.1-1.3l2-1.6-2-3.4-2.4 1a9 9 0 0 0-2.2-1.3L16 3H8l-.3 2.4a9 9 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.6a9 9 0 0 0 0 2.6l-2 1.6 2 3.4 2.4-1a9 9 0 0 0 2.2 1.3L8 21h8l.3-2.4a9 9 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.6c.1-.4.1-.9.1-1.3Z" />
           </svg>
         </button>
-      )}
-
-      {/* 觸控裝置的老闆鍵：右上角一塊看不見的熱區，連點兩下就遮蔽 */}
-      {coarsePointer && !hidden && (
-        <div className="touch-boss-corner" onPointerDown={onDoubleTap(toggleBoss)} />
       )}
 
       {settingsOpen && !hidden && <SkinSettings />}
