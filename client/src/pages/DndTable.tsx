@@ -539,6 +539,33 @@ export function DndRoom({ room }: { room: RoomView }) {
     }
   };
 
+  /**
+   * 棋子的血量本來只寫在 title 裡，手指裝置根本叫不出 title。
+   * 棋盤格在手機上只有 20px 左右，數字塞不進格子，只能在棋盤下面另外列一排。
+   * 桌機用 CSS 收起來（.dnd-hp-list 預設 display:none），畫面完全不變。
+   */
+  const renderTouchHpList = () => {
+    if (!game) return null;
+    const pieces: Array<{ id: string; name: string; hp: number; maxHp: number }> = [];
+    for (const row of game.board) {
+      for (const cell of row) {
+        const piece = cell.piece;
+        if (!piece || piece.type === 'staircase') continue;
+        pieces.push({ id: piece.id, name: piece.name.split(' ')[0]!, hp: piece.hp, maxHp: piece.maxHp });
+      }
+    }
+    if (pieces.length === 0) return null;
+    return (
+      <div className="dnd-hp-list">
+        {pieces.map((piece) => (
+          <span key={piece.id} className="dnd-hp-list__item">
+            {piece.name} <b>{piece.hp}</b>/{piece.maxHp}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   const renderBossMenu = () => {
     if (!game) return null;
     const monsters: Array<{ id: string; name: string; hp: number; maxHp: number; acted: boolean }> = [];
@@ -933,6 +960,7 @@ export function DndRoom({ room }: { room: RoomView }) {
             {/* 主棋盤 */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: '2 1 400px', minWidth: 0 }}>
               {playing && game ? (
+                <>
                 <div className="dnd-board-container" style={{ width: '100%', maxWidth: '100%', overflowX: 'auto', margin: '0' }}>
                   <div className="dnd-board" data-level={game.level} style={{ margin: '0 auto' }}>
                     {game.board.map((row, r) =>
@@ -1049,6 +1077,8 @@ export function DndRoom({ room }: { room: RoomView }) {
                     )}
                   </div>
                 </div>
+                {renderTouchHpList()}
+                </>
               ) : (
                 <DndCharacterLobby room={room} />
               )}

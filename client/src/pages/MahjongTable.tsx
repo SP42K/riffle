@@ -10,9 +10,11 @@ import {
 import { MahjongTileIcon } from '../mahjong/MahjongTileIcon';
 import { tileWidth } from '../mahjong/pixelart';
 import { MAHJONG_BANNER_TEXT_KEY, useMahjongActionBanner } from '../mahjong/useMahjongActionBanner';
+import { useTileScale } from '../mahjong/useTileScale';
 import { StartControls } from '../components/StartControls';
 import { TurnBanner } from '../components/TurnBanner';
 import { useCountdown } from '../hooks/useCountdown';
+import { useCoarsePointer } from '../hooks/useMediaQuery';
 import { emitWithAck } from '../net/socket';
 import { useGame } from '../state/GameProvider';
 import { useSkin } from '../state/skinContext';
@@ -150,6 +152,8 @@ function RevealedHands({
 export function MahjongRoom({ room }: { room: RoomView }) {
   const { run } = useGame();
   const { t } = useSkin();
+  const tileScale = useTileScale();
+  const coarsePointer = useCoarsePointer();
 
   const game = room.game?.type === 'taiwanMahjong' ? room.game : null;
   const me = room.me;
@@ -204,7 +208,11 @@ export function MahjongRoom({ room }: { room: RoomView }) {
   const nicknameOfSeat = (seat: number | null) =>
     seat === null ? '' : (room.seats.find((s) => s.seat === seat)?.nickname ?? t('seat.left'));
 
+  // 手指裝置的兩段式打牌，選起來的那一張（key = 在手牌列的位置，tile = 牌面）
+  const [selectedTile, setSelectedTile] = useState<{ key: string; tile: MahjongTileId } | null>(null);
+
   const discard = (tile: MahjongTileId) => {
+    setSelectedTile(null);
     run(() => emitWithAck('game:mahjong', { action: { kind: 'discard', tile } }));
   };
   const selfDrawAction = (action: 'hu' | 'gang' | 'none', tile?: MahjongTileId) => {
@@ -521,6 +529,29 @@ export function MahjongRoom({ room }: { room: RoomView }) {
   const canDiscard =
     isMyTurn && game?.phase === 'discard' && dealPhase !== 'hidden' && dealPhase !== 'dice';
 
+  // 不輪到自己（或動畫還沒播完）就把選取狀態清掉，不然回合換人之後那條牌名還掛在畫面上
+  useEffect(() => {
+    if (!canDiscard) setSelectedTile(null);
+  }, [canDiscard]);
+
+  /**
+   * 手指裝置的兩段式打牌：第一下選起來（看得到牌名），同一張再按一下才真的打出去。
+   * 滑鼠裝置維持一下就打出——桌機有 hover 也有 title，本來就不缺辨識手段。
+   * key 用「位置」而不是牌面，手上有兩張一樣的牌時只會亮起被點的那一張。
+   */
+  const tapTile = (key: string, tile: MahjongTileId) => {
+    if (!canDiscard) return;
+    if (!coarsePointer) {
+      discard(tile);
+      return;
+    }
+    if (selectedTile?.key === key) {
+      discard(tile);
+      return;
+    }
+    setSelectedTile({ key, tile });
+  };
+
   const footer = (
     <div className="room__controls">
       {!started ? (
@@ -542,6 +573,21 @@ export function MahjongRoom({ room }: { room: RoomView }) {
           </span>
           {myInfo && <MyFlowers flowers={myInfo.flowers} />}
           {myInfo && <MyMelds melds={myInfo.melds} />}
+          {/* 手指裝置沒有 hover，牌名只藏在 title 裡等於看不到：選起來先把牌名寫在這條上面 */}
+          {selectedTile && (
+            <div className="mahjong-selected-bar">
+              <span className="mahjong-selected-bar__label">
+                {t('mahjong.selectedTile', { tile: mahjongTileLabel(selectedTile.tile) })}
+              </span>
+              <button
+                type="button"
+                className="btn btn--primary btn--small"
+                onClick={() => discard(selectedTile.tile)}
+              >
+                {t('mahjong.confirmDiscard')}
+              </button>
+            </div>
+          )}
           <div className="mahjong-hand-row">
             {hand.length === 0 && <span className="muted">{t('mahjong.handEmpty')}</span>}
             {mainHand.map((tile, index) => (
@@ -550,16 +596,22 @@ export function MahjongRoom({ room }: { room: RoomView }) {
                 tile={tile}
                 faceDown={dealPhase === 'dice' || dealPhase === 'hidden'}
                 disabled={!canDiscard}
-                onClick={canDiscard ? () => discard(tile) : undefined}
+                selected={selectedTile?.key === `hand-${index}`}
+                onClick={canDiscard ? () => tapTile(`hand-${index}`, tile) : undefined}
               />
             ))}
+            {/* 剛摸到的那張隔開一張牌的距離，這個寬度得跟著螢幕係數一起縮，不然窄螢幕會空一大塊 */}
             {justDrawnTile && (
-              <div className="mahjong-hand-row__drawn" style={{ marginLeft: tileWidth(1.3) + 4 }}>
+              <div
+                className="mahjong-hand-row__drawn"
+                style={{ marginLeft: tileWidth(1.3 * tileScale) + 4 }}
+              >
                 <MahjongTileIcon
                   tile={justDrawnTile}
                   faceDown={dealPhase === 'dice' || dealPhase === 'hidden'}
                   disabled={!canDiscard}
-                  onClick={canDiscard ? () => discard(justDrawnTile) : undefined}
+                  selected={selectedTile?.key === 'drawn'}
+                  onClick={canDiscard ? () => tapTile('drawn', justDrawnTile) : undefined}
                 />
               </div>
             )}

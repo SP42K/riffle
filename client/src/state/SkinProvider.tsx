@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
+import { useCoarsePointer } from '../hooks/useMediaQuery';
 import { SkinSettings } from '../pages/SkinSettings';
 import { SKINS, fill, resolveSkin } from '../skins';
 import {
@@ -28,22 +29,6 @@ function loadPrefs(): Prefs {
   } catch {
     return DEFAULT_PREFS;
   }
-}
-
-/** 是不是用手指在操作。觸控裝置沒有鍵盤，老闆鍵得換成手勢。 */
-function useCoarsePointer(): boolean {
-  const [coarse, setCoarse] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches,
-  );
-
-  useEffect(() => {
-    const query = window.matchMedia('(pointer: coarse)');
-    const onChange = () => setCoarse(query.matches);
-    query.addEventListener('change', onChange);
-    return () => query.removeEventListener('change', onChange);
-  }, []);
-
-  return coarse;
 }
 
 /** 兩次點擊之間超過這個時間就當成兩次單擊，不算連點。 */

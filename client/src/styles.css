@@ -722,11 +722,27 @@ select:focus {
 .mahjong-tile--clickable:hover {
   transform: translateY(-4px);
 }
+/* 兩段式打牌選起來的那一張：黃框由 canvas 自己畫，這裡只把它抬起來當「拿在手上」 */
+.mahjong-tile--selected {
+  transform: translateY(-6px);
+}
 .mahjong-hand-row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
   justify-content: center;
+}
+/* 選起來之後才出現的牌名條：手指裝置看不到 title，牌名只能寫成看得見的字 */
+.mahjong-selected-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.mahjong-selected-bar__label {
+  font-weight: 700;
+  color: var(--gold);
 }
 .mahjong-actions {
   display: flex;
@@ -1305,6 +1321,25 @@ select:focus {
 }
 .board__title {
   margin: 0 0 0.4rem;
+}
+/* 棋子↔暱稱對照表：桌機把游標移到棋子上看 title 就好，這一行只給沒有 hover 的手指裝置 */
+.board__legend {
+  display: none;
+}
+@media (pointer: coarse) {
+  .board__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.7rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .board__legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
 }
 .board__list {
   list-style: none;
@@ -2138,6 +2173,82 @@ select:focus {
   }
   .snake-name-tag {
     font-size: 0.55rem;
+  }
+}
+
+/*
+ * 貪吃蛇觸控搖桿：SnakeTable 只在 pointer: coarse 時才把這些節點畫出來，
+ * 所以這裡不用再包 media query——桌機根本沒有這些元素，樣式完全不會生效。
+ * touch-action / user-select 一定要關掉，否則連點會被瀏覽器當成雙擊放大或長按選字。
+ */
+.snake-pad {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  width: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* 九宮格：中間空著當手指的休息位置，四個方向各佔一格 */
+.snake-pad__dpad {
+  display: grid;
+  grid-template-areas:
+    '. up .'
+    'left . right'
+    '. down .';
+  gap: 0.35rem;
+}
+.snake-pad__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  min-height: 52px;
+  padding: 0;
+  border-radius: 12px;
+  font-size: 1.3rem;
+  line-height: 1;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.snake-pad__btn--up {
+  grid-area: up;
+}
+.snake-pad__btn--down {
+  grid-area: down;
+}
+.snake-pad__btn--left {
+  grid-area: left;
+}
+.snake-pad__btn--right {
+  grid-area: right;
+}
+/* 手指裝置沒有 hover，按下去的回饋只能靠 :active */
+.snake-pad__btn:active:not(:disabled),
+.snake-pad__skill:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.28);
+  transform: translateY(1px);
+}
+.snake-pad__skills {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.snake-pad__skill {
+  min-width: 88px;
+  min-height: 56px;
+  font-weight: 700;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* ≤860px 時 .room__footer 已經補過安全區內距，這裡只補平板橫向那種寬觸控螢幕 */
+@media (min-width: 861px) {
+  .snake-pad {
+    padding-bottom: env(safe-area-inset-bottom);
   }
 }
 /* ---------------------------------------------------------------------------
@@ -2980,6 +3091,25 @@ svg.pixel-sprite.class-portrait {
   height: 100%;
   transition: width 0.3s;
   box-shadow: 0 0 4px currentColor;
+}
+
+/* 棋子血量的數字本來只在 title 裡，手指裝置叫不出來；格子太小塞不下，改列在棋盤下面 */
+.dnd-hp-list {
+  display: none;
+}
+@media (pointer: coarse) {
+  .dnd-hp-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.6rem;
+    justify-content: center;
+    margin-top: 0.5rem;
+    color: var(--muted);
+    font-size: 0.7rem;
+  }
+  .dnd-hp-list__item b {
+    color: var(--text);
+  }
 }
 
 .dnd-controls {
