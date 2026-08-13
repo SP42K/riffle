@@ -1100,8 +1100,10 @@ function magePassive(state: DndState, mage: DndPiece, target: DndPiece, rng: () 
     } as any];
   }
 
-  target.trappedTurns = MAGE_BIND_TURNS;
-  target.netDamage = 0; // 束縛只定身，不像撒網會持續扣血
+  // 束縛只定身，不像撒網會持續扣血；但盜賊可能先網住了同一隻怪，
+  // 蓋掉他的回合數與持續傷害等於幫怪解debuff，所以只往長的取、傷害留著。
+  target.trappedTurns = Math.max(target.trappedTurns ?? 0, MAGE_BIND_TURNS);
+  target.netDamage = target.netDamage ?? 0;
   pushFx(state, target.id, 'bind');
   return [{
     t: 'dndMessage',
@@ -1351,7 +1353,7 @@ function tickBanishedMonsters(state: DndState): LogEvent[] {
 }
 
 /** 惡魔之卵的每輪倒數，時間到就當場暴斃。 */
-function tickDoom(seats: Seats, state: DndState): LogEvent[] {
+function tickDoom(seats: Seats, state: DndState, rng: () => number): LogEvent[] {
   const events: LogEvent[] = [];
   let died = false;
   for (let r = 0; r < BOARD_SIZE; r++) {
@@ -1367,7 +1369,7 @@ function tickDoom(seats: Seats, state: DndState): LogEvent[] {
       died = true;
     }
   }
-  if (died) checkAndSpawnBossOrStaircase(seats, state, events, Math.random);
+  if (died) checkAndSpawnBossOrStaircase(seats, state, events, rng);
   return events;
 }
 
@@ -1389,6 +1391,9 @@ function runAlliesTurn(seats: Seats, state: DndState, rng: () => number): LogEve
   for (const ally of allies) {
     const located = findPieceById(state, ally.piece.id);
     if (!located) continue;
+    // 這一輪剛被召出來、或剛被洗腦換邊的，先站著 —— 兩邊的紀錄都寫在 monsterActed，
+    // endRound 才清掉，所以這裡讀得到。
+    if (state.monsterActed.has(located.piece.id)) continue;
     if (isRestrained(located.piece)) continue;
     if (located.piece.stunnedTurns && located.piece.stunnedTurns > 0) {
       located.piece.stunnedTurns--;
@@ -1808,6 +1813,13 @@ function burnFireWalls(seats: Seats, state: DndState): LogEvent[] {
       ? Math.round(wall.dmg * (1 + MAGE_MAGIC_VULN))
       : wall.dmg;
     piece.hp = Math.max(0, piece.hp - burnDmg);
+    // 燒到的是冒險者的話要把血同步回座位。少了這行，隊伍面板會顯示舊血量，
+    // 而吟遊詩人的【生命之歌】以 seats 的 hp 為準往回寫，等於把火焰傷害整個退還。
+    if (piece.type === 'player') {
+      const burnedSeat = seatIndexOfPiece(seats, piece);
+      const burnedInfo = burnedSeat === -1 ? null : state.seats[burnedSeat];
+      if (burnedInfo) burnedInfo.hp = piece.hp;
+    }
     events.push({
       t: 'dndMessage',
       message: piece.magicDebuffTurns && piece.magicDebuffTurns > 0
@@ -2680,7 +2692,7 @@ export function nextActiveDndSeat(seats: Seats, currentSeat: number, stateSeats:
  * 跟後半拆開的理由是中間那段「怪物行動」可能由魔王玩家接管，要能停在中間等他輸入。
  */
 /** 弓手【放血】的每輪結算：流血的怪各扣 1 點，扣到 0 就收屍。 */
-function bleedMonsters(seats: Seats, state: DndState): LogEvent[] {
+function bleedMonsters(seats: Seats, state: DndState, rng: () => number): LogEvent[] {
   const events: LogEvent[] = [];
   let died = false;
   for (let r = 0; r < BOARD_SIZE; r++) {
@@ -2701,14 +2713,14 @@ function bleedMonsters(seats: Seats, state: DndState): LogEvent[] {
       }
     }
   }
-  if (died) checkAndSpawnBossOrStaircase(seats, state, events, Math.random);
+  if (died) checkAndSpawnBossOrStaircase(seats, state, events, rng);
   return events;
 }
 
 function beginRound(seats: Seats, state: DndState, rng: () => number, events: LogEvent[]) {
   state.roundCount++;
-  events.push(...bleedMonsters(seats, state));
-  events.push(...tickDoom(seats, state));
+  events.push(...bleedMonsters(seats, state, rng));
+  events.push(...tickDoom(seats, state, rng));
   events.push(...tickBanishedMonsters(state));
   if (state.level === ESCORT_LEVEL) {
     events.push(...escortReinforcements(state, rng));
@@ -2967,9 +2979,6 @@ export function applyDndAction(
 ): DndApplyResult {
   if (state.over) return { ok: false, error: 'GAME_NOT_RUNNING' };
 
-  // 技能特效只代表「剛剛這一次」，所以每次行動先歸零
-  state.fx = [];
-
   const activeSeat = state.turnSeat;
   // 座位的主人自己送，或是 NPC 座位由指定的代打者（房主）送，兩種都放行
   const seatOwner = seats[activeSeat] ?? null;
@@ -2980,6 +2989,10 @@ export function applyDndAction(
   if (seatOwner !== playerId && !npcSeatByController) {
     return { ok: false, error: 'NOT_YOUR_TURN' };
   }
+
+  // 技能特效只代表「剛剛這一次」，所以每次行動先歸零。
+  // 要在輪次檢查之後 —— 不然別人手快點一下，就把上一手的技能圖示從所有人的畫面上抹掉。
+  state.fx = [];
 
   if (
     action.kind === 'bossMove' ||
@@ -3154,16 +3167,17 @@ export function applyDndAction(
     if (targetPiece.ally) return { ok: false, error: 'TARGET_NOT_FOUND' };
     if (targetPiece.invulnerable) return { ok: false, error: 'TARGET_INVULNERABLE' };
 
-    // 【匿蹤】：出手就現身
-    if (state.seats[activeSeat]?.stealth) {
-      setStealth(seats, state, activeSeat, false);
-      events.push({ t: 'dndMessage', message: `🗡️ ${playerPiece.name.split(' ')[0]} 從陰影中撲出 —— 【匿蹤】解除！` } as any);
-    }
-
     const classId = playerPiece.classId || 'brave';
     const maxRange = DND_CLASS_RANGE[classId as DndClassId] ?? 1;
     const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
     if (dist > maxRange) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
+
+    // 【匿蹤】：出手就現身。要擺在所有檢查之後 —— 打不到的目標會回錯誤、事件被丟掉，
+    // 但狀態改動不會跟著回滾，站得太前面的話一次無效點擊就白白現身。
+    if (state.seats[activeSeat]?.stealth) {
+      setStealth(seats, state, activeSeat, false);
+      events.push({ t: 'dndMessage', message: `🗡️ ${playerPiece.name.split(' ')[0]} 從陰影中撲出 —— 【匿蹤】解除！` } as any);
+    }
 
     const stats = CLASS_STATS[classId as DndClassId];
     const roll = Math.floor(rng() * 20) + 1;
@@ -4446,8 +4460,9 @@ export function checkDndGameOver(seats: Seats, state: DndState): { over: boolean
     const seatInfo = state.seats[idx];
     if (!seatInfo?.alive) continue;
     aliveCount++;
-    // NPC 隊友不算「還有人能操作」——沒有真人活著的話沒有人能送出動作
-    if (!seatInfo.isNpc && seats[idx]) aliveHumans++;
+    // 「還有人能送出動作」才算數：真人自己的座位，或是有房主代打的 NPC 座位。
+    // 房主一人操作全隊時，他本人的角色倒下不該直接判輸 —— 剩下的 NPC 他照樣操作得動。
+    if (seatInfo.isNpc ? state.npcController !== null : !!seats[idx]) aliveHumans++;
   }
 
   let goblinCount = 0;
@@ -4517,7 +4532,7 @@ export function autoActDnd(
 
   // 魔王掛機：等同按下「結束回合」，剩下的怪由 AI 打完，房間不會卡在他身上
   if (state.phase === 'boss') {
-    return finishBossTurn(seats, state, [], Math.random);
+    return finishBossTurn(seats, state, [], rng);
   }
 
   const playerId = seats[activeSeat];
@@ -4535,10 +4550,10 @@ export function autoActDnd(
   if (!playerPiece) {
     // 角色不在棋盤上（放逐中）。不能什麼都不做就回 null ——
     // handlers 會重新掛一個 45 秒計時器，房間會停在這個座位上永遠空轉。
-    return finishDndTurn(seats, state, playerId, activeSeat, 'rest', [], Math.random);
+    return finishDndTurn(seats, state, playerId, activeSeat, 'rest', [], rng);
   }
 
-  return applyDndAction(seats, state, playerId, { kind: 'rest' });
+  return applyDndAction(seats, state, playerId, { kind: 'rest' }, rng);
 }
 
 /**

@@ -3992,4 +3992,65 @@ describe('D&D Game Engine', () => {
     const actionResult = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-0' }, rngHit);
     expect(actionResult.ok).toBe(true);
   });
+
+  it('should keep the rogue hidden when the attack is rejected for range', () => {
+    // 打不到的目標會回錯誤、事件被丟掉，但狀態改動不會回滾 ——
+    // 【匿蹤】要是先解除，一次無效點擊就白白現身，怪下一輪全都改盯著他。
+    const { seats, state } = soloTable('bubble', { tanky: true });
+    state.board[0][0].piece = { id: 'm-far', type: 'goblin', name: 'Far', hp: 99, maxHp: 99, ac: 11 };
+    state.seats[0].equipment = { kind: 'bubble', tier: 'normal' }; // 匿蹤是【骰子匕首】給的
+    state.seats[0].stealth = true;
+
+    const res = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-far' }, () => 0.9);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('TARGET_OUT_OF_RANGE');
+    expect(state.seats[0].stealth).toBe(true);
+  });
+
+  it('should sync seat hp when a hostile fire wall burns an adventurer', () => {
+    // 只扣棋子的血、不同步座位，隊伍面板會顯示舊血量，
+    // 而【生命之歌】以座位的 hp 為準往回寫，等於把火焰傷害整個退還。
+    const { seats, state } = soloTable('brave', { tanky: true });
+    state.board[0][0].piece = { id: 'm-far', type: 'goblin', name: 'Far', hp: 99, maxHp: 99, ac: 99 };
+    state.fireWalls = [{ r: 8, c: 6, turns: 2, dmg: 5, hostile: true }];
+
+    const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(res.ok).toBe(true);
+    expect(res.events.some((e) => e.t === 'dndMessage' && e.message.includes('火牆'))).toBe(true);
+
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    expect(state.seats[0].hp).toBe(me.piece.hp);
+  });
+
+  it('should hold a minion that already acted this round', () => {
+    // 剛召出來／剛被洗腦換邊的那一輪要站著，紀錄寫在 monsterActed（endRound 才清）。
+    const table = (held) => {
+      const { seats, state } = soloTable('summoner', { tanky: true });
+      state.board[2][2].piece = {
+        id: 'a-1', type: 'goblin', name: '隨從', hp: 20, maxHp: 20, ac: 12,
+        ally: true, range: 1, attackBonus: 5, dmgDice: 6,
+      };
+      state.board[2][3].piece = { id: 'm-1', type: 'goblin', name: '靶', hp: 99, maxHp: 99, ac: 1 };
+      if (held) state.monsterActed.add('a-1');
+      applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+      return findPiece(state, (p) => p.id === 'm-1')?.piece.hp ?? 0;
+    };
+
+    expect(table(true)).toBe(99);      // 這一輪已經算過了，不該再打一次
+    expect(table(false)).toBeLessThan(99); // 對照組：沒被記過的隨從照常出手
+  });
+
+  it('should not end the run when the host still controls living NPC teammates', () => {
+    // 房主一人操作全隊時，他本人的角色倒下不代表沒有人能送出動作
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, null, () => 0);
+    state.npcController = 'p1';
+    state.seats[0].alive = false;
+
+    expect(checkDndGameOver(seats, state).over).toBe(false);
+
+    // 沒有代打者的話，剩下的 NPC 沒有人能操作，那才是真的結束
+    state.npcController = null;
+    expect(checkDndGameOver(seats, state).over).toBe(true);
+  });
 });

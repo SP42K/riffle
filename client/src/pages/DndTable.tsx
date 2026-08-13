@@ -70,8 +70,15 @@ export function DndRoom({ room }: { room: RoomView }) {
   const playing = room.status === 'playing';
   // 輪到我：自己的座位，或是這個 NPC 座位由我代打
   const iControlNpcs = !!game && game.npcControllerId === me.playerId;
+  // 沒有 turnPlayerId 還有另一種情況：有人中離、座位被清空但那個座位不是 NPC。
+  // 少了 isNpc 這個條件，代打者會看到「輪到你」但伺服器每個動作都退 NOT_YOUR_TURN。
   const npcSeatIsMine =
-    !!game && !game.turnPlayerId && iControlNpcs && game.phase === 'party' && !game.over;
+    !!game &&
+    !game.turnPlayerId &&
+    iControlNpcs &&
+    game.seats[game.turnSeat]?.isNpc === true &&
+    game.phase === 'party' &&
+    !game.over;
   const isMyTurn = playing && (game?.turnPlayerId === me.playerId || npcSeatIsMine);
   const isHost = room.hostId === me.playerId;
 
