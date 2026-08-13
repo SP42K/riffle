@@ -5,16 +5,20 @@ import {
   BIG_TWO_RULE_KEYS,
   DEFAULT_BIG_TWO_RULES,
   DEFAULT_MONOPOLY_OPTIONS,
+  DEFAULT_SNAKE_OPTIONS,
   GAME_TYPES,
   MONOPOLY_OPTION_KEYS,
   MONOPOLY_OPTION_SPEC,
   SEAT_LIMITS,
+  SNAKE_TIME_LIMIT_MAX_SEC,
+  SNAKE_TIME_LIMIT_MIN_SEC,
   bigTwoPresetOf,
   type BigTwoRules,
   type GameType,
   type JoinMode,
   type MonopolyOptions,
   type RoomStatus,
+  type SnakeOptions,
 } from 'shared';
 import { ChatPanel } from '../components/ChatPanel';
 import { emitWithAck, getPlayerId, socket } from '../net/socket';
@@ -38,8 +42,11 @@ export function Lobby() {
   const [bigTwoRules, setBigTwoRules] = useState<BigTwoRules>(DEFAULT_BIG_TWO_RULES);
   const [monopolyOptions, setMonopolyOptions] =
     useState<MonopolyOptions>(DEFAULT_MONOPOLY_OPTIONS);
+  const [snakeOptions, setSnakeOptions] = useState<SnakeOptions>(DEFAULT_SNAKE_OPTIONS);
   const [joinCode, setJoinCode] = useState('');
   const [nicknameDraft, setNicknameDraft] = useState(nickname);
+  // 記住自己申請過哪些房間，按鈕才能從「申請加入」變成「已送出申請」
+  const [requestedRooms, setRequestedRooms] = useState<Set<string>>(new Set());
 
   const limits = SEAT_LIMITS[gameType];
   const seatOptions = Array.from({ length: limits.max - limits.min + 1 }, (_, i) => limits.min + i);
@@ -66,6 +73,7 @@ export function Lobby() {
         gameType,
         bigTwoRules,
         monopolyOptions,
+        snakeOptions,
       }),
     );
     setRoomName('');
@@ -73,6 +81,13 @@ export function Lobby() {
 
   const join = (roomId: string, mode: JoinMode) => {
     run(() => emitWithAck('room:join', { roomId, mode }));
+  };
+
+  const requestJoin = (roomId: string) => {
+    run(async () => {
+      await emitWithAck('room:requestJoin', { roomId });
+      setRequestedRooms((prev) => new Set(prev).add(roomId));
+    });
   };
 
   const joinByCode = (event: FormEvent) => {
@@ -183,6 +198,91 @@ export function Lobby() {
                 ))}
               </fieldset>
             )}
+            {gameType === 'snake' && (
+              <fieldset className="lobby__rules">
+                <legend>{t('lobby.rulesOptionsLabel')}</legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.wraparound}
+                    onChange={(event) =>
+                      setSnakeOptions({ ...snakeOptions, wraparound: event.target.checked })
+                    }
+                  />
+                  {t('snake.optWraparound')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.unlimitedLives}
+                    onChange={(event) =>
+                      setSnakeOptions({ ...snakeOptions, unlimitedLives: event.target.checked })
+                    }
+                  />
+                  {t('snake.optUnlimitedLives')}
+                </label>
+                <label>
+                  {t('snake.optTimeLimit')}
+                  <input
+                    type="number"
+                    min={SNAKE_TIME_LIMIT_MIN_SEC}
+                    max={SNAKE_TIME_LIMIT_MAX_SEC}
+                    step={30}
+                    disabled={!snakeOptions.unlimitedLives}
+                    value={snakeOptions.unlimitedLivesTimeLimitSec}
+                    onChange={(event) =>
+                      setSnakeOptions({
+                        ...snakeOptions,
+                        unlimitedLivesTimeLimitSec: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.cutting}
+                    onChange={(event) =>
+                      setSnakeOptions({ ...snakeOptions, cutting: event.target.checked })
+                    }
+                  />
+                  {t('snake.optCutting')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.largeMap}
+                    onChange={(event) =>
+                      setSnakeOptions({ ...snakeOptions, largeMap: event.target.checked })
+                    }
+                  />
+                  {t('snake.optLargeMap')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={snakeOptions.items}
+                    onChange={(event) => setSnakeOptions({ ...snakeOptions, items: event.target.checked })}
+                  />
+                  {t('snake.optItems')}
+                </label>
+                <label>
+                  {t('snake.optHeadOnCollision')}
+                  <select
+                    value={snakeOptions.headOnCollision}
+                    onChange={(event) =>
+                      setSnakeOptions({
+                        ...snakeOptions,
+                        headOnCollision: event.target.value as 'bounce' | 'clash',
+                      })
+                    }
+                  >
+                    <option value="bounce">{t('snake.optHeadBounce')}</option>
+                    <option value="clash">{t('snake.optHeadClash')}</option>
+                  </select>
+                </label>
+              </fieldset>
+            )}
             {gameType === 'monopoly' && (
               <fieldset className="lobby__rules lobby__rules--monopoly">
                 <legend>{t('lobby.rulesOptionsLabel')}</legend>
@@ -244,6 +344,10 @@ export function Lobby() {
               {rooms.map((room) => {
                 const full = room.playerCount >= room.maxPlayers;
                 const started = room.status !== 'waiting';
+                // 只有麻將房會有電腦代打；房間滿位但有電腦座位時，改成「申請加入」頂替電腦
+                const hasNpcSeat = room.gameType === 'taiwanMahjong' && room.npcCount > 0;
+                const canRequestJoin = hasNpcSeat && full;
+                const alreadyRequested = requestedRooms.has(room.id);
                 return (
                   <li key={room.id} className="room-row">
                     <div className="room-row__main">
@@ -264,21 +368,40 @@ export function Lobby() {
                     </div>
                     <div className="room-row__meta">
                       <span>{t('lobby.host', { name: room.hostNickname })}</span>
-                      <span>{t('lobby.playerCount', { n: room.playerCount, max: room.maxPlayers })}</span>
+                      <span>
+                        {hasNpcSeat
+                          ? t('lobby.playerNpcCount', {
+                              human: room.playerCount - room.npcCount,
+                              npc: room.npcCount,
+                              max: room.maxPlayers,
+                            })
+                          : t('lobby.playerCount', { n: room.playerCount, max: room.maxPlayers })}
+                      </span>
                       {room.spectatorCount > 0 && (
                         <span>{t('lobby.spectatorCount', { n: room.spectatorCount })}</span>
                       )}
                     </div>
                     <div className="room-row__actions">
-                      <button
-                        type="button"
-                        className="btn btn--primary"
-                        disabled={full || started}
-                        title={started ? t('lobby.started') : full ? t('lobby.full') : undefined}
-                        onClick={() => join(room.id, 'play')}
-                      >
-                        {t('lobby.join')}
-                      </button>
+                      {canRequestJoin ? (
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          disabled={alreadyRequested}
+                          onClick={() => requestJoin(room.id)}
+                        >
+                          {alreadyRequested ? t('lobby.requestJoinSent') : t('lobby.requestJoin')}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          disabled={full || started}
+                          title={started ? t('lobby.started') : full ? t('lobby.full') : undefined}
+                          onClick={() => join(room.id, 'play')}
+                        >
+                          {t('lobby.join')}
+                        </button>
+                      )}
                       <button type="button" className="btn" onClick={() => join(room.id, 'spectate')}>
                         {t('lobby.spectate')}
                       </button>

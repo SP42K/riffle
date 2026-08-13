@@ -1,4 +1,5 @@
 import type { HoldemCategory, HoldemGameView, HoldemStreet } from './holdem.js';
+import type { MahjongAction, MahjongGameView, MahjongTileId } from './mahjong.js';
 import type {
   MonopolyAction,
   MonopolyCardId,
@@ -10,7 +11,7 @@ import type {
   MonopolyTileId,
 } from './monopoly.js';
 import type { DownstairsCharacterId, DownstairsGameView } from './downstairs.js';
-import type { SnakeDirection, SnakeGameView } from './snake.js';
+import type { SnakeDirection, SnakeGameView, SnakeItemKind, SnakeOptions } from './snake.js';
 
 // ---------------------------------------------------------------------------
 // 牌
@@ -134,7 +135,15 @@ export interface Combo {
 export type PlayerId = string;
 
 /** 一個房間只玩一種玩法，建房時決定。 */
-export type GameType = 'bigTwo' | 'holdem' | 'monopoly' | 'downstairs' | 'snake' | 'minesweeper' | 'dnd';
+export type GameType =
+  | 'bigTwo'
+  | 'holdem'
+  | 'monopoly'
+  | 'downstairs'
+  | 'snake'
+  | 'minesweeper'
+  | 'dnd'
+  | 'taiwanMahjong';
 
 export const GAME_TYPES: readonly GameType[] = [
   'bigTwo',
@@ -144,6 +153,7 @@ export const GAME_TYPES: readonly GameType[] = [
   'snake',
   'minesweeper',
   'dnd',
+  'taiwanMahjong',
 ];
 
 export const GAME_TYPE_LABEL: Record<GameType, string> = {
@@ -154,6 +164,7 @@ export const GAME_TYPE_LABEL: Record<GameType, string> = {
   snake: '貪吃蛇',
   minesweeper: '踩地雷',
   dnd: '龍與地下城',
+  taiwanMahjong: '台灣麻將',
 };
 
 /**
@@ -246,10 +257,12 @@ export const SEAT_LIMITS: Record<GameType, { min: number; max: number }> = {
   holdem: { min: 2, max: 9 },
   monopoly: { min: 2, max: 6 },
   downstairs: { min: 1, max: 4 },
-  snake: { min: 2, max: 4 },
+  snake: { min: 2, max: 6 },
   minesweeper: { min: 1, max: 4 },
   // 第 5 個座位是魔王專用（4 個冒險者位 + 1 個魔王位）
   dnd: { min: 1, max: 5 },
+  /** 台灣十六張麻將固定四人，空位補電腦。 */
+  taiwanMahjong: { min: 4, max: 4 },
 };
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -274,7 +287,11 @@ export type SystemNotice =
   | { t: 'joined'; player: string }
   | { t: 'spectating'; player: string }
   | { t: 'left'; player: string }
-  | { t: 'disconnected'; player: string };
+  | { t: 'disconnected'; player: string }
+  /** 貪吃蛇的「影響到別人」道具生效時發的公告，比戰報那六行更顯眼——聊天室看得到。 */
+  | { t: 'snakeItem'; player: string; item: SnakeItemKind }
+  /** 貪吃蛇按下衝刺（X 鍵）充能的瞬間發的公告，給其他人一點反應時間閃避。 */
+  | { t: 'snakeDash'; player: string };
 
 /** 大廳房間列表的一列。 */
 export interface RoomSummary {
@@ -285,11 +302,15 @@ export interface RoomSummary {
   bigTwoRules: BigTwoRules | null;
   /** 只有大富翁房有值，其他玩法為 null。 */
   monopolyOptions: MonopolyOptions | null;
+  /** 只有貪吃蛇房有值，其他玩法為 null。 */
+  snakeOptions: SnakeOptions | null;
   hostNickname: string;
   playerCount: number;
   maxPlayers: number;
   spectatorCount: number;
   status: RoomStatus;
+  /** 只有台灣麻將房會 > 0：playerCount 裡面有幾席是電腦代打，其他玩法固定 0。 */
+  npcCount: number;
 }
 
 /**
@@ -379,7 +400,8 @@ export type GameView =
   | DownstairsGameView
   | SnakeGameView
   | MinesweeperGameView
-  | DndGameView;
+  | DndGameView
+  | MahjongGameView;
 
 // ---------------------------------------------------------------------------
 // 戰報
@@ -441,8 +463,16 @@ export type LogEvent =
   | { t: 'snakeRespawn'; player: string }
   /** 兩條命用完，徹底出局。 */
   | { t: 'snakeDeath'; player: string }
+  /** 吃到果實（一般或屍體果實）。 */
+  | { t: 'snakeFoodEaten'; player: string }
   /** 吃到自己顏色的地雷果實拿到加分。 */
   | { t: 'snakeMineEaten'; player: string }
+  /** 用掉一個道具（子彈是每發都送一次）。 */
+  | { t: 'snakeItemUsed'; player: string; item: SnakeItemKind }
+  /** 按下衝刺（X 鍵）開始充能。 */
+  | { t: 'snakeDashCharging'; player: string }
+  /** 衝刺途中撞進別人身體、把對方截斷（只有衝刺會截斷，一般碰撞一律算自己死）。 */
+  | { t: 'snakeCut'; attacker: string; victim: string }
   | { t: 'snakeOver'; ranking: string[] }
   // 踩地雷
   | { t: 'minesweeperStart'; players: number }
@@ -468,7 +498,17 @@ export type LogEvent =
    * 前端據此把它分到「技能與被動」那一欄；沒標的（生怪、死亡、換層、撿裝備…）
    * 留在戰鬥紀錄裡。標在事件上而不是讓前端比對字串，是因為字串一改分類就會失準。
    */
-  | { t: 'dndMessage'; message: string; kind?: 'skill' };
+  | { t: 'dndMessage'; message: string; kind?: 'skill' }
+  // 台灣麻將。牌一律送 tile id，前端照牌面規則自己還原文字。
+  | { t: 'mahjongStart'; players: number }
+  | { t: 'mahjongRound'; round: number; banker: string }
+  | { t: 'mahjongDiscard'; player: string; tile: MahjongTileId }
+  | { t: 'mahjongMeld'; player: string; kind: 'chi' | 'peng' | 'gang'; tiles: MahjongTileId[] }
+  // from 只有 winType === 'discard' 才有值：放槍（點炮）的那個人。
+  | { t: 'mahjongWin'; player: string; winType: 'selfDraw' | 'discard'; tai: number; from?: string }
+  | { t: 'mahjongDraw' }
+  | { t: 'mahjongOver'; ranking: string[] }
+  | { t: 'timeoutMahjong'; player: string };
 
 /**
  * 一次下注動作的結構化描述。座位上的「最近動作」與戰報共用。
@@ -490,9 +530,11 @@ export interface RoomView {
   bigTwoRules: BigTwoRules | null;
   /** 只有大富翁房有值。 */
   monopolyOptions: MonopolyOptions | null;
+  /** 只有貪吃蛇房有值。 */
+  snakeOptions: SnakeOptions | null;
   /** 只有龍與地下城房有值。 */
   dndDifficulty: DndDifficulty | null;
-  /** 只有龍與地下城房有值：NPC 隊友由 AI 還是房主操作。 */
+  /** 只有龍與地下城房有值:NPC 隊友由 AI 還是房主操作。 */
   dndNpcControl: DndNpcControl | null;
   /**
    * 空位要補什麼職業的 NPC 隊友，四個座位各一格。
@@ -511,6 +553,10 @@ export interface RoomView {
   hand: Card[] | null;
   /** 只有觀戰者、而且這個玩法有暗牌時才拿得到（上帝視角）。 */
   allHands: Record<PlayerId, Card[]> | null;
+  /** 台灣麻將的手牌；其他玩法一律為 null（牌的資料結構跟 Card 不同，另開一個欄位）。 */
+  mahjongHand: MahjongTileId[] | null;
+  /** 觀戰台灣麻將時的上帝視角（四家的手牌）；非觀戰或非麻將一律為 null。 */
+  mahjongAllHands: Record<PlayerId, MahjongTileId[]> | null;
   /**
    * 德州撲克的房內籌碼，其他玩法為 null。
    * 這是房間層的狀態（跨手累積），所以不放在單手的 GameView 裡。
@@ -518,6 +564,17 @@ export interface RoomView {
   chips: Record<PlayerId, number> | null;
   game: GameView | null;
   log: LogEvent[];
+  /**
+   * 累計曾經 push 過的 log 事件數，不受 LOG_HISTORY 裁剪影響（只增不減）。
+   * 用來判斷「log 是否有新事件」——log 陣列本身被裁剪過，陣列長度會停在
+   * LOG_HISTORY 不再變化，不能拿來偵測新事件。
+   */
+  logSeq: number;
+  /**
+   * 台灣麻將專用：房間滿位時有人申請加入頂替電腦座位，等房主接受或婉拒。
+   * 只有房主的畫面會出現操作按鈕，但每個人都看得到申請者是誰。非麻將房固定 null。
+   */
+  mahjongJoinRequest: { nickname: string } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -542,6 +599,7 @@ export interface ClientToServerEvents {
       gameType: GameType;
       bigTwoRules?: Partial<BigTwoRules>;
       monopolyOptions?: Partial<MonopolyOptions>;
+      snakeOptions?: Partial<SnakeOptions>;
     },
     ack: Ack<{ roomId: string }>,
   ) => void;
@@ -575,10 +633,28 @@ export interface ClientToServerEvents {
    * 跟其他玩法的「這一手就是這一手」不同，這裡送出不代表這一拍已經轉向。
    */
   'game:snake': (p: { dir: SnakeDirection }, ack: Ack<null>) => void;
+  /** 貪吃蛇專用：用掉道具欄第一格（空白鍵觸發）。子彈欄位用完才會真的清空。 */
+  'game:snakeItem': (p: Record<string, never>, ack: Ack<null>) => void;
+  /** 貪吃蛇專用：觸發衝刺截斷技能（X 鍵）。房間沒開 cutting 選項或還在冷卻時無效。 */
+  'game:snakeDash': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 踩地雷專用。 */
   'game:minesweeper': (p: { action: MinesweeperAction }, ack: Ack<null>) => void;
   /** 龍與地下城專用。 */
   'game:dnd': (p: { action: DndAction }, ack: Ack<null>) => void;
+  /** 台灣麻將專用。摸牌後出牌／自摸決策／吃碰槓胡反應走同一個事件，靠 action.kind 收窄。 */
+  'game:mahjong': (p: { action: MahjongAction }, ack: Ack<null>) => void;
+  /**
+   * 台灣麻將專用。房主在開局前把剩下的空位一次補滿電腦玩家，方便一個人也能整桌測試。
+   * 只有台灣麻將支援，其他玩法沒有電腦玩家的概念。
+   */
+  'room:addNpc': (p: Record<string, never>, ack: Ack<null>) => void;
+  /**
+   * 台灣麻將專用。房間滿位但還有電腦座位時，大廳裡的玩家可以申請加入頂替電腦，
+   * 送出後要等房主用 room:respondJoinRequest 接受。
+   */
+  'room:requestJoin': (p: { roomId: string }, ack: Ack<null>) => void;
+  /** 台灣麻將專用。房主接受或婉拒目前待處理的加入申請。 */
+  'room:respondJoinRequest': (p: { accept: boolean }, ack: Ack<null>) => void;
 }
 
 export interface MinesweeperAction {

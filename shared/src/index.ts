@@ -5,3 +5,4 @@ export * from './holdem.js';
 export * from './monopoly.js';
 export * from './downstairs.js';
 export * from './snake.js';
+export * from './mahjong.js';
