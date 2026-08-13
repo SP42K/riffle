@@ -282,7 +282,8 @@ separate player — this is how you test multiplayer locally. A second `session:
 
 `GameServer` keeps three maps: `sessions` (socket.id → session), `playerRoom` (playerId → roomId,
 survives disconnect so reattach works), and `rooms`. On disconnect the member is only marked
-offline; the seat and hand are held for `DISCONNECT_GRACE_MS` (30s) before `dropFromRoom`.
+offline; the seat and hand are held for `DISCONNECT_GRACE_MS` (90s) before `dropFromRoom` —
+long enough that a phone switching apps or losing signal keeps its seat.
 
 Turn timing has two clocks: `TURN_MS` (45s) normally, but `scheduleTurn` shortens the deadline to
 `DISCONNECTED_TURN_MS` (3s) when the current player is offline so the table doesn't stall, and

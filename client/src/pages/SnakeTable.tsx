@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   SEAT_LIMITS,
   SNAKE_DASH_COOLDOWN_MS,
@@ -16,6 +24,7 @@ import {
 import { SNAKE_SEAT_COLORS, SnakeColorDot } from '../components/SnakeColorDot';
 import { StartControls } from '../components/StartControls';
 import { useCountdown } from '../hooks/useCountdown';
+import { useCoarsePointer } from '../hooks/useMediaQuery';
 import { emitWithAck } from '../net/socket';
 import { useGame } from '../state/GameProvider';
 import { isTyping, useSkin } from '../state/skinContext';
@@ -438,9 +447,96 @@ function ItemToast({ roomMessages, myPlayerId }: { roomMessages: import('shared'
   );
 }
 
+/** 觸控裝置沒有鍵盤：方向鍵改成畫面上的九宮格搖桿，空白鍵／X 鍵改成旁邊兩顆技能鈕。 */
+function SnakePad({
+  canAct,
+  itemsEnabled,
+  cuttingEnabled,
+  onDir,
+  onItem,
+  onDash,
+  t,
+}: {
+  canAct: boolean;
+  itemsEnabled: boolean;
+  cuttingEnabled: boolean;
+  onDir: (dir: SnakeDirection) => void;
+  onItem: () => void;
+  onDash: () => void;
+  t: (key: TextKey, vars?: Record<string, string | number>) => string;
+}) {
+  // 用 pointerdown 而不是 click：手指按下去就送出，不必等 300ms 的點擊判定，
+  // 抓住 pointer 也才不會手指滑到隔壁鍵時又觸發第二個方向。
+  const press = (fire: () => void) => (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if ('vibrate' in navigator) navigator.vibrate(10);
+    fire();
+  };
+  const release = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+  const dirButton = (dir: SnakeDirection, key: TextKey) => (
+    <button
+      type="button"
+      className={`btn snake-pad__btn snake-pad__btn--${dir}`}
+      disabled={!canAct}
+      aria-label={t(key)}
+      onPointerDown={press(() => onDir(dir))}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onLostPointerCapture={release}
+    >
+      <span aria-hidden="true">{HEAD_ARROW[dir]}</span>
+    </button>
+  );
+
+  return (
+    <div className="snake-pad">
+      <div className="snake-pad__dpad">
+        {dirButton('up', 'snake.padUp')}
+        {dirButton('left', 'snake.padLeft')}
+        {dirButton('right', 'snake.padRight')}
+        {dirButton('down', 'snake.padDown')}
+      </div>
+      <div className="snake-pad__skills">
+        {itemsEnabled && (
+          <button
+            type="button"
+            className="btn snake-pad__skill"
+            disabled={!canAct}
+            onPointerDown={press(onItem)}
+            onPointerUp={release}
+            onPointerCancel={release}
+            onLostPointerCapture={release}
+          >
+            {t('snake.padItem')}
+          </button>
+        )}
+        {cuttingEnabled && (
+          <button
+            type="button"
+            className="btn snake-pad__skill"
+            disabled={!canAct}
+            onPointerDown={press(onDash)}
+            onPointerUp={release}
+            onPointerCancel={release}
+            onLostPointerCapture={release}
+          >
+            {t('snake.padDash')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function SnakeRoom({ room }: { room: RoomView }) {
   const { run, roomMessages } = useGame();
   const { t } = useSkin();
+  const coarsePointer = useCoarsePointer();
 
   const game = room.game?.type === 'snake' ? room.game : null;
   const me = room.me;
@@ -457,6 +553,11 @@ export function SnakeRoom({ room }: { room: RoomView }) {
   const remainingMs = useCountdown(playing ? (game?.turnDeadline ?? 0) : 0);
   const countingDown = remainingMs > 0;
 
+  // 鍵盤與觸控搖桿送的是同一批意圖，統一走這三個 helper，兩條路徑不會各寫一份
+  const emitDir = useCallback((dir: SnakeDirection) => run(() => emitWithAck('game:snake', { dir })), [run]);
+  const emitItem = useCallback(() => run(() => emitWithAck('game:snakeItem', {})), [run]);
+  const emitDash = useCallback(() => run(() => emitWithAck('game:snakeDash', {})), [run]);
+
   // 按鍵只送方向意圖或道具使用意圖，真正的移動與碰撞判定都在下一拍才發生
   useEffect(() => {
     if (!canAct) return;
@@ -465,22 +566,22 @@ export function SnakeRoom({ room }: { room: RoomView }) {
       if (isTyping(event.target)) return; // 焦點在聊天框裡就不吃方向鍵/空白鍵
       if (event.code === 'Space') {
         event.preventDefault();
-        run(() => emitWithAck('game:snakeItem', {}));
+        emitItem();
         return;
       }
       if (event.code === 'KeyX') {
         event.preventDefault();
-        run(() => emitWithAck('game:snakeDash', {}));
+        emitDash();
         return;
       }
       const dir = KEY_TO_DIR[event.code];
       if (!dir) return;
       event.preventDefault();
-      run(() => emitWithAck('game:snake', { dir }));
+      emitDir(dir);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [canAct, run]);
+  }, [canAct, emitDir, emitItem, emitDash]);
 
   const grid = useMemo(() => (game ? buildGrid(game) : null), [game]);
   const heads = useMemo(() => (game ? headPositions(game, Date.now()) : []), [game]);
@@ -519,18 +620,22 @@ export function SnakeRoom({ room }: { room: RoomView }) {
               {t('snake.startingIn', { n: Math.ceil(remainingMs / 1000) })}
             </p>
           )}
-          <div className="snake-board-wrap">
+          {/* --snake-cols 給 CSS 算窄螢幕的格子大小用：一般地圖 20、大地圖 40 */}
+          <div
+            className="snake-board-wrap"
+            style={{ '--snake-cols': game.width } as CSSProperties}
+          >
             <div className="snake-board" style={{ gridTemplateColumns: `repeat(${game.width}, 1fr)` }}>
               {grid.map((cell, index) => (
                 <span key={index} className={cellClassName(cell)}>
                   {cellGlyph(cell)}
                 </span>
               ))}
-            </div>
-            {/* 其他人使用道具/衝刺的全域浮出通知 */}
-            <ItemToast roomMessages={roomMessages} myPlayerId={me.playerId} />
-            {/* 浮動覆蓋層：名牌跟自己的道具欄，用百分比座標疊在棋盤上，不佔用格子本身的空間 */}
-            <div className="snake-overlay">
+              {/* 浮動覆蓋層：名牌跟自己的道具欄，用百分比座標疊在棋盤上，不佔用格子本身的空間。
+                  放在 .snake-board「裡面」而不是 wrap 裡：棋盤寬過 wrap 而橫捲時，
+                  inset:0 跟的是棋盤本身的大小，百分比座標才對得準、也跟著一起捲。
+                  絕對定位的 grid 子元素不佔格，排版不受影響。 */}
+              <div className="snake-overlay">
               {heads.map(({ seat, x, y, badges }) => {
                 const nickname = room.seats.find((s) => s.seat === seat)?.nickname ?? '';
                 const left = `${((x + 0.5) / game.width) * 100}%`;
@@ -570,7 +675,10 @@ export function SnakeRoom({ room }: { room: RoomView }) {
                     ))}
                   </div>
                 )}
+              </div>
             </div>
+            {/* 其他人使用道具/衝刺的全域浮出通知：置中對齊可視範圍就好，留在 wrap 上 */}
+            <ItemToast roomMessages={roomMessages} myPlayerId={me.playerId} />
           </div>
         </>
       )}
@@ -611,6 +719,17 @@ export function SnakeRoom({ room }: { room: RoomView }) {
     <div className="room__controls">
       <StartControls room={room} />
     </div>
+  ) : coarsePointer ? (
+    // 手指裝置：提示文字講的是鍵盤，換成真的按得到的搖桿
+    <SnakePad
+      canAct={canAct}
+      itemsEnabled={itemsEnabled}
+      cuttingEnabled={cuttingEnabled}
+      onDir={emitDir}
+      onItem={emitItem}
+      onDash={emitDash}
+      t={t}
+    />
   ) : (
     <p className="muted">
       {t('snake.controlsHint')}

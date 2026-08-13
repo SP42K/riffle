@@ -53,6 +53,10 @@ export function StartControls({ room }: { room: RoomView }) {
           {startLabel}
         </button>
       )}
+      {/* 觸控裝置沒有 hover，把開不了局的理由從 title 攤出來 */}
+      {isHost && !canStart && (
+        <span className="room__hint touch-only">{t('start.needPlayers', { min })}</span>
+      )}
     </>
   );
 }

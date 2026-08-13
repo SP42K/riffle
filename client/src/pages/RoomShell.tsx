@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   BIG_TWO_RULE_KEYS,
   MONOPOLY_OPTION_KEYS,
@@ -33,12 +33,40 @@ interface Props {
  */
 export function RoomShell({ room, center, footer, isMyTurn, showLog = true }: Props) {
   const { roomMessages, run } = useGame();
-  const { skin, t } = useSkin();
+  const { skin, t, prefs } = useSkin();
   const game = room.game;
   const me = room.me;
   const isSpectator = me.mode === 'spectate';
   const playing = room.status === 'playing';
   const allHands = room.allHands;
+
+  // 側欄在窄螢幕會夾在牌桌與控制列中間、把手牌擠到看不見，所以窄螢幕預設收起來。
+  // 桌機不受影響：開關本身 display:none，收合的 CSS 也只寫在 860px 以下。
+  const [chatOpen, setChatOpen] = useState(false);
+  // 未讀不能用「訊息數的差」算：伺服器把歷史裁在 CHAT_HISTORY 則，滿了之後長度就不動了。
+  // 改記「最後看過那則的 id」，用它在目前陣列裡的位置算；找不到就代表看過的那則已被裁掉，整包都算未讀。
+  const [lastSeenId, setLastSeenId] = useState<string | null>(
+    () => roomMessages[roomMessages.length - 1]?.id ?? null,
+  );
+  useEffect(() => {
+    if (chatOpen) setLastSeenId(roomMessages[roomMessages.length - 1]?.id ?? null);
+  }, [chatOpen, roomMessages]);
+  const seenIndex = lastSeenId === null ? -1 : roomMessages.findIndex((msg) => msg.id === lastSeenId);
+  const unread = chatOpen ? 0 : roomMessages.length - (seenIndex + 1);
+
+  // 輪到自己時震一下：手機螢幕關著或在看別的 App 時，這是唯一叫得動人的提示。
+  // 只認 false→true 那一次，同一個回合裡重畫幾次都不會再震；
+  // 初值直接抓進場當下的狀態，重新連線接回牌桌時不會莫名震一下。
+  const wasMyTurn = useRef(Boolean(isMyTurn));
+  useEffect(() => {
+    const mine = Boolean(isMyTurn);
+    const changed = mine && !wasMyTurn.current;
+    wasMyTurn.current = mine;
+    if (!changed) return;
+    if (!prefs.vibrateOnTurn) return;
+    if (typeof navigator === 'undefined' || !('vibrate' in navigator)) return;
+    navigator.vibrate(200);
+  }, [isMyTurn, prefs.vibrateOnTurn]);
 
   const others = room.seats.filter((seat) => seat.playerId !== me.playerId);
   const rules = room.bigTwoRules;
@@ -148,7 +176,16 @@ export function RoomShell({ room, center, footer, isMyTurn, showLog = true }: Pr
           )}
         </div>
 
-        <aside className="room__side">
+        <button
+          type="button"
+          className="btn room__side-toggle"
+          aria-expanded={chatOpen}
+          onClick={() => setChatOpen((open) => !open)}
+        >
+          {unread > 0 ? t('room.chatUnread', { n: unread }) : t('room.chatToggle')}
+        </button>
+
+        <aside className="room__side" data-collapsed={chatOpen ? undefined : 'true'}>
           {isSpectator && allHands && (
             <section className="panel spectator">
               <h2>{t('room.godView')}</h2>

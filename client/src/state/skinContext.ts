@@ -17,6 +17,8 @@ export interface Prefs {
   autoHideDelayMs: number;
   /** 分頁標題與 favicon 跟著外觀換。 */
   swapTitle: boolean;
+  /** 輪到自己時震動一下（只有行動裝置有效）。預設關：辦公室裡震動比畫面更容易穿幫。 */
+  vibrateOnTurn: boolean;
 }
 
 export const PREFS_KEY = 'ws.prefs';
@@ -30,6 +32,7 @@ export const DEFAULT_PREFS: Prefs = {
   autoHideOnMouseLeave: false,
   autoHideDelayMs: 800,
   swapTitle: true,
+  vibrateOnTurn: false,
 };
 
 export interface SkinContextValue {

@@ -56,6 +56,9 @@ export const CASINO_TEXT = {
   'room.turnTag': '輪到',
   'room.spectators': '觀戰者（{n}）',
   'room.chatTitle': '房間聊天',
+  // 窄螢幕才看得到：側欄摺起來時的開關，帶未讀數
+  'room.chatToggle': '聊天',
+  'room.chatUnread': '聊天（{n}）',
   'room.turnPrefix': '輪到',
   'room.turnMine': '輪到你了',
 
@@ -258,6 +261,13 @@ export const CASINO_TEXT = {
   'snake.dashActive': '衝刺中',
   'snake.dashCooldown': '冷卻中',
   'snake.dashReady': '可用',
+  // 觸控搖桿：方向鍵只放箭頭圖形，名稱走 aria-label 給讀螢幕軟體用
+  'snake.padUp': '往上',
+  'snake.padDown': '往下',
+  'snake.padLeft': '往左',
+  'snake.padRight': '往右',
+  'snake.padItem': '道具',
+  'snake.padDash': '衝刺',
   'downstairs.health': '❤ {n}',
   'downstairs.depth': '深度 {n}m',
   'downstairs.eliminated': '已出局',
@@ -333,6 +343,9 @@ export const CASINO_TEXT = {
   'mahjong.myScoreLabel': '我的分數：{n}',
   'mahjong.flowerCount': '花 {n}',
   'mahjong.handEmpty': '等待發牌',
+  // 手指裝置的兩段式打牌：{tile} 是共用引擎回傳的中文牌名，麻將牌本身不做偽裝
+  'mahjong.selectedTile': '已選 {tile}',
+  'mahjong.confirmDiscard': '打出',
   'mahjong.dealerTag': '莊',
   'mahjong.addNpc': '補電腦玩家',
   'mahjong.bankerDiceResult': '{name} 是這場比賽的莊家！',

@@ -94,6 +94,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     const onDisconnect = () => setConnected(false);
 
+    // 手機切到別的 App 再切回來時，系統常常已經把 WebSocket 收掉，而背景分頁的
+    // 自動重連也可能被節流到不會動。回到前景這一刻主動連一次，connect 事件會再
+    // 打一次 session:hello，座位與手牌就接得回來（伺服器的斷線寬限內）。
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && socket.disconnected) socket.connect();
+    };
+
     socket.on('connect', hello);
     socket.on('disconnect', onDisconnect);
     socket.on('lobby:state', (payload) => setRooms(payload.rooms));
@@ -104,11 +111,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
       if (!payload) setRoomMessages([]);
     });
     socket.on('error', (payload) => showToast(localizeError(payload.code, payload.message)));
+    document.addEventListener('visibilitychange', onVisible);
 
     if (socket.connected) hello();
     else socket.connect();
 
     return () => {
+      document.removeEventListener('visibilitychange', onVisible);
       socket.off('connect', hello);
       socket.off('disconnect', onDisconnect);
       socket.off('lobby:state');

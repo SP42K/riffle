@@ -70,6 +70,20 @@ export function MonopolyBoard({
   return (
     <section className="board">
       <h2 className="board__title">{t('monopoly.boardTitle')}</h2>
+      {/*
+       * 棋子只印得下暱稱的第一個字，完整暱稱本來只掛在 title 上——手指裝置根本叫不出 title。
+       * 在棋盤上方補一行對照表，40 列的列寬一點都不用動；桌機用 CSS 收起來，外觀不變。
+       */}
+      <div className="board__legend">
+        {seats.map((seat) => (
+          <span key={seat.playerId} className="board__legend-item">
+            <span className="board__token" data-mine={seat.playerId === myPlayerId ? 'true' : undefined}>
+              {seat.nickname.slice(0, 1)}
+            </span>
+            {seat.nickname}
+          </span>
+        ))}
+      </div>
       <ol className="board__list" ref={listRef}>
         {MONOPOLY_BOARD.map((tile) => {
           const estate = isEstateId(tile.id) ? owned.get(tile.id) : undefined;

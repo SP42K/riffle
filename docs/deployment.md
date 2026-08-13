@@ -52,8 +52,8 @@ durable state / presence / rooms / pub-sub 都必須放到外部資料存放（�
 Vercel 的 WS 連線比照一般 function invocation 計算 duration，**預設 5 分鐘**上限，
 Pro/Enterprise 的 beta 可拉到 30 分鐘，時間到就斷線。
 
-一局大老二或大富翁遠超 5 分鐘，而 `DISCONNECT_GRACE_MS` 只有 30 秒
-（`shared/src/types.ts:526`）—— 斷線超過 30 秒，`dropFromRoom` 就會把玩家踢出座位、
+一局大老二或大富翁遠超 5 分鐘，而 `DISCONNECT_GRACE_MS` 只有 90 秒
+（`shared/src/types.ts`）—— 斷線超過 90 秒，`dropFromRoom` 就會把玩家踢出座位、
 牌也收回。30 分鐘上限救不了這件事，只是把「每 5 分鐘掉線」變成「每 30 分鐘掉線」。
 
 ### 3. 長駐計時器無處可放
@@ -154,7 +154,7 @@ Render 開服務拿到網域 → 填 Vercel 的 `VITE_SERVER_URL` → deploy Ver
 - 玩家身分是 `sessionStorage` 的 `ws.sid`（`client/src/net/socket.ts`），不是 cookie，
   所以**不受第三方 cookie 政策影響**，跨網域沒有額外問題。
 - **Render free 方案閒置 15 分鐘會停機**，喚醒約 50 秒。這個專案沒有任何持久化，
-  停機一次所有房間、牌局、籌碼歸零，而 `DISCONNECT_GRACE_MS` 只有 30 秒，玩家一定被踢出座位。
+  停機一次所有房間、牌局、籌碼歸零，而 `DISCONNECT_GRACE_MS` 只有 90 秒，玩家一定被踢出座位。
   要能連著玩就把 `render.yaml` 的 `plan: free` 改成 `starter`（$7/月）。
   **每次 deploy 也一樣會清空**（換行程 = 換世界），這點付費方案不會變。
 - **Vercel 的 preview deployment 連不上後端**：preview 網址是隨機的，而白名單是精確比對，

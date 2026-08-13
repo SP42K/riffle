@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react';
+import { useCoarsePointer } from '../hooks/useMediaQuery';
 import { SkinSettings } from '../pages/SkinSettings';
 import { SKINS, fill, resolveSkin } from '../skins';
 import {
@@ -21,6 +30,9 @@ function loadPrefs(): Prefs {
     return DEFAULT_PREFS;
   }
 }
+
+/** 兩次點擊之間超過這個時間就當成兩次單擊，不算連點。 */
+const DOUBLE_TAP_MS = 350;
 
 /** favicon 是動態插進去的：index.html 只放一個空殼，換外觀時改它的 href。 */
 function applyFavicon(href: string): void {
@@ -65,6 +77,55 @@ export function SkinProvider({ children }: { children: ReactNode }) {
     setBossHidden((prev) => !prev);
     setAutoHidden(false);
   }, []);
+
+  /**
+   * 無條件解除遮蔽。連點遮蔽畫面要用這個而不是 toggleBoss：
+   * 如果現在是失焦自動遮蔽（bossHidden 還是 false），toggleBoss 會把它翻成 true，
+   * 點了畫面還是黑的——手機上沒有可靠的 focus 事件可以救回來。
+   */
+  const revealAll = useCallback(() => {
+    setBossHidden(false);
+    setAutoHidden(false);
+  }, []);
+
+  const coarsePointer = useCoarsePointer();
+  // 連點偵測：記住上一次 pointerdown 的時間，夠近就算連點
+  const lastTapRef = useRef(0);
+  const onDoubleTap = useCallback((run: () => void) => {
+    return (event: ReactPointerEvent) => {
+      const now = event.timeStamp || Date.now();
+      if (now - lastTapRef.current < DOUBLE_TAP_MS) {
+        lastTapRef.current = 0;
+        run();
+        return;
+      }
+      lastTapRef.current = now;
+    };
+  }, []);
+
+  /**
+   * 觸控裝置的老闆鍵：右上角 48px 熱區連點兩下就遮蔽。
+   * 用 document 監聽而不是鋪一塊透明 div——透明 div 會把底下按鈕
+   * （離開房間、改當觀戰者這些就貼在右上角）的單擊整個吃掉；
+   * 座標判斷讓單擊照常穿透，只有連點才動作。計時器跟遮蔽畫面的分開，互不干擾。
+   */
+  const cornerTapRef = useRef(0);
+  useEffect(() => {
+    if (!coarsePointer || hidden) return;
+    const CORNER_PX = 48;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.clientX < window.innerWidth - CORNER_PX || event.clientY > CORNER_PX) return;
+      const now = event.timeStamp || Date.now();
+      if (now - cornerTapRef.current < DOUBLE_TAP_MS) {
+        cornerTapRef.current = 0;
+        toggleBoss();
+        return;
+      }
+      cornerTapRef.current = now;
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [coarsePointer, hidden, toggleBoss]);
 
   // 外觀套用到 <html>，CSS 全靠這個屬性分支
   useEffect(() => {
@@ -189,7 +250,14 @@ export function SkinProvider({ children }: { children: ReactNode }) {
       )}
 
       {settingsOpen && !hidden && <SkinSettings />}
-      {hidden && <div className="boss-screen">{skin.Boss()}</div>}
+      {hidden && (
+        <div
+          className="boss-screen"
+          onPointerDown={coarsePointer ? onDoubleTap(revealAll) : undefined}
+        >
+          {skin.Boss()}
+        </div>
+      )}
     </SkinContext.Provider>
   );
 }

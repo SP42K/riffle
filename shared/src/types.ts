@@ -684,7 +684,12 @@ export interface ServerToClientEvents {
 /** 大老二每人的手牌張數。人數上限請看 SEAT_LIMITS。 */
 export const HAND_SIZE = 13;
 export const TURN_MS = 45_000;
-export const DISCONNECT_GRACE_MS = 30_000;
+/**
+ * 斷線後保留座位與手牌的寬限時間。
+ * 給到 90 秒是為了手機：切去接個電話、看個訊息，或是隧道裡收訊斷掉，
+ * 回來還坐得回原位；離線期間輪到他時本來就會縮短倒數代打，桌子不會被卡住。
+ */
+export const DISCONNECT_GRACE_MS = 90_000;
 export const CHAT_HISTORY = 100;
 export const LOG_HISTORY = 60;
 
