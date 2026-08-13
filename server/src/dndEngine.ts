@@ -54,8 +54,6 @@ export interface DndState {
   altarsDestroyed: number;
   /** B6：場上那隻虛空酋長的 id；null 代表現在沒有。用來偵測牠被打死了沒。 */
   gateChiefId: string | null;
-  /** 被術士【放逐】的怪物：離場中，時間到會回到原本的格子。 */
-  banishedMonsters: Array<{ piece: DndPiece; r: number; c: number; turns: number }>;
   /** 術士【嗜魔鬥志】：還剩幾輪，隨從的傷害會被放大。 */
   allyRage: number;
 }
@@ -122,13 +120,13 @@ const MAX_ROUND_LAPS = 12;
 
 export const CLASS_STATS: Record<DndClassId, { name: string; hp: number; ac: number; attackBonus: number; dmgDice: number; dmgFlat: number; description: string }> = {
   brave: { name: 'Knight (騎士)', hp: 24, ac: 14, attackBonus: 4, dmgDice: 8, dmgFlat: 2, description: '前線護盾。【鎖鏈】：把 3 格內的怪物或一名隊友拉到身旁。【反射】：受擊時把 1/3 傷害彈回攻擊者。【武勇】：各 1/3 機率暈眩／擊退／極限防禦 (移動3格)' },
-  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 6, dmgFlat: 8, description: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合、每回合扣 1 HP（牠仍能攻擊；虛空酋長靠瞬移不受影響）。【弱點打擊】：各 1/2 機率降低目標 AC 或傷害 (移動6格)' },
-  tangerine: { name: 'Mage (法師)', hp: 16, ac: 10, attackBonus: 3, dmgDice: 12, dmgFlat: 2, description: '遠程爆發，攻擊距離 3 格。【火牆】：拉出一道燒 2 回合的 3 格火牆。【法術侵蝕】：各 1/2 機率破魔（火焰傷害 +30%）或束縛（3 回合不能動） (移動2格)' },
+  bubble: { name: 'Rogue (盜賊)', hp: 18, ac: 12, attackBonus: 5, dmgDice: 8, dmgFlat: 8, description: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合、每回合扣 1 HP（牠仍能攻擊；虛空酋長靠瞬移不受影響）。【弱點打擊】：各 1/2 機率降低目標 AC 或傷害 (移動6格)' },
+  tangerine: { name: 'Mage (法師)', hp: 16, ac: 10, attackBonus: 3, dmgDice: 12, dmgFlat: 2, description: '遠程爆發，攻擊距離 3 格。【火牆】：拉出一道燒 2 回合的 3 格火牆。【法術侵蝕】：各 1/2 機率衝擊波（把目標震退 2 格）或束縛（3 回合不能動） (移動2格)' },
   star: { name: 'Cleric (牧師)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '隊伍的命脈。【神聖治癒】：補 3 格內隊友 4 點 HP。【神聖判官】：每次攻擊從目標汲取 1 點生命，自己回多少目標就扣多少 (移動2格)' },
   gladiator: { name: 'Gladiator (鬥士)', hp: 30, ac: 12, attackBonus: 4, dmgDice: 10, dmgFlat: 2, description: '血厚甲薄的前線輸出。【野蠻衝撞】：衝到 5 格內的目標身旁，造成 5 傷害並暈眩 1 回合。【嗜血】：命中時各 1/2 機率致命斬殺（傷害 ×1.2）或旋風（周圍 8 格各吃半刀） (移動3格)' },
-  archer: { name: 'Archer (弓手)', hp: 18, ac: 12, attackBonus: 6, dmgDice: 8, dmgFlat: 2, description: '射程 5 格的後排輸出。【狙擊】：對全場任一隻怪造成 5 傷害。【獵殺】：命中與否都各 1/2 機率放血（3 回合每回合 -1）或穿刺（射中時才會貫穿到目標正後方的怪） (移動3格)' },
+  archer: { name: 'Archer (弓手)', hp: 18, ac: 12, attackBonus: 6, dmgDice: 8, dmgFlat: 2, description: '射程 5 格的後排輸出。【狙擊】：接下來 6 回合無視射程，帶弓時每次出手連射。【獵殺】：命中與否都各 1/2 機率放血（3 回合每回合 -1）或穿刺（射中時才會貫穿到目標正後方的怪） (移動3格)' },
   bard: { name: 'Bard (吟遊詩人)', hp: 18, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 3, description: '全隊的增益核心。【進擊之歌】：一回合內全隊傷害 +40%（冷卻 2 回合）。【即興吟唱】：出手時各 1/3 機率讓全隊 AC +3、命中 +2，或全體回 1 點 HP (移動3格)' },
-  summoner: { name: 'Summoner (召喚術士)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '把敵人變成戰力的術士，攻擊距離 2 格。【魔物召喚】：召出 2 隻替你作戰的哥布林。【墮落低語】：出手時各 1/3 機率洗腦目標、把牠放逐出場 2 回合，或讓隨從這一輪攻擊力與命中率各 +30% (移動2格)' },
+  summoner: { name: 'Summoner (召喚術士)', hp: 20, ac: 12, attackBonus: 3, dmgDice: 6, dmgFlat: 2, description: '把敵人變成戰力的術士，攻擊距離 2 格。【魔物召喚】：召出 2 隻替你作戰的哥布林。【墮落低語】：出手時各 1/3 機率洗腦目標、讓牠魅惑後遊蕩 2 回合，或發動魂體轉化強化隨從 (移動2格)' },
 };
 
 /**
@@ -538,7 +536,7 @@ function summonGodCopies(seats: Seats, state: DndState, rng: () => number): LogE
       speed: DND_CLASS_MOVE[classId],
     };
     if (placeNear(state, boss.r, boss.c, copy)) {
-      events.push({ t: 'dndMessage', message: `🪞 邪神捏出了一個${copy.name}！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🪞 邪神捏出了一個${copy.name}！` } as any);
     }
   }
   return events;
@@ -557,7 +555,7 @@ function updateEvilGod(seats: Seats, state: DndState, rng: () => number): LogEve
   if (phase2 && !state.godPhase2) {
     state.godPhase2 = true;
     events.push({
-      t: 'dndMessage',
+      t: 'dndMessage', kind: 'skill',
       message: '🌀 邪神的軀殼裂開了 —— 它開始在分身之間流竄。',
     } as any);
   }
@@ -569,12 +567,12 @@ function updateEvilGod(seats: Seats, state: DndState, rng: () => number): LogEve
       if (state.godWindow === 0) {
         events.push(...summonGodCopies(seats, state, rng));
       } else {
-        events.push({ t: 'dndMessage', message: `💢 邪神還捏不出新的分身 —— 還有 ${state.godWindow} 輪！` } as any);
+        events.push({ t: 'dndMessage', kind: 'skill', message: `💢 邪神還捏不出新的分身 —— 還有 ${state.godWindow} 輪！` } as any);
       }
     } else {
       state.godWindow = GOD_WINDOW_ROUNDS;
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: '💥 分身全被打碎了！邪神身上的光芒黯了下來。',
       } as any);
     }
@@ -592,7 +590,7 @@ function updateEvilGod(seats: Seats, state: DndState, rng: () => number): LogEve
         bossCell.piece = target.piece;
         copyCell.piece = boss.piece;
         pushFx(state, boss.piece.id, 'possess');
-        events.push({ t: 'dndMessage', message: '🌀 邪神換了一具身體 —— 你分不清剛才打的是哪一個了。' } as any);
+        events.push({ t: 'dndMessage', kind: 'skill', message: '🌀 邪神換了一具身體 —— 你分不清剛才打的是哪一個了。' } as any);
       }
     }
   }
@@ -622,7 +620,7 @@ function evilGodPassive(
     // 它本來就貼著你打，換完還是面對面。
     const copies = godCopies(state);
     if (copies.length === 0) {
-      events.push({ t: 'dndMessage', message: '🌀 邪神想扭曲空間，但場上沒有分身可以替換。' } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: '🌀 邪神想扭曲空間，但場上沒有分身可以替換。' } as any);
       return events;
     }
 
@@ -636,7 +634,7 @@ function evilGodPassive(
       victim.c = swapWith.c;
       pushFx(state, victim.piece.id, 'swap');
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: `🌀 邪神扭曲了空間，把 ${who} 跟 ${swapWith.piece.name} 對調了位置！`,
       } as any);
     }
@@ -648,18 +646,18 @@ function evilGodPassive(
     if (seatInfo) {
       seatInfo.stunnedTurns = 1;
       pushFx(state, victim.piece.id, 'stun');
-      events.push({ t: 'dndMessage', message: `💫 ${who} 被震懾了，下一個回合無法行動！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `💫 ${who} 被震懾了，下一個回合無法行動！` } as any);
     }
     return events;
   }
 
   // 彈飛：沿著「邪神 → 目標」的方向推 3 格
   if (!shoveAway(state, mon, victim, 3)) {
-    events.push({ t: 'dndMessage', message: `💢 邪神想把 ${who} 彈飛，但身後沒有空間！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `💢 邪神想把 ${who} 彈飛，但身後沒有空間！` } as any);
     return events;
   }
   pushFx(state, victim.piece.id, 'knockback');
-  events.push({ t: 'dndMessage', message: `💨 ${who} 被邪神一掌轟飛了出去！` } as any);
+  events.push({ t: 'dndMessage', kind: 'skill', message: `💨 ${who} 被邪神一掌轟飛了出去！` } as any);
   return events;
 }
 
@@ -712,11 +710,11 @@ function b6MonsterPassive(
 
   if (mon.piece.monsterPassive === 'troll') {
     if (!shoveAway(state, mon, victim, 5)) {
-      events.push({ t: 'dndMessage', message: `💢 巨魔想把 ${who} 打飛，但身後沒有空間！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `💢 巨魔想把 ${who} 打飛，但身後沒有空間！` } as any);
       return events;
     }
     pushFx(state, victim.piece.id, 'knockback');
-    events.push({ t: 'dndMessage', message: `💨 巨魔一記橫掃，把 ${who} 轟飛了 5 格！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `💨 巨魔一記橫掃，把 ${who} 轟飛了 5 格！` } as any);
     return events;
   }
 
@@ -726,17 +724,17 @@ function b6MonsterPassive(
     if (seatInfo) {
       seatInfo.stunnedTurns = 1;
       pushFx(state, victim.piece.id, 'stun');
-      events.push({ t: 'dndMessage', message: `💫 哥布林英雄的盾擊震暈了 ${who}，下一回合無法行動！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `💫 哥布林英雄的盾擊震暈了 ${who}，下一回合無法行動！` } as any);
     }
     return events;
   }
 
   if (!shoveAway(state, mon, victim, 1)) {
-    events.push({ t: 'dndMessage', message: `😱 ${who} 想後退，但身後已經無路可退！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `😱 ${who} 想後退，但身後已經無路可退！` } as any);
     return events;
   }
   pushFx(state, victim.piece.id, 'fear');
-  events.push({ t: 'dndMessage', message: `😱 哥布林英雄的威壓讓 ${who} 踉蹌退開了一格！` } as any);
+  events.push({ t: 'dndMessage', kind: 'skill', message: `😱 哥布林英雄的威壓讓 ${who} 踉蹌退開了一格！` } as any);
   return events;
 }
 
@@ -816,7 +814,7 @@ function runCopySkill(
     if (!seatInfo || (seatInfo.restrainedTurns ?? 0) > 0) return events;
     seatInfo.restrainedTurns = ROGUE_NET_TURNS;
     events.push({
-      t: 'dndMessage',
+      t: 'dndMessage', kind: 'skill',
       message: `🕸️ ${mon.piece.name} 甩出羅網，${hero.piece.name.split(' ')[0]} 接下來 ${ROGUE_NET_TURNS} 回合無法移動！`,
     } as any);
     return events;
@@ -882,7 +880,8 @@ function checkBossFinalPhase(state: DndState, rng: () => number): LogEvent[] {
 
 const DEBUFF_TURNS = 2;
 /** 法師被動【破魔】把目標的 AC 打成原本的七成。 */
-const MAGE_MAGIC_VULN = 0.3;
+/** 法師【衝擊波】把目標往後推幾格。 */
+const MAGE_SHOCK_PUSH = 2;
 /** 法師被動【束縛】綁住的回合數（純定身，不扣血）。 */
 const MAGE_BIND_TURNS = 3;
 const DEBUFF_RATIO = 0.6;
@@ -1088,29 +1087,38 @@ function isHidden(seats: Seats, state: DndState, piece: DndPiece): boolean {
  * 法師的攻擊被動：二選一，各 1/2。
  * 【破魔】AC 掉到七成／【束縛】3 回合不能移動（只定身，不造成持續傷害）。
  */
-function magePassive(state: DndState, mage: DndPiece, target: DndPiece, rng: () => number): LogEvent[] {
+function magePassive(
+  state: DndState,
+  mage: DndPiece,
+  mr: number,
+  mc: number,
+  target: { piece: DndPiece; r: number; c: number },
+  rng: () => number,
+): LogEvent[] {
   const who = mage.name.split(' ')[0];
 
+  // 【衝擊波】：把目標往後推兩格。推人的邏輯跟邪神的彈飛、巨魔的重擊共用同一份。
   if (Math.floor(rng() * 2) === 0) {
-    // 破魔動的是「魔防」：只讓火焰燒得更痛，不碰 AC（AC 是物理防禦，
-    // 降它等於連近戰都變好打，那是盜賊【破甲】的活）
-    target.magicDebuffTurns = DEBUFF_TURNS;
-    pushFx(state, target.id, 'magicDown');
+    if (!shoveAway(state, { r: mr, c: mc }, target, MAGE_SHOCK_PUSH)) {
+      return [{ t: 'dndMessage', kind: 'skill', message: `💢 ${who} 的【衝擊波】撞上了 ${target.piece.name}，但牠身後沒有退路！` } as any];
+    }
+    pushFx(state, target.piece.id, 'knockback');
     return [{
-      t: 'dndMessage',
-      message: `🔮 ${who} 的【破魔】撕裂了 ${target.name} 的魔法防禦，`
-        + `接下來 ${DEBUFF_TURNS} 回合牠被火焰灼燒的傷害提高 ${Math.round(MAGE_MAGIC_VULN * 100)}%！`,
+      t: 'dndMessage', kind: 'skill',
+      message: `🌊 ${who} 的【衝擊波】把 ${target.piece.name} 震退了 ${MAGE_SHOCK_PUSH} 格！`,
     } as any];
   }
 
+  const targetPiece = target.piece;
+
   // 束縛只定身，不像撒網會持續扣血；但盜賊可能先網住了同一隻怪，
-  // 蓋掉他的回合數與持續傷害等於幫怪解debuff，所以只往長的取、傷害留著。
-  target.trappedTurns = Math.max(target.trappedTurns ?? 0, MAGE_BIND_TURNS);
-  target.netDamage = target.netDamage ?? 0;
-  pushFx(state, target.id, 'bind');
+  // 蓋掉他的回合數與持續傷害等於幫怪解 debuff，所以只往長的取、傷害留著。
+  targetPiece.trappedTurns = Math.max(targetPiece.trappedTurns ?? 0, MAGE_BIND_TURNS);
+  targetPiece.netDamage = targetPiece.netDamage ?? 0;
+  pushFx(state, targetPiece.id, 'bind');
   return [{
-    t: 'dndMessage',
-    message: `🪢 ${who} 的【束縛】纏住了 ${target.name}，接下來 ${MAGE_BIND_TURNS} 回合牠無法移動！`,
+    t: 'dndMessage', kind: 'skill',
+    message: `🪢 ${who} 的【束縛】纏住了 ${targetPiece.name}，接下來 ${MAGE_BIND_TURNS} 回合牠無法移動！`,
   } as any];
 }
 
@@ -1189,7 +1197,7 @@ function tryArcherDecoy(
   };
   pushFx(state, victim.piece.id, 'decoy');
   events.push({
-    t: 'dndMessage',
+    t: 'dndMessage', kind: 'skill',
     message: `👥 ${victim.piece.name.split(' ')[0]} 的身形一晃，留下了一個【殘影】頂在原地！`,
   } as any);
   return events;
@@ -1228,11 +1236,12 @@ const SUMMON_BASE_CAP = 2;
 const SUMMON_PER_LEVEL = 2;
 /** 【惡魔之卵】幾回合後必死。 */
 const DOOM_TURNS = 5;
-/** 【放逐】把怪物丟出場外幾回合。 */
-const MONSTER_BANISH_TURNS = 2;
-/** 【嗜魔鬥志】：隨從的命中與傷害各提升幾成、持續幾輪。 */
-const ALLY_RAGE_RATIO = 0.3;
-const ALLY_RAGE_TURNS = 1;
+/** 【魅惑】讓怪物漫無目的地遊蕩幾回合。 */
+const CHARM_WANDER_TURNS = 2;
+/** 【魂體轉化】：隨從的命中與傷害各提升幾成、持續幾輪，外加永久的 HP。 */
+const ALLY_TRANSMUTE_RATIO = 0.3;
+const ALLY_TRANSMUTE_TURNS = 1;
+const ALLY_TRANSMUTE_HP = 2;
 /** 洗腦無效的怪：頭目、薩滿、英雄、巨魔。 */
 function immuneToCharm(piece: DndPiece): boolean {
   if (piece.id.startsWith('boss-')) return true;
@@ -1282,76 +1291,53 @@ function summonerPassive(
   // 【洗腦】把牠拉到我方
   if (roll === 0) {
     if (immuneToCharm(target)) {
-      events.push({ t: 'dndMessage', message: `💢 低語滑過 ${target.name} 的耳邊 —— 牠的意志硬得撬不開。` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `💢 低語滑過 ${target.name} 的耳邊 —— 牠的意志硬得撬不開。` } as any);
       return events;
     }
     target.ally = true;
     // 換邊之後這一輪不該再照原本的立場動一次
     state.monsterActed.add(target.id);
     pushFx(state, target.id, 'charm');
-    events.push({ t: 'dndMessage', message: `💞 ${target.name} 的眼神渙散了下來 —— 牠現在站在你們這一邊！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `💞 ${target.name} 的眼神渙散了下來 —— 牠現在站在你們這一邊！` } as any);
     return events;
   }
 
-  // 【放逐】把牠丟出這個世界幾回合。跟虛空酋長對玩家做的是同一件事，
-  // 所以也照同一套規矩：離場、記住原本站的格子、時間到回來。
+  // 【魅惑】：牠還在場上，但接下來幾回合只會漫無目的地亂走，不會攻擊任何人
   if (roll === 1) {
     if (target.id.startsWith('boss-')) {
-      events.push({ t: 'dndMessage', message: `🌌 裂隙咬不動 ${target.name} —— 頭目的份量撐開了它。` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `💢 低語在 ${target.name} 腦中散開 —— 頭目連晃都沒晃一下。` } as any);
       return events;
     }
-    const cell = state.board[tr]?.[tc];
-    if (cell && cell.piece?.id === target.id) cell.piece = null;
-    state.banishedMonsters.push({ piece: target, r: tr, c: tc, turns: MONSTER_BANISH_TURNS });
-    pushFx(state, target.id, 'banish');
+    target.wanderTurns = CHARM_WANDER_TURNS;
+    pushFx(state, target.id, 'wander');
     events.push({
-      t: 'dndMessage',
-      message: `🌌 術士撕開一道裂隙，${target.name} 被吞了進去 —— ${MONSTER_BANISH_TURNS} 回合後才會被吐回來。`,
+      t: 'dndMessage', kind: 'skill',
+      message: `😵 ${target.name} 的眼神失焦了 —— 接下來 ${CHARM_WANDER_TURNS} 回合牠只會在原地打轉。`,
     } as any);
     return events;
   }
 
-  // 【嗜魔鬥志】讓場上的隨從這一輪打得更兇。
+  // 【魂體轉化】：這一輪隨從打得更兇更準，血量則是永久加上去的。
   // 圖示掛在每一隻隨從身上 —— 三個結果裡只有這個沒有位移也沒有換邊，
   // 不在棋盤上留下痕跡的話，玩家會以為自己從來沒抽到它。
-  state.allyRage = ALLY_RAGE_TURNS;
+  state.allyRage = ALLY_TRANSMUTE_TURNS;
+  let touched = 0;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       const piece = state.board[r]?.[c]?.piece;
-      if (isAlly(piece)) pushFx(state, piece!.id, 'rage');
+      if (!isAlly(piece)) continue;
+      piece!.maxHp += ALLY_TRANSMUTE_HP;
+      piece!.hp += ALLY_TRANSMUTE_HP;
+      pushFx(state, piece!.id, 'transmute');
+      touched++;
     }
   }
   events.push({
-    t: 'dndMessage',
-    message: `🔺 術士低聲下令【嗜魔鬥志】—— 這一輪隨從的攻擊力與命中率各提高 ${Math.round(ALLY_RAGE_RATIO * 100)}%！`,
+    t: 'dndMessage', kind: 'skill',
+    message: `🔺 術士施展【魂體轉化】—— 這一輪隨從的攻擊力與命中率各提高 `
+      + `${Math.round(ALLY_TRANSMUTE_RATIO * 100)}%，並永久獲得 ${ALLY_TRANSMUTE_HP} 點 HP`
+      + `${touched === 0 ? '（可惜場上一個隨從也沒有）' : ''}！`,
   } as any);
-  return events;
-}
-
-/** 被放逐的怪物每輪倒數，時間到就回到原本的格子（被佔走就找中央附近的空位）。 */
-function tickBanishedMonsters(state: DndState): LogEvent[] {
-  const events: LogEvent[] = [];
-  const staying: typeof state.banishedMonsters = [];
-
-  for (const entry of state.banishedMonsters) {
-    entry.turns--;
-    if (entry.turns > 0) {
-      staying.push(entry);
-      continue;
-    }
-    const home = state.board[entry.r]?.[entry.c];
-    const cell = home && home.piece === null ? home : findEmptyCellNearCenter(state);
-    if (!cell) {
-      // 整張棋盤都滿了：留著下一輪再試，總比讓牠人間蒸發好
-      entry.turns = 1;
-      staying.push(entry);
-      continue;
-    }
-    cell.piece = entry.piece;
-    events.push({ t: 'dndMessage', message: `🌌 裂隙把 ${entry.piece.name} 吐了回來！` } as any);
-  }
-
-  state.banishedMonsters = staying;
   return events;
 }
 
@@ -1368,7 +1354,7 @@ function tickDoom(seats: Seats, state: DndState, rng: () => number): LogEvent[] 
       piece.doomTurns--;
       if (piece.doomTurns > 0) continue;
       state.board[r]![c]!.piece = null;
-      events.push({ t: 'dndMessage', message: `🥚 ${piece.name} 體內的卵孵化了 —— 牠從裡面被撐開，當場斷氣。` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🥚 ${piece.name} 體內的卵孵化了 —— 牠從裡面被撐開，當場斷氣。` } as any);
       died = true;
     }
   }
@@ -1422,10 +1408,10 @@ function runAlliesTurn(seats: Seats, state: DndState, rng: () => number): LogEve
       // 【嗜魔鬥志】：術士下令的那一輪，隨從的命中與傷害同時放大
       const raging = state.allyRage > 0;
       const base = located.piece.attackBonus ?? 2;
-      const bonus = raging ? Math.round(base * (1 + ALLY_RAGE_RATIO)) : base;
+      const bonus = raging ? Math.round(base * (1 + ALLY_TRANSMUTE_RATIO)) : base;
       if (roll + bonus >= target.piece.ac) {
         let dmg = Math.floor(rng() * (located.piece.dmgDice ?? 6)) + 1;
-        if (raging) dmg = Math.max(1, Math.round(dmg * (1 + ALLY_RAGE_RATIO)));
+        if (raging) dmg = Math.max(1, Math.round(dmg * (1 + ALLY_TRANSMUTE_RATIO)));
         target.piece.hp = Math.max(0, target.piece.hp - dmg);
         events.push({
           t: 'dndAttack', player: located.piece.name, target: target.piece.name, roll, hit: true, damage: dmg,
@@ -1540,7 +1526,7 @@ function bardPassive(
       info.acBuffAmount = amount;
     });
     pushFx(state, bard.id, 'song');
-    events.push({ t: 'dndMessage', message: `🎵 ${who} 唱起【大地之歌】—— 這一輪全隊的 AC +${amount}！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `🎵 ${who} 唱起【大地之歌】—— 這一輪全隊的 AC +${amount}！` } as any);
     return events;
   }
 
@@ -1551,7 +1537,7 @@ function bardPassive(
       info.hitBuffAmount = amount;
     });
     pushFx(state, bard.id, 'song');
-    events.push({ t: 'dndMessage', message: `🎵 ${who} 唱起【專注之歌】—— 這一輪全隊的命中 +${amount}！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `🎵 ${who} 唱起【專注之歌】—— 這一輪全隊的命中 +${amount}！` } as any);
     return events;
   }
 
@@ -1562,7 +1548,7 @@ function bardPassive(
     if (piece) piece.hp = info.hp;
   });
   pushFx(state, bard.id, 'song');
-  events.push({ t: 'dndMessage', message: `🎵 ${who} 唱起【生命之歌】—— 全隊恢復了 ${heal} 點 HP！` } as any);
+  events.push({ t: 'dndMessage', kind: 'skill', message: `🎵 ${who} 唱起【生命之歌】—— 全隊恢復了 ${heal} 點 HP！` } as any);
   return events;
 }
 
@@ -1573,8 +1559,11 @@ const GLADIATOR_WHIRLWIND_RATIO = 0.5;
 /** 鬥士【野蠻衝撞】的射程與傷害。 */
 const GLADIATOR_CHARGE_RANGE = 5;
 const GLADIATOR_CHARGE_DAMAGE = 5;
-/** 弓手【狙擊】每一箭的傷害。 */
-const ARCHER_SNIPE_DAMAGE = 5;
+/**
+ * 弓手【狙擊】：發動後幾回合內無視射程，而且每次普攻會連射（帶【弓箭】時）。
+ * 技能本身不造成傷害 —— 它買的是那段窗口。
+ */
+const SNIPE_TURNS = 6;
 /** 弓手【放血】持續幾回合，每回合扣 1 點。 */
 const ARCHER_BLEED_TURNS = 3;
 /** 弓手【殘影】分身的素質（比照法師）。 */
@@ -1605,7 +1594,7 @@ function gladiatorPassive(
     const boosted = Math.ceil(damage * GLADIATOR_EXECUTE_RATIO);
     pushFx(state, gladiator.id, 'execute');
     events.push({
-      t: 'dndMessage',
+      t: 'dndMessage', kind: 'skill',
       message: `🩸 ${who} 抓住破綻發動【致命斬殺】，這一擊的傷害提升到 ${boosted} 點！`,
     } as any);
     return { damage: boosted, events };
@@ -1629,13 +1618,13 @@ function gladiatorPassive(
   }
 
   if (hit.length === 0) {
-    events.push({ t: 'dndMessage', message: `🌀 ${who} 揮出【旋風】，但周圍沒有其他敵人。` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `🌀 ${who} 揮出【旋風】，但周圍沒有其他敵人。` } as any);
     return { damage, events };
   }
 
   pushFx(state, gladiator.id, 'whirlwind');
   events.push({
-    t: 'dndMessage',
+    t: 'dndMessage', kind: 'skill',
     message: `🌀 ${who} 的【旋風】橫掃周圍 ${hit.length} 隻敵人，各造成 ${splash} 點傷害！（${hit.join('、')}）`,
   } as any);
   return { damage, events };
@@ -1666,7 +1655,7 @@ function archerPassive(
     target.piece.bleedDamage = bleed;
     pushFx(state, target.piece.id, 'bleed');
     events.push({
-      t: 'dndMessage',
+      t: 'dndMessage', kind: 'skill',
       message: `🩸 ${who} 的箭撕開了 ${target.piece.name} 的血管 —— 接下來 ${ARCHER_BLEED_TURNS} 回合牠每回合流失 ${bleed} 點 HP！`,
     } as any);
     return events;
@@ -1675,7 +1664,7 @@ function archerPassive(
   // 【穿刺】：沿著「弓手 → 目標」的方向再往前一格。
   // 這一箭本來就沒射中的話，後面那隻自然也不會受傷。
   if (damage <= 0) {
-    events.push({ t: 'dndMessage', message: `➶ ${who} 的箭擦身而過，力道不足以貫穿到後方。` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `➶ ${who} 的箭擦身而過，力道不足以貫穿到後方。` } as any);
     return events;
   }
 
@@ -1684,7 +1673,7 @@ function archerPassive(
   if (dr === 0 && dc === 0) return events;
   const behind = state.board[target.r + dr]?.[target.c + dc]?.piece;
   if (!behind || !isHostile(behind) || behind.invulnerable) {
-    events.push({ t: 'dndMessage', message: `➶ ${who} 的箭貫穿而過，但後方沒有第二個目標。` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `➶ ${who} 的箭貫穿而過，但後方沒有第二個目標。` } as any);
     return events;
   }
 
@@ -1692,7 +1681,7 @@ function archerPassive(
   behind.hp = Math.max(0, behind.hp - pierce);
   pushFx(state, behind.id, 'pierce');
   events.push({
-    t: 'dndMessage',
+    t: 'dndMessage', kind: 'skill',
     message: `➶ ${who} 的【穿刺】一箭貫穿，後方的 ${behind.name} 也吃到 ${pierce} 點傷害！`,
   } as any);
   return events;
@@ -1728,7 +1717,7 @@ function roguePassive(state: DndState, rogue: DndPiece, target: DndPiece, rng: (
     pushFx(state, target.id, 'acDown');
     return [
       {
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: `🗡️ ${who} 的匕首劃開了 ${target.name} 的護甲，AC 降到 ${target.ac}（${DEBUFF_TURNS} 回合）！`,
       } as any,
     ];
@@ -1738,7 +1727,7 @@ function roguePassive(state: DndState, rogue: DndPiece, target: DndPiece, rng: (
   pushFx(state, target.id, 'weaken');
   return [
     {
-      t: 'dndMessage',
+      t: 'dndMessage', kind: 'skill',
       message: `🩸 ${who} 割開了 ${target.name} 的肌腱，牠的傷害只剩六成（${DEBUFF_TURNS} 回合）！`,
     } as any,
   ];
@@ -1814,11 +1803,7 @@ function burnFireWalls(seats: Seats, state: DndState): LogEvent[] {
     const burns = wall.hostile ? piece.type === 'player' : isHostile(piece);
     if (!burns || piece.invulnerable) continue;
 
-    // 【破魔】：魔防被撕開的目標，火焰燒得更痛
-    const burnDmg = piece.magicDebuffTurns && piece.magicDebuffTurns > 0
-      ? Math.round(wall.dmg * (1 + MAGE_MAGIC_VULN))
-      : wall.dmg;
-    piece.hp = Math.max(0, piece.hp - burnDmg);
+    piece.hp = Math.max(0, piece.hp - wall.dmg);
     // 燒到的是冒險者的話要把血同步回座位。少了這行，隊伍面板會顯示舊血量，
     // 而吟遊詩人的【生命之歌】以 seats 的 hp 為準往回寫，等於把火焰傷害整個退還。
     if (piece.type === 'player') {
@@ -1827,10 +1812,8 @@ function burnFireWalls(seats: Seats, state: DndState): LogEvent[] {
       if (burnedInfo) burnedInfo.hp = piece.hp;
     }
     events.push({
-      t: 'dndMessage',
-      message: piece.magicDebuffTurns && piece.magicDebuffTurns > 0
-        ? `🔥 ${piece.name} 的魔防已被【破魔】撕開，站在火牆裡被燒掉 ${burnDmg} 點 HP！`
-        : `🔥 ${piece.name} 站在火牆裡，被燒掉 ${burnDmg} 點 HP！`,
+      t: 'dndMessage', kind: 'skill',
+      message: `🔥 ${piece.name} 站在火牆裡，被燒掉 ${wall.dmg} 點 HP！`,
     } as any);
     if (piece.hp <= 0 && cell) {
       if (piece.type === 'player') {
@@ -1838,7 +1821,7 @@ function burnFireWalls(seats: Seats, state: DndState): LogEvent[] {
         if (seat !== -1 && state.seats[seat]) state.seats[seat]!.alive = false;
       }
       cell.piece = null;
-      events.push({ t: 'dndMessage', message: `🔥 ${piece.name} 被火牆燒成了灰燼！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🔥 ${piece.name} 被火牆燒成了灰燼！` } as any);
     }
   }
 
@@ -1863,9 +1846,6 @@ function tickMonsterDebuffs(state: DndState): void {
       }
       if (piece.atkDebuffTurns && piece.atkDebuffTurns > 0) {
         piece.atkDebuffTurns--;
-      }
-      if (piece.magicDebuffTurns && piece.magicDebuffTurns > 0) {
-        piece.magicDebuffTurns--;
       }
     }
   }
@@ -1894,7 +1874,7 @@ function voidChiefPassive(
     const cell = state.board[victim.r]?.[victim.c];
     if (cell && cell.piece?.id === victim.piece.id) cell.piece = null;
     pushFx(state, victim.piece.id, 'banish');
-    events.push({ t: 'dndMessage', message: `🌌 虛空酋長張開裂隙，${who} 被放逐了 1 回合！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `🌌 虛空酋長張開裂隙，${who} 被放逐了 1 回合！` } as any);
     return events;
   }
 
@@ -1902,14 +1882,14 @@ function voidChiefPassive(
     const mage = spawnMonster(state, makeGoblin(`m-mage-void-${Date.now()}-${Math.floor(rng() * 1000)}`, GOBLIN_MAGE));
     if (placeNear(state, victim.r, victim.c, mage)) {
       pushFx(state, mage.id, 'summon');
-      events.push({ t: 'dndMessage', message: `🧿 虛空酋長的低語喚出了一隻哥布林法師！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🧿 虛空酋長的低語喚出了一隻哥布林法師！` } as any);
     }
     return events;
   }
 
   seatInfo.fearTurns = 2;
   pushFx(state, victim.piece.id, 'fear');
-  events.push({ t: 'dndMessage', message: `😱 ${who} 陷入【恐懼】，接下來 2 回合的移動方向會完全顛倒！` } as any);
+  events.push({ t: 'dndMessage', kind: 'skill', message: `😱 ${who} 陷入【恐懼】，接下來 2 回合的移動方向會完全顛倒！` } as any);
   return events;
 }
 
@@ -1982,7 +1962,7 @@ function warriorPassive(
   if (roll === 0) {
     target.stunnedTurns = 1;
     pushFx(state, target.id, 'stun');
-    events.push({ t: 'dndMessage', message: `💫 ${who} 的重擊震暈了 ${target.name}，牠下一回合無法行動！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `💫 ${who} 的重擊震暈了 ${target.name}，牠下一回合無法行動！` } as any);
     return events;
   }
 
@@ -2001,14 +1981,14 @@ function warriorPassive(
     }
 
     if (landedR === tr && landedC === tc) {
-      events.push({ t: 'dndMessage', message: `💢 ${who} 想擊退 ${target.name}，但牠身後沒有退路！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `💢 ${who} 想擊退 ${target.name}，但牠身後沒有退路！` } as any);
       return events;
     }
 
     state.board[tr]![tc]!.piece = null;
     state.board[landedR]![landedC]!.piece = target;
     pushFx(state, target.id, 'knockback');
-    events.push({ t: 'dndMessage', message: `💥 ${who} 一記盾擊，把 ${target.name} 擊退了！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `💥 ${who} 一記盾擊，把 ${target.name} 擊退了！` } as any);
     return events;
   }
 
@@ -2018,7 +1998,7 @@ function warriorPassive(
     seatInfo.damageCapTurns = 1;
     seatInfo.damageCap = 2;
     pushFx(state, warrior.id, 'guard');
-    events.push({ t: 'dndMessage', message: `🛡️ ${who} 進入【極限防禦】，下一回合受到的每次傷害都不會超過 2 點！` } as any);
+    events.push({ t: 'dndMessage', kind: 'skill', message: `🛡️ ${who} 進入【極限防禦】，下一回合受到的每次傷害都不會超過 2 點！` } as any);
   }
   return events;
 }
@@ -2674,7 +2654,6 @@ export function dealDnd(
     fx: [],
     altarsDestroyed: 0,
     gateChiefId: null,
-    banishedMonsters: [],
     allyRage: 0,
   };
 
@@ -2711,10 +2690,10 @@ function bleedMonsters(seats: Seats, state: DndState, rng: () => number): LogEve
       if (piece.invulnerable) continue;
       const bleed = piece.bleedDamage ?? 1;
       piece.hp = Math.max(0, piece.hp - bleed);
-      events.push({ t: 'dndMessage', message: `💧 ${piece.name} 的傷口還在流血，失去了 ${bleed} 點 HP！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `💧 ${piece.name} 的傷口還在流血，失去了 ${bleed} 點 HP！` } as any);
       if (piece.hp <= 0) {
         state.board[r]![c]!.piece = null;
-        events.push({ t: 'dndMessage', message: `💀 ${piece.name} 流血過多倒下了！` } as any);
+        events.push({ t: 'dndMessage', kind: 'skill', message: `💀 ${piece.name} 流血過多倒下了！` } as any);
         died = true;
       }
     }
@@ -2727,7 +2706,6 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
   state.roundCount++;
   events.push(...bleedMonsters(seats, state, rng));
   events.push(...tickDoom(seats, state, rng));
-  events.push(...tickBanishedMonsters(state));
   if (state.level === ESCORT_LEVEL) {
     events.push(...escortReinforcements(state, rng));
   }
@@ -2768,7 +2746,7 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
             }
           }
         }
-        events.push({ t: 'dndMessage', message: `🌀 ${seatInfo.piece.name.split(' ')[0]} 從異空間回歸戰場！` } as any);
+        events.push({ t: 'dndMessage', kind: 'skill', message: `🌀 ${seatInfo.piece.name.split(' ')[0]} 從異空間回歸戰場！` } as any);
         seatInfo.piece = undefined;
         seatInfo.banishCell = undefined;
       }
@@ -2792,12 +2770,12 @@ function beginRound(seats: Seats, state: DndState, rng: () => number, events: Lo
       const netDmg = piece.netDamage ?? 1;
       piece.hp = Math.max(0, piece.hp - netDmg);
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: `🕸️ ${piece.name} 被網子纏住，原地掙扎並受到 ${netDmg} 點傷害！`,
       } as any);
       if (piece.hp <= 0) {
         state.board[r]![c]!.piece = null;
-        events.push({ t: 'dndMessage', message: `🕸️ ${piece.name} 力竭倒在網中！` } as any);
+        events.push({ t: 'dndMessage', kind: 'skill', message: `🕸️ ${piece.name} 力竭倒在網中！` } as any);
       }
     }
   }
@@ -2847,7 +2825,7 @@ function endRound(seats: Seats, state: DndState, rng: () => number, events: LogE
       info.corruptedTurns--;
       if (info.corruptedTurns === 0) {
         events.push({
-          t: 'dndMessage',
+          t: 'dndMessage', kind: 'skill',
           message: `✨ ${info.name?.split(' ')[0] ?? `P${idx + 1}`} 的聖物洗去了穢氣，效果恢復了！`,
         } as any);
       }
@@ -2894,11 +2872,21 @@ function endRound(seats: Seats, state: DndState, rng: () => number, events: LogE
       seatInfo.hitBuffTurns--;
       if (seatInfo.hitBuffTurns === 0) seatInfo.hitBuffAmount = undefined;
     }
+    // 【狙擊】的窗口
+    if (seatInfo.sniperTurns && seatInfo.sniperTurns > 0) {
+      seatInfo.sniperTurns--;
+      if (seatInfo.sniperTurns === 0) {
+        events.push({
+          t: 'dndMessage', kind: 'skill',
+          message: `🎯 ${seatInfo.name?.split(' ')[0] ?? `P${idx + 1}`} 的弓弦鬆了下來 —— 【狙擊】的視野收了回來。`,
+        } as any);
+      }
+    }
     if (seatInfo.fearTurns && seatInfo.fearTurns > 0) {
       seatInfo.fearTurns--;
       if (seatInfo.fearTurns === 0) {
         events.push({
-          t: 'dndMessage',
+          t: 'dndMessage', kind: 'skill',
           message: `😮‍💨 ${seatInfo.name?.split(' ')[0] ?? `P${idx + 1}`} 擺脫了【恐懼】，行動恢復正常。`,
         } as any);
       }
@@ -3034,7 +3022,7 @@ export function applyDndAction(
       const tr = wanted.r;
       const tc = wanted.c;
       if (wanted.feared) {
-        events.push({ t: 'dndMessage', message: `😱 ${playerPiece.name.split(' ')[0]} 被【恐懼】支配，朝著反方向踉蹌走去！` } as any);
+        events.push({ t: 'dndMessage', kind: 'skill', message: `😱 ${playerPiece.name.split(' ')[0]} 被【恐懼】支配，朝著反方向踉蹌走去！` } as any);
       }
 
       const classId = playerPiece.classId || 'brave';
@@ -3111,7 +3099,7 @@ export function applyDndAction(
     tr = wanted.r;
     tc = wanted.c;
     if (wanted.feared) {
-      events.push({ t: 'dndMessage', message: `😱 ${playerPiece.name.split(' ')[0]} 被【恐懼】支配，朝著反方向踉蹌走去！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `😱 ${playerPiece.name.split(' ')[0]} 被【恐懼】支配，朝著反方向踉蹌走去！` } as any);
     }
 
     const targetCell = state.board[tr]?.[tc];
@@ -3185,13 +3173,15 @@ export function applyDndAction(
     const classId = playerPiece.classId || 'brave';
     const maxRange = DND_CLASS_RANGE[classId as DndClassId] ?? 1;
     const dist = Math.abs(pr - tr) + Math.abs(pc - tc);
-    if (dist > maxRange) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
+    // 【狙擊】開著的時候，弓手打得到地圖上的任何一格
+    const sniperOpen = classId === 'archer' && (state.seats[activeSeat]?.sniperTurns ?? 0) > 0;
+    if (dist > maxRange && !sniperOpen) return { ok: false, error: 'TARGET_OUT_OF_RANGE' };
 
     // 【匿蹤】：出手就現身。要擺在所有檢查之後 —— 打不到的目標會回錯誤、事件被丟掉，
     // 但狀態改動不會跟著回滾，站得太前面的話一次無效點擊就白白現身。
     if (state.seats[activeSeat]?.stealth) {
       setStealth(seats, state, activeSeat, false);
-      events.push({ t: 'dndMessage', message: `🗡️ ${playerPiece.name.split(' ')[0]} 從陰影中撲出 —— 【匿蹤】解除！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🗡️ ${playerPiece.name.split(' ')[0]} 從陰影中撲出 —— 【匿蹤】解除！` } as any);
     }
 
     const stats = CLASS_STATS[classId as DndClassId];
@@ -3332,7 +3322,7 @@ export function applyDndAction(
           playerPiece.hp = Math.max(0, playerPiece.hp - bounced);
           if (state.seats[activeSeat]) state.seats[activeSeat]!.hp = playerPiece.hp;
           events.push({
-            t: 'dndMessage',
+            t: 'dndMessage', kind: 'skill',
             message: `🪞 ${targetPiece.name} 把 ${bounced} 點傷害原封不動彈了回來！`,
           } as any);
           if (playerPiece.hp <= 0) {
@@ -3363,7 +3353,7 @@ export function applyDndAction(
         damage: daggerDamage,
       });
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: `🎲 ${playerPiece.name.split(' ')[0]} 揮空了，但【骰子匕首】仍劃出 ${daggerDamage} 點傷害！`,
       } as any);
 
@@ -3399,7 +3389,47 @@ export function applyDndAction(
       } else if (classId === 'bubble') {
         events.push(...roguePassive(state, playerPiece, targetPiece, rng));
       } else if (classId === 'tangerine') {
-        events.push(...magePassive(state, playerPiece, targetPiece, rng));
+        events.push(...magePassive(state, playerPiece, pr, pc, tNow, rng));
+      }
+    }
+
+    /*
+     * 【狙擊】窗口期間的連射。
+     *
+     * 第一箭走上面那條一般流程（命中骰、傷害、被動全部照舊），剩下的箭在這裡補 ——
+     * 把整段攻擊包成迴圈會動到督軍分裂、判官汲取那幾段跟「一次攻擊」綁在一起的邏輯，
+     * 補在後面是風險最小的做法。每一箭各自擲命中、各自算傷害，也各自可能觸發放血與穿刺。
+     */
+    if (classId === 'archer' && sniperOpen) {
+      const extra = (equipmentOf(state, activeSeat)?.sniperShots ?? 1) - 1;
+      for (let i = 0; i < extra; i++) {
+        const victim = findPieceById(state, targetPiece.id);
+        if (!victim || !isHostile(victim.piece) || victim.piece.hp <= 0) break;
+        if (victim.piece.invulnerable) break;
+
+        const extraRoll = Math.floor(rng() * 20) + 1;
+        const extraHit = extraRoll + hitBonus >= victim.piece.ac;
+        let extraDamage = 0;
+        if (extraHit) {
+          extraDamage = Math.floor(rng() * stats.dmgDice) + 1 + stats.dmgFlat + bardAuraOf(seats, state);
+          const extraMarch = damageBuffOf(state, activeSeat);
+          if (extraMarch > 0) extraDamage = Math.round(extraDamage * (1 + extraMarch));
+          victim.piece.hp = Math.max(0, victim.piece.hp - extraDamage);
+        }
+        events.push({
+          t: 'dndAttack',
+          player: playerPiece.name,
+          target: victim.piece.name,
+          roll: extraRoll,
+          hit: extraHit,
+          damage: extraDamage,
+        });
+
+        const still = findPieceById(state, targetPiece.id);
+        if (still && still.piece.hp > 0) {
+          events.push(...archerPassive(state, activeSeat, playerPiece, pr, pc, still, extraDamage, rng));
+        }
+        events.push(...sweepDeadMonsters(seats, state, rng));
       }
     }
 
@@ -3415,7 +3445,7 @@ export function applyDndAction(
       if (victim && !victim.piece.invulnerable) {
         victim.piece.hp = Math.max(0, victim.piece.hp - drain);
         events.push({
-          t: 'dndMessage',
+          t: 'dndMessage', kind: 'skill',
           message: `⚖️ ${playerPiece.name.split(' ')[0]} 的【神聖判官】從 ${victim.piece.name} 身上汲取了 ${drain} 點生命。`,
         } as any);
 
@@ -3426,7 +3456,7 @@ export function applyDndAction(
         }
       } else {
         events.push({
-          t: 'dndMessage',
+          t: 'dndMessage', kind: 'skill',
           message: `🙏 ${playerPiece.name.split(' ')[0]} 的信仰之力湧現，補充了自己 ${drain} 點 HP。`,
         } as any);
       }
@@ -3446,7 +3476,7 @@ export function applyDndAction(
     if (state.seats[activeSeat]?.equipment?.kind === 'bubble' && !state.seats[activeSeat]?.stealth) {
       setStealth(seats, state, activeSeat, true);
       pushFx(state, playerPiece.id, 'stealth');
-      events.push({ t: 'dndMessage', message: `🌫️ ${playerPiece.name.split(' ')[0]} 隱沒進陰影裡 —— 【匿蹤】恢復了。` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🌫️ ${playerPiece.name.split(' ')[0]} 隱沒進陰影裡 —— 【匿蹤】恢復了。` } as any);
     }
 
   } else if (kind === 'skill') {
@@ -3483,7 +3513,7 @@ export function applyDndAction(
       if (tSeatIdx !== -1 && state.seats[tSeatIdx]) {
         state.seats[tSeatIdx]!.hp = targetPiece.hp;
       }
-      events.push({ t: 'dndMessage', message: `✨ ${playerPiece.name.split(' ')[0]} 施放治癒術，恢復了 ${targetPiece.name.split(' ')[0]} ${healAmt} 點 HP！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `✨ ${playerPiece.name.split(' ')[0]} 施放治癒術，恢復了 ${targetPiece.name.split(' ')[0]} ${healAmt} 點 HP！` } as any);
 
       // 【法杖】：主目標以外的隊員也一起回血
       if (staff && staff.healSplash > 0) {
@@ -3496,7 +3526,7 @@ export function applyDndAction(
           info.hp = ally.hp;
         }
         events.push({
-          t: 'dndMessage',
+          t: 'dndMessage', kind: 'skill',
           message: `🔮 法杖的光芒擴散開來，其他隊員各恢復了 ${staff.healSplash} 點 HP！`,
         } as any);
       }
@@ -3520,13 +3550,13 @@ export function applyDndAction(
       // 撒網一樣是出手，藏不住
       if (state.seats[activeSeat]?.stealth) {
         setStealth(seats, state, activeSeat, false);
-        events.push({ t: 'dndMessage', message: `🗡️ ${playerPiece.name.split(' ')[0]} 出手撒網，【匿蹤】解除！` } as any);
+        events.push({ t: 'dndMessage', kind: 'skill', message: `🗡️ ${playerPiece.name.split(' ')[0]} 出手撒網，【匿蹤】解除！` } as any);
       }
 
       // 虛空酋長靠瞬移，網子綁不住牠的位置（isRestrained 的例外），戰報別謊報「被釘在原地」
       const rogueName = playerPiece.name.split(' ')[0];
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: isRestrained(netted.piece)
           ? `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，接下來 ${netTurns} 回合牠被釘在原地，每回合扣 ${netDamage} 點 HP！`
           : `🕸️ ${rogueName} 撒出羅網纏住 ${netted.piece.name}，但牠一個瞬移就掙開了 —— 接下來 ${netTurns} 回合每回合仍會扣 ${netDamage} 點 HP！`,
@@ -3548,12 +3578,12 @@ export function applyDndAction(
         const spot = freeCellNextTo(state, pr, pc);
         const who = playerPiece.name.split(' ')[0];
         if (!spot) {
-          events.push({ t: 'dndMessage', message: `⛓️ ${who} 施放【鎖鏈】，但周圍沒有空間可以把 ${ally.piece.name} 拉過來！` } as any);
+          events.push({ t: 'dndMessage', kind: 'skill', message: `⛓️ ${who} 施放【鎖鏈】，但周圍沒有空間可以把 ${ally.piece.name} 拉過來！` } as any);
         } else {
           state.board[spot.r]![spot.c]!.piece = ally.piece;
           state.board[ally.r]![ally.c]!.piece = null;
           pushFx(state, ally.piece.id, 'chain');
-          events.push({ t: 'dndMessage', message: `⛓️ ${who} 甩出【鎖鏈】，把隊友 ${ally.piece.name} 拉到了自己身旁！` } as any);
+          events.push({ t: 'dndMessage', kind: 'skill', message: `⛓️ ${who} 甩出【鎖鏈】，把隊友 ${ally.piece.name} 拉到了自己身旁！` } as any);
         }
 
       } else if (shield) {
@@ -3584,10 +3614,10 @@ export function applyDndAction(
         }
 
         if (pulled.length === 0) {
-          events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 揮出【鎖鏈】，但範圍內沒有怪物、或身旁已經沒有空間了！` } as any);
+          events.push({ t: 'dndMessage', kind: 'skill', message: `⛓️ ${playerPiece.name.split(' ')[0]} 揮出【鎖鏈】，但範圍內沒有怪物、或身旁已經沒有空間了！` } as any);
         } else {
           events.push({
-            t: 'dndMessage',
+            t: 'dndMessage', kind: 'skill',
             message: `⛓️ ${playerPiece.name.split(' ')[0]} 的【反射盾】共鳴，鎖鏈把 ${pulled.length} 隻怪物一起拖到了身邊！（${pulled.join('、')}）`,
           } as any);
         }
@@ -3609,7 +3639,7 @@ export function applyDndAction(
 
         const pullCell = freeCellNextTo(state, pr, pc);
         if (!pullCell) {
-          events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 施放【鎖鏈】，但周圍沒有空間可以將怪物拉過來！` } as any);
+          events.push({ t: 'dndMessage', kind: 'skill', message: `⛓️ ${playerPiece.name.split(' ')[0]} 施放【鎖鏈】，但周圍沒有空間可以將怪物拉過來！` } as any);
         } else {
           const oldMonsterCell = state.board[tr]?.[tc];
           const newMonsterCell = state.board[pullCell.r]?.[pullCell.c];
@@ -3617,7 +3647,7 @@ export function applyDndAction(
             newMonsterCell.piece = targetMonster;
             oldMonsterCell.piece = null;
             pushFx(state, targetMonster.id, 'chain');
-            events.push({ t: 'dndMessage', message: `⛓️ ${playerPiece.name.split(' ')[0]} 揮出【鎖鏈】，將 ${targetMonster.name} 強行拉到身旁！` } as any);
+            events.push({ t: 'dndMessage', kind: 'skill', message: `⛓️ ${playerPiece.name.split(' ')[0]} 揮出【鎖鏈】，將 ${targetMonster.name} 強行拉到身旁！` } as any);
           }
         }
       }
@@ -3640,9 +3670,9 @@ export function applyDndAction(
         state.board[landing.r]![landing.c]!.piece = playerPiece;
         pr = landing.r;
         pc = landing.c;
-        events.push({ t: 'dndMessage', message: `🐗 ${who} 低身撞開人群，衝到了 ${found.piece.name} 面前！` } as any);
+        events.push({ t: 'dndMessage', kind: 'skill', message: `🐗 ${who} 低身撞開人群，衝到了 ${found.piece.name} 面前！` } as any);
       } else {
-        events.push({ t: 'dndMessage', message: `🐗 ${who} 想衝上去，但 ${found.piece.name} 周圍已經沒有空位了！` } as any);
+        events.push({ t: 'dndMessage', kind: 'skill', message: `🐗 ${who} 想衝上去，但 ${found.piece.name} 周圍已經沒有空位了！` } as any);
       }
 
       found.piece.hp = Math.max(0, found.piece.hp - GLADIATOR_CHARGE_DAMAGE);
@@ -3657,7 +3687,7 @@ export function applyDndAction(
         damage: GLADIATOR_CHARGE_DAMAGE,
       });
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: `💥 【野蠻衝撞】撞得 ${found.piece.name} 頭昏眼花 —— ${GLADIATOR_CHARGE_DAMAGE} 點傷害，下一回合無法行動！`,
       } as any);
 
@@ -3666,52 +3696,18 @@ export function applyDndAction(
       }
 
     } else if (classId === 'archer') {
-      // 【狙擊】：不限距離，指定全場任一隻怪。拿到【弓箭】後一次射多箭，
-      // 多的箭可以指定不同目標（沒指定就全部射同一隻）。
-      if (!targetId) return { ok: false, error: 'BAD_ACTION' };
-      const bow = equipmentOf(state, activeSeat);
-      const shots = bow?.sniperShots ?? 1;
-      const wanted = [targetId, ...(currentAction.targetIds ?? [])].slice(0, shots);
-
-      const who = playerPiece.name.split(' ')[0];
-      let fired = 0;
-      for (let i = 0; i < shots; i++) {
-        // 指定了幾個目標就射幾個，剩下的箭補在最後一個指定的目標上
-        const wantId = wanted[Math.min(i, wanted.length - 1)]!;
-        let victim = findPieceById(state, wantId);
-        // 目標已經被前面的箭射死就改射場上任何一隻怪，不浪費箭
-        if (!victim || !isHostile(victim.piece) || victim.piece.hp <= 0) {
-          victim = findAnyMonster(state);
-        }
-        if (!victim) break;
-        if (victim.piece.invulnerable) {
-          if (fired === 0) return { ok: false, error: 'TARGET_INVULNERABLE' };
-          break;
-        }
-
-        victim.piece.hp = Math.max(0, victim.piece.hp - ARCHER_SNIPE_DAMAGE);
-        fired++;
-        events.push({
-          t: 'dndAttack',
-          player: playerPiece.name,
-          target: victim.piece.name,
-          roll: 0,
-          hit: true,
-          damage: ARCHER_SNIPE_DAMAGE,
-        });
-        pushFx(state, victim.piece.id, 'snipe');
-      }
-
-      if (fired === 0) return { ok: false, error: 'TARGET_NOT_FOUND' };
-
+      // 【狙擊】：不選目標、不造成傷害 —— 買的是接下來那段窗口。
+      // 多給一格是因為發動的這一輪結束時會先扣掉一格，玩家實際享受到的才是完整的 SNIPE_TURNS 輪。
+      const info = state.seats[activeSeat];
+      if (info) info.sniperTurns = SNIPE_TURNS + 1;
+      pushFx(state, playerPiece.id, 'snipe');
       events.push({
         t: 'dndMessage',
-        message: fired > 1
-          ? `🎯 ${who} 拉滿弓，【狙擊】連發 ${fired} 箭，每箭 ${ARCHER_SNIPE_DAMAGE} 點傷害！`
-          : `🎯 ${who} 屏息瞄準，一箭【狙擊】命中 ${ARCHER_SNIPE_DAMAGE} 點傷害！`,
+        message: `🎯 ${playerPiece.name.split(' ')[0]} 架起弓、屏住呼吸 —— 接下來 ${SNIPE_TURNS} 回合，`
+          + `地圖上任何一個角落都在射程之內`
+          + `${(equipmentOf(state, activeSeat)?.sniperShots ?? 1) > 1
+            ? `，而且每次出手都會連射 ${equipmentOf(state, activeSeat)!.sniperShots} 箭` : ''}！`,
       } as any);
-
-      events.push(...sweepDeadMonsters(seats, state, rng));
 
     } else if (classId === 'bard') {
       // 【進擊之歌】：這一輪全隊的傷害都放大，冷卻 2 回合
@@ -3723,7 +3719,7 @@ export function applyDndAction(
       });
       pushFx(state, playerPiece.id, 'song');
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: `🎺 ${playerPiece.name.split(' ')[0]} 奏起【進擊之歌】—— 這一輪全隊的傷害提高 ${Math.round(ratio * 100)}%！`,
       } as any);
 
@@ -3760,7 +3756,7 @@ export function applyDndAction(
       if (state.seats[activeSeat]) state.seats[activeSeat]!.summonsUsed = used + 1;
       pushFx(state, playerPiece.id, 'summon');
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: `🌑 ${playerPiece.name.split(' ')[0]} 撕開地面，喚出了 ${born.length} 隻隨從！`
           + `（${born.join('、')}）這一層還能再召喚 ${SUMMON_PER_LEVEL - used - 1} 次。`,
       } as any);
@@ -3781,7 +3777,7 @@ export function applyDndAction(
       if (placed === 0) return { ok: false, error: 'INVALID_CELL' };
 
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: `🔥 ${playerPiece.name.split(' ')[0]} 燃起一道 ${placed} 格【火牆】，站在裡面的怪物每回合會被燒掉 ${FIRE_WALL_DAMAGE} 點 HP，持續 ${FIRE_WALL_TURNS} 回合！`,
       } as any);
     } else {
@@ -3923,7 +3919,8 @@ function movementInterrupted(
 ): boolean {
   if (moveEvents.some((event) => event.t === 'dndLevelUp')) return true;
   // 看行動中的座位而不是送出動作的人：代打 NPC 時，踩到陷阱被放逐的是 NPC，
-  // 查操作者自己的座位會回「沒事」，接著就會拿一顆已經離場的棋子繼續打完終結動作。
+  // 查操作者自己的座位會回「沒事」，接著就會拿一顆已經離場的棋子繼續打完終結動作 ——
+  // 畫面上就是那個座位卡住，只能等 45 秒讀秒結束。
   const banished = state.seats[seat]?.banishedTurns;
   return !!(banished && banished > 0);
 }
@@ -4109,7 +4106,7 @@ function resolveMonsterAttack(
         if (dmg > cap) {
           dmg = cap;
           events.push({
-            t: 'dndMessage',
+            t: 'dndMessage', kind: 'skill',
             message: `🛡️ ${hitTarget.piece.name.split(' ')[0]} 的【極限防禦】擋下了大部分衝擊，只受到 ${cap} 點傷害！`,
           } as any);
         }
@@ -4139,14 +4136,14 @@ function resolveMonsterAttack(
           mon.piece.hp = Math.max(0, mon.piece.hp - reflected);
           pushFx(state, hitTarget.piece.id, 'reflect');
           events.push({
-            t: 'dndMessage',
+            t: 'dndMessage', kind: 'skill',
             message: `🪞 ${hitTarget.piece.name.split(' ')[0]} 的【反射】把 ${reflected} 點傷害彈回 ${mon.piece.name} 身上！`,
           } as any);
 
           if (mon.piece.hp <= 0) {
             const monCell = state.board[mon.r]?.[mon.c];
             if (monCell && monCell.piece?.id === mon.piece.id) monCell.piece = null;
-            events.push({ t: 'dndMessage', message: `💥 ${mon.piece.name} 被自己的攻擊反噬倒下了！` } as any);
+            events.push({ t: 'dndMessage', kind: 'skill', message: `💥 ${mon.piece.name} 被自己的攻擊反噬倒下了！` } as any);
             checkAndSpawnBossOrStaircase(seats, state, events, rng);
           }
         }
@@ -4172,7 +4169,7 @@ function resolveMonsterAttack(
               targetCell.piece = hitTarget.piece;
               const srcCell = state.board[hitTarget.r]?.[hitTarget.c];
               if (srcCell) srcCell.piece = null;
-              events.push({ t: 'dndMessage', message: `✨ ${hitTarget.piece.name.split(' ')[0]} 受擊後發動【閃現退避】，向後移動！` } as any);
+              events.push({ t: 'dndMessage', kind: 'skill', message: `✨ ${hitTarget.piece.name.split(' ')[0]} 受擊後發動【閃現退避】，向後移動！` } as any);
               hitTarget.r = rm.r;
               hitTarget.c = rm.c;
               break;
@@ -4187,7 +4184,7 @@ function resolveMonsterAttack(
         }
         if (hitTarget.piece.type === 'villager') {
           state.villagersLost++;
-          events.push({ t: 'dndMessage', message: `☠️ ${hitTarget.piece.name} 倒下了…` } as any);
+          events.push({ t: 'dndMessage', kind: 'skill', message: `☠️ ${hitTarget.piece.name} 倒下了…` } as any);
         }
         const playerCell = state.board[hitTarget.r]?.[hitTarget.c];
         if (playerCell && playerCell.piece?.id === hitTarget.piece.id) {
@@ -4254,6 +4251,25 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
       return;
     }
 
+    // 【魅惑】：還站在敵方那一邊，但腦子已經不在了 —— 隨機晃一步，不攻擊任何人
+    if (mon.piece.wanderTurns && mon.piece.wanderTurns > 0) {
+      mon.piece.wanderTurns--;
+      if (!netted) {
+        const dirs4 = [{ dr: -1, dc: 0 }, { dr: 1, dc: 0 }, { dr: 0, dc: -1 }, { dr: 0, dc: 1 }];
+        const pick = dirs4[Math.floor(rng() * dirs4.length)]!;
+        const nr = mon.r + pick.dr;
+        const nc = mon.c + pick.dc;
+        if (inBounds(nr, nc) && state.board[nr]?.[nc]?.piece === null) {
+          state.board[mon.r]![mon.c]!.piece = null;
+          state.board[nr]![nc]!.piece = mon.piece;
+          mon.r = nr;
+          mon.c = nc;
+          events.push({ t: 'dndMove', player: mon.piece.name, dir: 'wander' } as any);
+        }
+      }
+      return;
+    }
+
     if (hasVoidPowers(mon.piece)) {
       // 頭目挑瞬移目標時，跟一般怪一樣會被村民、殘影、被洗腦的隨從騙過去 ——
       // 只認 type 'player' 的話，弓手的【殘影】對頭目等於不存在。
@@ -4302,7 +4318,7 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
             oldCell.piece = null;
             mon.r = jumpCell.r;
             mon.c = jumpCell.c;
-            events.push({ t: 'dndMessage', message: `⚡ 虛空酋長瞬移到了 ${victim.piece.name.split(' ')[0]} 身旁準備突襲！` } as any);
+            events.push({ t: 'dndMessage', kind: 'skill', message: `⚡ 虛空酋長瞬移到了 ${victim.piece.name.split(' ')[0]} 身旁準備突襲！` } as any);
           }
         }
       }
@@ -4361,7 +4377,7 @@ function runMonstersTurn(seats: Seats, state: DndState, rng: () => number): LogE
               name: 'Goblin (召喚物)',
               hp: 14, maxHp: 14, ac: 11
             });
-            events.push({ t: 'dndMessage', message: `🪄 大薩滿揮舞法杖，召喚了一隻哥布林！` } as any);
+            events.push({ t: 'dndMessage', kind: 'skill', message: `🪄 大薩滿揮舞法杖，召喚了一隻哥布林！` } as any);
             return; 
           }
         }
@@ -4689,7 +4705,9 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
   ];
 
   const classId = npcPiece.classId || 'brave';
-  const maxRange = DND_CLASS_RANGE[classId as DndClassId] ?? 1;
+  // 【狙擊】開著的時候，NPC 弓手一樣打得到整張地圖
+  const sniperOpen = classId === 'archer' && (npcInfo.sniperTurns ?? 0) > 0;
+  const maxRange = sniperOpen ? BOARD_SIZE * 2 : (DND_CLASS_RANGE[classId as DndClassId] ?? 1);
 
   /**
    * 受傷的 NPC 會撤退，而不是繼續往前送。
@@ -4816,7 +4834,7 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
       state.board[target.r]![target.c]!.piece = null;
       state.board[spot.r]![spot.c]!.piece = target.piece;
       pushFx(state, target.piece.id, 'chain');
-      events.push({ t: 'dndMessage', message: `⛓️ ${who} 揮出【鎖鏈】，將 ${target.piece.name} 強行拉到身旁！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `⛓️ ${who} 揮出【鎖鏈】，將 ${target.piece.name} 強行拉到身旁！` } as any);
       spend();
       return true;
     }
@@ -4839,7 +4857,7 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
         t: 'dndAttack', player: npcName, target: target.piece.name,
         roll: 0, hit: true, damage: GLADIATOR_CHARGE_DAMAGE,
       });
-      events.push({ t: 'dndMessage', message: `🐗 ${who} 一記【野蠻衝撞】撞上了 ${target.piece.name}！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🐗 ${who} 一記【野蠻衝撞】撞上了 ${target.piece.name}！` } as any);
       events.push(...sweepDeadMonsters(seats, state, rng));
       spend();
       return true;
@@ -4853,34 +4871,22 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
       target.piece.trappedTurns = ROGUE_NET_TURNS + (dagger?.netBonusTurns ?? 0);
       target.piece.netDamage = 1 + (dagger?.netBonusDamage ?? 0);
       pushFx(state, target.piece.id, 'net');
-      events.push({ t: 'dndMessage', message: `🕸️ ${who} 撒出羅網纏住了 ${target.piece.name}！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🕸️ ${who} 撒出羅網纏住了 ${target.piece.name}！` } as any);
       spend();
       return true;
     }
 
-    // 弓手【狙擊】：全場任一隻怪，優先挑快死的收頭
+    // 弓手【狙擊】：窗口還沒開、而且場上有搆不到的怪就開起來
     if (classId === 'archer') {
-      let best: { piece: DndPiece } | null = null;
-      for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-          const piece = state.board[r]?.[c]?.piece;
-          if (!isHostile(piece) || piece!.invulnerable) continue;
-          if (!best || piece!.hp < best.piece.hp) best = { piece: piece! };
-        }
-      }
-      if (!best) return false;
-      const shots = equipmentOf(state, npcSeat)?.sniperShots ?? 1;
-      for (let i = 0; i < shots; i++) {
-        if (best.piece.hp <= 0) break;
-        best.piece.hp = Math.max(0, best.piece.hp - ARCHER_SNIPE_DAMAGE);
-        events.push({
-          t: 'dndAttack', player: npcName, target: best.piece.name,
-          roll: 0, hit: true, damage: ARCHER_SNIPE_DAMAGE,
-        });
-      }
-      pushFx(state, best.piece.id, 'snipe');
-      events.push({ t: 'dndMessage', message: `🎯 ${who} 屏息瞄準，射出了一發【狙擊】！` } as any);
-      events.push(...sweepDeadMonsters(seats, state, rng));
+      if ((npcInfo.sniperTurns ?? 0) > 0) return false;
+      const outOfReach = !nearest(maxRange);
+      if (!outOfReach) return false;
+      npcInfo.sniperTurns = SNIPE_TURNS + 1;
+      pushFx(state, npcPiece.id, 'snipe');
+      events.push({
+        t: 'dndMessage', kind: 'skill',
+        message: `🎯 ${who} 架起弓 —— 接下來 ${SNIPE_TURNS} 回合，地圖上任何一個角落都在射程之內！`,
+      } as any);
       spend();
       return true;
     }
@@ -4903,7 +4909,7 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
       if (!bestSpot) return false;
       const placed = castFireWall(state, pr, pc, bestSpot.r, bestSpot.c, npcSeat);
       if (placed === 0) return false;
-      events.push({ t: 'dndMessage', message: `🔥 ${who} 燃起一道【火牆】，擋在 ${bestSpot.hits} 隻敵人腳下！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🔥 ${who} 燃起一道【火牆】，擋在 ${bestSpot.hits} 隻敵人腳下！` } as any);
       spend();
       return true;
     }
@@ -4924,7 +4930,7 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
       });
       pushFx(state, npcPiece.id, 'song');
       events.push({
-        t: 'dndMessage',
+        t: 'dndMessage', kind: 'skill',
         message: `🎺 ${who} 奏起【進擊之歌】—— 全隊的傷害提高 ${Math.round(ratio * 100)}%！`,
       } as any);
       spend();
@@ -4949,7 +4955,7 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
       if (born === 0) return false;
       npcInfo.summonsUsed = used + 1;
       pushFx(state, npcPiece.id, 'summon');
-      events.push({ t: 'dndMessage', message: `🌑 ${who} 撕開地面，喚出了 ${born} 隻隨從！` } as any);
+      events.push({ t: 'dndMessage', kind: 'skill', message: `🌑 ${who} 撕開地面，喚出了 ${born} 隻隨從！` } as any);
       spend();
       return true;
     }
@@ -5000,7 +5006,7 @@ function runNpcTurn(seats: Seats, state: DndState, npcSeat: number, rng: () => n
           damage: -CLERIC_HEAL_AMOUNT,
         });
         events.push({
-          t: 'dndMessage',
+          t: 'dndMessage', kind: 'skill',
           message: `✨ ${npcName.split(' ')[0]} 見 ${woundedAlly.name.split(' ')[0]} 傷勢過重，優先施放了治癒術！`,
         } as any);
         return events;

@@ -1986,57 +1986,26 @@ describe('D&D Game Engine', () => {
     expect(findPiece(state, (p) => p.id === 'm-t').piece.hp).toBe(95);
   });
 
-  it('should fire the mage passive even on a miss', () => {
+  it('should knock the target back with the mage passive on a miss', () => {
     const seats: Seats = ['p1', null, null, null];
     const state = dealDnd(seats, { p1: 'tangerine' });
-    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
     state.traps = [];
     clearGoblins(state);
+    clearNpcs(state);
 
     const mage = findPiece(state, (p) => p.playerId === 'p1');
     state.board[mage.r][mage.c].piece = null;
     state.board[8][6].piece = mage.piece;
     state.board[8][7].piece = { id: 'm-t', type: 'goblin', name: 'T', hp: 40, maxHp: 40, ac: 99 };
 
-    // rng 0.01 → 命中骰極低必定揮空，被動骰 0 → 破魔
+    // rng 0.01 → 命中骰極低必定揮空，被動骰 0 → 衝擊波
     const result = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-t' }, () => 0.01);
     expect(result.ok).toBe(true);
     expect(result.events.some((e) => e.t === 'dndAttack' && e.hit === false)).toBe(true);
-    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('破魔'))).toBe(true);
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('衝擊波'))).toBe(true);
 
-    // 破魔動的是魔防，不是 AC —— 物理防禦要原封不動
-    const target = findPiece(state, (p) => p.id === 'm-t');
-    expect(target.piece.ac).toBe(99);
-    expect(target.piece.magicDebuffTurns).toBeGreaterThan(0);
-  });
-
-  it('should make fire burn harder on a magic-shredded monster', () => {
-    const seats: Seats = ['p1', null, null, null];
-    const state = dealDnd(seats, { p1: 'tangerine' });
-    clearNpcs(state); // 這條不驗 NPC，把隊友撤掉才不會被他們的技能干擾
-    state.traps = [];
-    clearGoblins(state);
-
-    const mage = findPiece(state, (p) => p.playerId === 'p1');
-    state.board[mage.r][mage.c].piece = null;
-    state.board[8][6].piece = mage.piece;
-
-    // 兩隻條件相同的怪，一隻先被破魔
-    state.board[2][2].piece = { id: 'm-plain', type: 'goblin', name: 'Plain', hp: 99, maxHp: 99, ac: 11 };
-    state.board[2][5].piece = {
-      id: 'm-shred', type: 'goblin', name: 'Shred', hp: 99, maxHp: 99, ac: 11, magicDebuffTurns: 2,
-    };
-    state.fireWalls = [
-      { r: 2, c: 2, turns: 2, dmg: 10 },
-      { r: 2, c: 5, turns: 2, dmg: 10 },
-    ];
-
-    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
-
-    const plain = findPiece(state, (p) => p.id === 'm-plain');
-    const shred = findPiece(state, (p) => p.id === 'm-shred');
-    expect(99 - plain.piece.hp).toBe(10);
-    expect(99 - shred.piece.hp).toBe(13); // 10 × 1.3
+    // 驗事件而不是最終位置：怪被推開之後，同一輪的怪物回合牠會自己走回來
+    expect(result.events.some((e) => e.t === 'dndMessage' && e.message.includes('震退了 2 格'))).toBe(true);
   });
 
   it('should bind a monster with the mage passive', () => {
@@ -3269,45 +3238,163 @@ describe('D&D Game Engine', () => {
     if (!tooFar.ok) expect(tooFar.error).toBe('TARGET_OUT_OF_RANGE');
   });
 
-  it('should snipe across the whole map', () => {
-    const { seats, state } = soloTable('archer', { tanky: true });
-    state.board[0][15].piece = { id: 'm-corner', type: 'goblin', name: 'Corner', hp: 99, maxHp: 99, ac: 11 };
+  it('should roll a d8 plus eight for the rogue', () => {
+    // d8+8 → 9～16
+    const seats: Seats = ['p1', null, null, null];
+    for (const roll of [0.001, 0.5, 0.999]) {
+      const state = dealDnd(seats, { p1: 'bubble' }, 'normal', null, null, () => 0);
+      state.traps = [];
+      clearGoblins(state);
+      clearNpcs(state);
+      const me = findPiece(state, (p) => p.playerId === 'p1');
+      state.board[me.r][me.c].piece = null;
+      state.board[8][6].piece = me.piece;
+      state.board[8][7].piece = {
+        id: 'm-t', type: 'goblin', name: 'T', hp: 999, maxHp: 999, ac: 1, damagedByRogue: true,
+      };
 
-    const snipe = applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-corner' }, () => 0.5);
-    expect(snipe.ok).toBe(true);
-    expect(findPiece(state, (p) => p.id === 'm-corner').piece.hp).toBe(94); // 固定 5 點
+      const hit = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-t' }, () => roll);
+      const attack = hit.events.find((e) => e.t === 'dndAttack' && e.target === 'T');
+      expect(attack.damage).toBeGreaterThanOrEqual(9);
+      expect(attack.damage).toBeLessThanOrEqual(16);
+    }
   });
 
-  it('should fire multiple arrows with the bow', () => {
-    const { seats, state } = soloTable('archer', { tanky: true });
-    state.seats[0].equipment = { kind: 'archer', tier: 'hell' }; // 4 箭
-    state.board[0][15].piece = { id: 'm-corner', type: 'goblin', name: 'Corner', hp: 99, maxHp: 99, ac: 11 };
+  it('should end the turn when a controlled NPC is banished by a trap', () => {
+    /*
+     * 代打模式下，房主把 NPC 走進陷阱 —— 那個座位被放逐、棋子離場。
+     * 舊版的 movementInterrupted 查的是「操作者」的座位（沒被放逐），
+     * 於是回合不收尾，畫面卡在一個沒有棋子的座位上，只能等 45 秒讀秒。
+     */
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1', () => 0);
+    clearGoblins(state);
 
-    applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-corner' }, () => 0.5);
-    expect(findPiece(state, (p) => p.id === 'm-corner').piece.hp).toBe(99 - 20);
-  });
+    // 把回合交給 NPC 座位 1，並在牠隔壁鋪一個陷阱
+    const npc = findPiece(state, (p) => p.id === 'npc-1');
+    state.board[npc.r][npc.c].piece = null;
+    state.board[8][6].piece = npc.piece;
+    state.turnSeat = 1;
+    state.turnHasMoved = false;
+    state.traps = [{ r: 8, c: 7, triggered: false }];
 
-  it('should spread the extra arrows over several targets', () => {
-    const { seats, state } = soloTable('archer', { tanky: true });
-    state.seats[0].equipment = { kind: 'archer', tier: 'normal' }; // 2 箭
-    state.board[0][15].piece = { id: 'm-a', type: 'goblin', name: 'A', hp: 99, maxHp: 99, ac: 11 };
-    state.board[0][14].piece = { id: 'm-b', type: 'goblin', name: 'B', hp: 99, maxHp: 99, ac: 11 };
-
-    applyDndAction(seats, state, 'p1', {
-      kind: 'skill', targetId: 'm-a', targetIds: ['m-b'],
+    const res = applyDndAction(seats, state, 'p1', {
+      kind: 'turnCombo', move: { r: 8, c: 7 }, action: { kind: 'rest' },
     }, () => 0.5);
-    expect(findPiece(state, (p) => p.id === 'm-a').piece.hp).toBe(94);
-    expect(findPiece(state, (p) => p.id === 'm-b').piece.hp).toBe(94);
+    expect(res.ok).toBe(true);
+
+    // 座位 1 被放逐、棋子離場
+    expect(state.seats[1].banishedTurns).toBeGreaterThan(0);
+    expect(findPiece(state, (p) => p.id === 'npc-1')).toBeNull();
+    // 而且回合已經交出去了，不會停在那個空座位上
+    expect(state.turnSeat).not.toBe(1);
   });
 
-  it('should drop the bow bonus while the relics are corrupted', () => {
+  it('should tag skill messages so the client can split the two log panels', () => {
+    // 「技能與被動」那一欄靠事件上的 kind 分流，不是比對字串。
+    // 少標的話玩家會在技能欄看到生怪與死亡訊息，多標則反過來。
+    const { seats, state } = soloTable('tangerine', { tanky: true });
+    state.board[8][7].piece = { id: 'm-t', type: 'goblin', name: 'T', hp: 99, maxHp: 99, ac: 99 };
+
+    const swing = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-t' }, () => 0.01);
+    const skills = swing.events.filter((e) => e.t === 'dndMessage' && e.kind === 'skill');
+    expect(skills.length).toBeGreaterThan(0);
+    expect(skills.every((e) => e.message.length > 0)).toBe(true);
+  });
+
+  it('should leave spawn and flow messages out of the skill log', () => {
+    // 護送關第 2 輪的伏兵、之後的追兵，都是流程訊息而不是技能
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, null, () => 0);
+    state.traps = [];
+    descendTo(state, seats, 3);
+    state.traps = [];
+
+    let sawSpawn = false;
+    for (let i = 0; i < 4; i++) {
+      const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+      if (!res.ok) break;
+      for (const e of res.events) {
+        if (e.t !== 'dndMessage') continue;
+        if (e.message.includes('伏兵殺出') || e.message.includes('追了上來')) {
+          sawSpawn = true;
+          expect(e.kind).toBeUndefined();
+        }
+      }
+    }
+    expect(sawSpawn).toBe(true);
+  });
+
+  it('should open a six round sniper window without dealing damage', () => {
+    const { seats, state } = soloTable('archer', { tanky: true });
+    state.board[0][15].piece = { id: 'm-corner', type: 'goblin', name: 'Corner', hp: 99, maxHp: 99, ac: 11 };
+
+    const open = applyDndAction(seats, state, 'p1', { kind: 'skill' }, () => 0.5);
+    expect(open.ok).toBe(true);
+    // 發動的那一手不造成傷害，買的是窗口
+    expect(findPiece(state, (p) => p.id === 'm-corner').piece.hp).toBe(99);
+    // 多給的一格會在這一輪結束時扣掉，剩下的才是完整的 6 輪
+    expect(state.seats[0].sniperTurns).toBe(6);
+  });
+
+  it('should let the archer shoot across the map while the window is open', () => {
+    const { seats, state } = soloTable('archer', { tanky: true });
+    state.board[0][15].piece = { id: 'm-corner', type: 'goblin', name: 'Corner', hp: 99, maxHp: 99, ac: 1 };
+
+    // 沒開窗口：地圖另一角打不到
+    const tooFar = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-corner' }, () => 0.9);
+    expect(tooFar.ok).toBe(false);
+    if (!tooFar.ok) expect(tooFar.error).toBe('TARGET_OUT_OF_RANGE');
+
+    // 開了窗口就打得到
+    state.seats[0].sniperTurns = 6;
+    const shot = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-corner' }, () => 0.9);
+    expect(shot.ok).toBe(true);
+    expect(findPiece(state, (p) => p.id === 'm-corner').piece.hp).toBeLessThan(99);
+  });
+
+  it('should close the window and take the range back', () => {
+    const { seats, state } = soloTable('archer', { tanky: true });
+    state.seats[0].sniperTurns = 1; // 這一輪結束就到期
+
+    const res = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(res.ok).toBe(true);
+    expect(state.seats[0].sniperTurns).toBe(0);
+    expect(res.events.some((e) => e.t === 'dndMessage' && e.message.includes('弓弦鬆了下來'))).toBe(true);
+  });
+
+  it('should fire several arrows per attack with the bow', () => {
+    const { seats, state } = soloTable('archer', { tanky: true });
+    state.seats[0].equipment = { kind: 'archer', tier: 'hell' }; // 4 連射
+    state.seats[0].sniperTurns = 6;
+    state.board[0][15].piece = { id: 'm-corner', type: 'goblin', name: 'Corner', hp: 999, maxHp: 999, ac: 1 };
+
+    const volley = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-corner' }, () => 0.9);
+    expect(volley.ok).toBe(true);
+    const arrows = volley.events.filter((e) => e.t === 'dndAttack' && e.target === 'Corner');
+    expect(arrows.length).toBe(4);
+  });
+
+  it('should only fire one arrow without the bow', () => {
+    const { seats, state } = soloTable('archer', { tanky: true });
+    state.seats[0].sniperTurns = 6;
+    state.board[0][15].piece = { id: 'm-corner', type: 'goblin', name: 'Corner', hp: 999, maxHp: 999, ac: 1 };
+
+    const shot = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-corner' }, () => 0.9);
+    const arrows = shot.events.filter((e) => e.t === 'dndAttack' && e.target === 'Corner');
+    expect(arrows.length).toBe(1);
+  });
+
+  it('should drop the extra arrows while the relics are corrupted', () => {
     const { seats, state } = soloTable('archer', { tanky: true });
     state.seats[0].equipment = { kind: 'archer', tier: 'hell' };
     state.seats[0].corruptedTurns = 3;
-    state.board[0][15].piece = { id: 'm-corner', type: 'goblin', name: 'Corner', hp: 99, maxHp: 99, ac: 11 };
+    state.seats[0].sniperTurns = 6;
+    state.board[0][15].piece = { id: 'm-corner', type: 'goblin', name: 'Corner', hp: 999, maxHp: 999, ac: 1 };
 
-    applyDndAction(seats, state, 'p1', { kind: 'skill', targetId: 'm-corner' }, () => 0.5);
-    expect(findPiece(state, (p) => p.id === 'm-corner').piece.hp).toBe(94); // 只剩一箭
+    const shot = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-corner' }, () => 0.9);
+    const arrows = shot.events.filter((e) => e.t === 'dndAttack' && e.target === 'Corner');
+    expect(arrows.length).toBe(1); // 窗口還在，但連射沒了
   });
 
   it('should make the target bleed for three rounds', () => {
@@ -3613,36 +3700,45 @@ describe('D&D Game Engine', () => {
     if (!hit.ok) expect(hit.error).toBe('TARGET_NOT_FOUND');
   });
 
-  it('should banish a monster out of the fight for two rounds', () => {
+  it('should charm a monster into aimless wandering', () => {
     const { seats, state } = soloTable('summoner', { tanky: true });
-    state.board[8][7].piece = { id: 'm-gone', type: 'goblin', name: 'Gone', hp: 999, maxHp: 999, ac: 99 };
+    state.board[8][7].piece = { id: 'm-lost', type: 'goblin', name: 'Lost', hp: 999, maxHp: 999, ac: 99 };
 
-    // rng 0.4 → 三選一的第二個（放逐）
-    const cast = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-gone' }, () => 0.4);
+    // rng 0.4 → 三選一的第二個（魅惑）
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-lost' }, () => 0.4);
     expect(cast.ok).toBe(true);
-    expect(findPiece(state, (p) => p.id === 'm-gone')).toBeNull(); // 離場了
-    expect(state.banishedMonsters.length).toBe(1);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('只會在原地打轉'))).toBe(true);
 
-    // 兩輪之後回到原本的格子
-    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
-    const back = findPiece(state, (p) => p.id === 'm-gone');
-    expect(back).not.toBeNull();
-    expect(back.r).toBe(8);
-    expect(back.c).toBe(7);
-    expect(state.banishedMonsters.length).toBe(0);
+    // 還在場上，但這一輪沒有攻擊玩家
+    const lost = findPiece(state, (p) => p.id === 'm-lost');
+    expect(lost).not.toBeNull();
+    expect(cast.events.some((e) => e.t === 'dndAttack' && e.player === 'Lost')).toBe(false);
   });
 
-  it('should not banish a boss', () => {
+  it('should let a charmed monster snap out of it', () => {
+    const { seats, state } = soloTable('summoner', { tanky: true });
+    state.board[8][7].piece = {
+      id: 'm-lost', type: 'goblin', name: 'Lost', hp: 999, maxHp: 999, ac: 99, wanderTurns: 1,
+    };
+
+    // 這一輪是最後一輪遊蕩，之後就會恢復正常
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(findPiece(state, (p) => p.id === 'm-lost').piece.wanderTurns).toBe(0);
+
+    const back = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.9);
+    expect(back.events.some((e) => e.t === 'dndAttack' && e.player === 'Lost')).toBe(true);
+  });
+
+  it('should not charm a boss into wandering', () => {
     const { seats, state } = soloTable('summoner', { tanky: true });
     state.board[8][7].piece = { id: 'boss-1', type: 'goblin', name: 'Boss', hp: 999, maxHp: 999, ac: 99 };
 
     const cast = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'boss-1' }, () => 0.4);
     expect(cast.ok).toBe(true);
-    expect(findPiece(state, (p) => p.id === 'boss-1')).not.toBeNull();
-    expect(state.banishedMonsters.length).toBe(0);
+    expect(findPiece(state, (p) => p.id === 'boss-1').piece.wanderTurns).toBeFalsy();
   });
 
-  it('should let the rage order raise both minion accuracy and damage', () => {
+  it('should let transmutation raise both minion accuracy and damage', () => {
     // 同一組亂數跑兩次：一次有鬥志、一次沒有。命中門檻卡在中間，
     // 有鬥志才打得中 —— 這樣同時驗到命中與傷害兩邊都吃到加成。
     const runOnce = (rage) => {
@@ -3662,14 +3758,23 @@ describe('D&D Game Engine', () => {
     expect(runOnce(true)).toBeGreaterThan(0);
   });
 
-  it('should let the rage order fire from the passive', () => {
+  it('should let transmutation fire from the passive and add HP', () => {
     const { seats, state } = soloTable('summoner', { tanky: true });
     state.board[8][7].piece = { id: 'm-t', type: 'goblin', name: 'T', hp: 999, maxHp: 999, ac: 99 };
 
-    // rng 0.9 → 三選一的第三個（嗜魔鬥志）
+    // 場上先放一隻隨從，才驗得到 +2HP
+    state.board[8][5].piece = {
+      id: 'ally-1', type: 'goblin', name: '隨從', hp: 16, maxHp: 16, ac: 11, ally: true,
+    };
+
+    // rng 0.9 → 三選一的第三個（魂體轉化）
     const cast = applyDndAction(seats, state, 'p1', { kind: 'attack', targetId: 'm-t' }, () => 0.9);
     expect(cast.ok).toBe(true);
-    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('嗜魔鬥志'))).toBe(true);
+    expect(cast.events.some((e) => e.t === 'dndMessage' && e.message.includes('魂體轉化'))).toBe(true);
+
+    const ally = findPiece(state, (p) => p.id === 'ally-1');
+    expect(ally.piece.maxHp).toBe(18);
+    expect(ally.piece.hp).toBe(18);
   });
 
   it('should charm an ordinary monster onto the party side', () => {
