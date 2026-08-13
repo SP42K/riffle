@@ -45,6 +45,12 @@ shared words but **different rankings** between the two games. Monopoly's vocabu
 `MONOPOLY_TILE_LABEL` for the 40 tiles and `MONOPOLY_CARD_LABEL` for the 32 機會／命運 cards).
 Snake's is small and lives in `shared/src/snake.ts` (果實/地雷果實/重生/出局), which holds only the
 board constants and view types — no rules.
+Taiwan Mahjong's vocabulary is in `shared/src/mahjong.ts`: 萬/索/筒 suits, 東南西北 winds,
+中發白 dragons, 春夏秋冬梅蘭竹菊 flowers (`mahjongTileLabel`), 吃/碰/槓/胡 melds and actions, and
+the 台數 (scoring) names produced by `calcTai` (平胡/碰碰胡/清一色/混一色/字一色/大三元/小三元/
+大四喜/小四喜/天胡/地胡/槓上開花/海底撈月/河底撈魚/搶槓/門清/自摸/屁胡 etc.) — these score names
+are plain strings returned by the engine, not routed through a skin label table, since they only
+ever appear in the win breakdown, not in disguised chrome.
 
 ## Architecture
 
@@ -99,12 +105,17 @@ value key-by-key (only booleans pass, anything missing falls back to the default
 engine via `dealGame` and the client via `RoomView.bigTwoRules` / `RoomSummary.bigTwoRules` (both
 `null` for hold'em).
 
-**Four games, one room layer.** A room picks its `gameType`
-(`'bigTwo' | 'holdem' | 'monopoly' | 'snake'`) at creation and never changes it. `SEAT_LIMITS`
-gives per-game seat counts (Big Two 2–4, hold'em 2–9, Monopoly 2–6, Snake 2–4). The pieces that
+**Many games, one room layer.** A room picks its `gameType`
+(`'bigTwo' | 'holdem' | 'monopoly' | 'downstairs' | 'snake' | 'minesweeper' | 'dnd' |
+'taiwanMahjong'`) at creation and never changes it. `SEAT_LIMITS`
+gives per-game seat counts (Big Two 2–4, hold'em 2–9, Monopoly 2–6, Snake 2–4, mahjong fixed 4–4).
+The pieces that
 differ are exactly three: the engine, the `GameView` union member, and the client table component.
 Everything else — sessions, reconnect grace, chat, lobby, per-viewer snapshots, turn timers — is
-shared and must stay game-agnostic.
+shared and must stay game-agnostic. Mahjong's fixed seat count is why
+it alone has NPC auto-fill (`fillMahjongNpcSeats`) — a solo tester can still fill a table — which
+in turn is why `isEmpty(room)` special-cases NPCs out: a room with only computer players left in
+it must still be reclaimed.
 
 **Snake is the one real-time mode, and it pays for that by faking `TurnBased`.** `SnakeState`
 pins `turnSeat: -1` and `turnDeadline: 0` (literal types, not just values) so the room layer keeps
@@ -125,6 +136,79 @@ costs nothing at either site. Three end conditions (`lastStanding` / `roundLimit
 `targetNetWorth`) arm independently and the first to fire wins; `normalizeMonopolyOptions` forces
 `lastStanding` on when all three are off, otherwise a room could never end. There is no preset
 concept — do not add one.
+
+**Taiwan Mahjong is the odd one out — it has real, human-substitutable NPCs.** The other three
+games never need a stand-in for an absent player; mahjong is fixed at 4 seats, so
+`fillMahjongNpcSeats(room)` seats synthetic players (`PlayerId` = `` npc:${roomId}:${seat} ``,
+`Member.isNpc`) into every empty seat, both at room creation and whenever `dropFromRoom` empties a
+seat mid-match (a human leaving mid-game does **not** end the match the way it does for the other
+three — the seat gets an NPC instead, and the match keeps going). `nextNpcNickname(room)` scans
+`room.players` for currently-used NPC nicknames (not a call-local counter) so a nickname freed by a
+human replacing an NPC can be reused, and two live NPCs are never both "電腦二". **NPC substitution
+is purely a room-membership operation** — it only ever touches `room.seats`/`room.players`, never
+`MahjongState`, because the engine's `players`/`seats` arrays are indexed by seat number, not by
+player identity; swapping who occupies seat 2 is invisible to the engine mid-hand.
+The only door into a full-with-NPCs room is a request/approve handshake
+(`room:requestJoin` → sets `room.mahjongJoinRequest`, single slot, host-only visible;
+`room:respondJoinRequest` → host accepts/rejects, accept evicts the NPC and reseats the requester by
+hand-replicating `onJoinRoom`'s steps). The ordinary join path still just fails with `ROOM_FULL` —
+do not special-case it there.
+
+NPCs act on their own pace, not on the human turn clock: `room.npcTimer` (separate from
+`turnTimer`/`handTimer`) is rescheduled by `scheduleMahjongNpc` after every mahjong-affecting
+action and, when the seat to act is an NPC, fires `mahjongAi.ts`'s `aiChooseDiscard` /
+`aiSelfDrawAction` / `aiRespond` after a short human-like delay. That delay is itself clamped
+against `room.mahjongDealUntil` — a timestamp set once, at `game:start`, to
+`Date.now() + MAHJONG_DEAL_MS` (7.5s animation + 0.75s buffer). Without this, an NPC's ~1.8s
+reaction fires long before the client's local dice-roll/flip-over animation (`dealPhase` in
+`MahjongTable.tsx`, timed independently on the client with no server round-trip) finishes, so the
+board visibly jumps ahead while the dice are still spinning. `MahjongTable.tsx` mirrors the same
+gate client-side (`actionsLocked`) so a human can't out-act the animation either — the two
+timelines are hand-tuned to match; if either side's animation timing changes, update the other.
+
+Round-end confirmation (`continueRound`) is a **second, room-level state machine that deliberately
+never touches `turnSeat`** — `state.roundReady: boolean[]` plus `room.handTimer` — because
+`gameContext` already rejects actions once `state.over === true` during `roundEnd`;
+`onMahjongContinueRound` bypasses `gameContext` entirely rather than bending it to accept a
+"turn-less" action. NPC seats auto-confirm (`autoConfirmMahjongNpcSeats`); there is deliberately
+**no kick-on-timeout** — an idle human just keeps their seat and the round advances anyway once
+`MAHJONG_ROUND_READY_MS` (3 minutes) elapses (`scheduleNextMahjongRound` → `advanceMahjongRound`).
+Don't reintroduce a kick here; it was built once and explicitly reverted.
+
+**The match-ending round still gets a full `roundEnd` screen before anyone sees rankings.**
+`finishRound` always lands on `phase: 'roundEnd'` — even when this round pushed someone past
+`MAHJONG_TARGET_SCORE` or hit `MAHJONG_MAX_ROUNDS` — and only sets a `pendingMatchEnd` flag rather
+than jumping straight to `matchEnd`. `state.matchOver` (and therefore `RoomView`'s wire-level
+`over`) stays `false` through that screen, so `checkGameOver`/`emitRanking` don't fire yet either.
+`scheduleNextMahjongRound` branches on `pendingMatchEnd`: normal rounds wait for
+`roundReady`/`MAHJONG_ROUND_READY_MS` as above, but a `pendingMatchEnd` round skips the ready-gate
+entirely and just waits a flat `MAHJONG_MATCH_END_DELAY_MS` (20s) before calling
+`finalizeMahjongMatch` (sets `matchWinnerSeat`, `matchOver`, `phase: 'matchEnd'`). This exists
+because the previous behavior skipped the win-breakdown screen entirely on the deciding round —
+the client never got to show tai/hand for the winning play, it just jumped to the final ranking.
+Never collapse `finishRound` back into deciding `matchEnd` directly; the two-step
+`pendingMatchEnd` → `finalizeMahjongMatch` split is what makes the last round look like every
+other round.
+
+Two more mahjong-only engine fields exist purely to make the shared discard pile render correctly:
+`discardOrder`/`discardSeq` is a single monotonic counter across all four seats (the UI merges all
+seats' discards into one grid, so "the last discard" cannot be read off any one seat's own array),
+and `justDrawn: {seat, tile} | null` separates "the tile I just drew, not yet part of my sorted
+hand" from the rest of the hand — set in `beginTurn`, explicitly cleared only in the peng/chi
+reaction branches (which skip drawing) since both draw-continuation and no-draw-reaction paths
+share `goToDiscard`. The banker seat is **randomized**, not fixed at seat 0: `startMahjong` rolls
+three dice (`bankerDice`, kept in state for the client's opening animation) and derives
+`bankerSeat` from their sum. Because of this, mahjong tests must never hardcode a seat or player id
+that assumes banker/turnSeat is seat 0 — derive from `state.turnSeat` / `state.bankerSeat` at
+assertion time, or the test becomes flaky (this bit a batch of tests once; see
+`mahjongEngine.test.ts`).
+
+Mahjong also **opts out of the visual disguise system** that the other three games use: card faces
+in Big Two/hold'em and the Monopoly board reskin into file names / `ls -l` output under the
+`vscode`/`terminal` skins, but `MahjongTileIcon` always draws real pixel-art tiles on a `<canvas>`
+(`client/src/mahjong/pixelart.ts`) regardless of the active skin — there was no plausible "looks
+like an editor" disguise for a mahjong tile. Only mahjong's *text* (hints, log lines, error
+messages) goes through the normal skin text-table system like every other game's does.
 
 **`turnSeat` means "which seat must send input right now", not "whose turn it is".** Big Two and
 hold'em make those the same thing; Monopoly does not — during an auction it points at the current
@@ -153,18 +237,23 @@ which several call sites rely on (e.g. `hands.get(p)[0]` is the player's smalles
 ### Server layering
 
 - `server/src/gameEngine.ts` (Big Two), `server/src/holdemEngine.ts` (hold'em),
-  `server/src/monopolyEngine.ts` and `server/src/snakeEngine.ts` — pure, no I/O, no sockets.
-  The first three operate on a `Seats` array
+  `server/src/monopolyEngine.ts`, `server/src/snakeEngine.ts` and `server/src/mahjongEngine.ts` —
+  pure, no I/O, no sockets.
+  All but `snakeEngine.ts` operate on a `Seats` array
   (`Array<PlayerId | null>`, index = turn order, `null` = vacated) plus their own state, mutate in
   place, and return a discriminated `{ ok }` result with an error code that has a Chinese message
-  table (`PLAY_ERROR_MESSAGE` / `BET_ERROR_MESSAGE` / `MONOPOLY_ERROR_MESSAGE`). `snakeEngine.ts`
+  table (`PLAY_ERROR_MESSAGE` / `BET_ERROR_MESSAGE` / `MONOPOLY_ERROR_MESSAGE` /
+  `MAHJONG_ERROR_MESSAGE`). `snakeEngine.ts`
   is the odd one: input can't be illegal, so `setSnakeDirection` returns `void` and `tickSnake`
-  returns `SnakeEvent[]` — there is no error table. All four states satisfy `TurnBased`
+  returns `SnakeEvent[]` — there is no error table. All the states satisfy `TurnBased`
   (`server/src/turnBased.ts`) — `turnSeat`/`turnDeadline`/`over` — which is why the timer and status
   code needs no branching. This is the layer under unit test.
   `turnBased.ts` also exports `assertNeverGame`, the exhaustiveness tail every game-type `switch`
   in `rooms.ts` and `handlers.ts` ends with; use it instead of a ternary or an `if/else`, or a
-  fifth game will be silently treated as Big Two.
+  new game will be silently mistreated. `server/src/mahjongAi.ts` sits beside the engine but is
+  not part of it — it is deliberately non-authoritative (NPC decision heuristics only), so it never
+  gets called by anything that validates a human's action, only by `handlers.ts` when the acting
+  seat belongs to an NPC.
 - `server/src/rooms.ts` — room/member bookkeeping and **snapshot building**. `buildRoomView`
   is per-viewer: a player gets only `hand` (Big Two hand or hold'em hole cards), a spectator gets
   `allHands` (god view) and no `hand`. Monopoly and Snake have no hidden cards, so `handOf` returns
@@ -307,4 +396,16 @@ Storage keys are neutral on purpose (`ws.sid` / `ws.user` / `ws.prefs`, migrated
   component under `RoomShell` — plus its `LogEvent` variants and skin vocabulary. The compiler
   catches most of it; the ones it **cannot** catch are the game-type dispatches, which is why
   `normalizeGameType` reads `GAME_TYPES` and every other dispatch is a `switch` ending in
-  `assertNeverGame`. Never reintroduce a ternary there.
+  `assertNeverGame`. Never reintroduce a ternary there. Only give a game NPC auto-fill /
+  join-approval plumbing if, like mahjong, it has a hard-fixed seat count — the other three games'
+  variable seat counts make "fill the empty seats" meaningless.
+- New mahjong tai (scoring) item → add a check inside `calcTai` in `shared/src/mahjong.ts`
+  (it already receives the full `MahjongScoreContext`: decomposed sets, pair, flowers, seat/round
+  wind, win type, dealer flag), call `add('名稱', 台數)`, and add a case to
+  `mahjongEngine.test.ts` / `mahjong.test.ts`. There is no per-skin label table for tai names —
+  they're plain Chinese strings returned by the shared engine and rendered as-is.
+- New mahjong meld/action → extend `MahjongAction` + `MAHJONG_ACTION_KINDS` in
+  `shared/src/mahjong.ts`, a case in `parseMahjongAction` (`handlers.ts`) and in the relevant
+  `mahjongEngine.ts` function, a `CASINO_TEXT`/`vscode.ts`/`terminal.ts` key for any new label, and
+  (if NPCs should ever choose it) a branch in `mahjongAi.ts`. There is one socket event
+  (`game:mahjong`) carrying the whole `MahjongAction` union, same pattern as Monopoly's.

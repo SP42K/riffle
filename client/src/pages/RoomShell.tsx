@@ -23,13 +23,15 @@ interface Props {
   footer: ReactNode;
   /** 輪到自己時整個房間會高亮，各玩法算好了傳進來。 */
   isMyTurn?: boolean;
+  /** 底部的文字戰報。預設顯示；台灣麻將自己有大字提示跟棄牌堆可以看，關掉不重複。 */
+  showLog?: boolean;
 }
 
 /**
  * 房間的外殼：標題列、座位、戰報、側欄聊天。
  * 這些跟玩法無關，大老二與德州撲克共用。
  */
-export function RoomShell({ room, center, footer, isMyTurn }: Props) {
+export function RoomShell({ room, center, footer, isMyTurn, showLog = true }: Props) {
   const { roomMessages, run } = useGame();
   const { skin, t } = useSkin();
   const game = room.game;
@@ -123,6 +125,8 @@ export function RoomShell({ room, center, footer, isMyTurn }: Props) {
                 game={game}
                 chips={room.chips?.[seat.playerId]}
                 snakeUnlimitedLives={room.snakeOptions?.unlimitedLives ?? false}
+                log={room.log}
+                logSeq={room.logSeq}
               />
             ))}
             {Array.from({ length: room.maxPlayers - room.seats.length }, (_, i) => (
@@ -134,12 +138,14 @@ export function RoomShell({ room, center, footer, isMyTurn }: Props) {
 
           <div className="table__center">{center}</div>
 
-          <div className="table__log">
-            {room.log.slice(-6).map((event, index) => {
-              const line = skin.formatLog(event);
-              return <p key={`${index}-${line}`}>{line}</p>;
-            })}
-          </div>
+          {showLog && (
+            <div className="table__log">
+              {room.log.slice(-6).map((event, index) => {
+                const line = skin.formatLog(event);
+                return <p key={`${index}-${line}`}>{line}</p>;
+              })}
+            </div>
+          )}
         </div>
 
         <aside className="room__side">

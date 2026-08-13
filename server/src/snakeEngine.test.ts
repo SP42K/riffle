@@ -753,10 +753,10 @@ describe('貪吃蛇：死亡掉落果實', () => {
     tickSnake(state);
 
     expect(livesOf(state, 'a')).toBe(0);
-    expect(state.food).toContainEqual({ x: 0, y: 5 });
-    expect(state.food).toContainEqual({ x: 2, y: 5 });
-    expect(state.food.some((f) => f.x === 1 && f.y === 5)).toBe(false);
-    expect(state.food.some((f) => f.x === 3 && f.y === 5)).toBe(false);
+    expect(state.corpseFood).toContainEqual({ x: 0, y: 5 });
+    expect(state.corpseFood).toContainEqual({ x: 2, y: 5 });
+    expect(state.corpseFood.some((f) => f.x === 1 && f.y === 5)).toBe(false);
+    expect(state.corpseFood.some((f) => f.x === 3 && f.y === 5)).toBe(false);
   });
 
   it('中途離開房間也一樣掉落果實', () => {
@@ -766,10 +766,10 @@ describe('貪吃蛇：死亡掉落果實', () => {
 
     removePlayerFromSnake(state, 'a');
 
-    expect(state.food).toContainEqual({ x: 5, y: 5 });
-    expect(state.food).toContainEqual({ x: 5, y: 7 });
-    expect(state.food.some((f) => f.x === 5 && f.y === 6)).toBe(false);
-    expect(state.food.some((f) => f.x === 5 && f.y === 8)).toBe(false);
+    expect(state.corpseFood).toContainEqual({ x: 5, y: 5 });
+    expect(state.corpseFood).toContainEqual({ x: 5, y: 7 });
+    expect(state.corpseFood.some((f) => f.x === 5 && f.y === 6)).toBe(false);
+    expect(state.corpseFood.some((f) => f.x === 5 && f.y === 8)).toBe(false);
   });
 });
 

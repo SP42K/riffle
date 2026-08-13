@@ -45,6 +45,8 @@ export function Lobby() {
   const [snakeOptions, setSnakeOptions] = useState<SnakeOptions>(DEFAULT_SNAKE_OPTIONS);
   const [joinCode, setJoinCode] = useState('');
   const [nicknameDraft, setNicknameDraft] = useState(nickname);
+  // 記住自己申請過哪些房間，按鈕才能從「申請加入」變成「已送出申請」
+  const [requestedRooms, setRequestedRooms] = useState<Set<string>>(new Set());
 
   const limits = SEAT_LIMITS[gameType];
   const seatOptions = Array.from({ length: limits.max - limits.min + 1 }, (_, i) => limits.min + i);
@@ -79,6 +81,13 @@ export function Lobby() {
 
   const join = (roomId: string, mode: JoinMode) => {
     run(() => emitWithAck('room:join', { roomId, mode }));
+  };
+
+  const requestJoin = (roomId: string) => {
+    run(async () => {
+      await emitWithAck('room:requestJoin', { roomId });
+      setRequestedRooms((prev) => new Set(prev).add(roomId));
+    });
   };
 
   const joinByCode = (event: FormEvent) => {
@@ -335,6 +344,10 @@ export function Lobby() {
               {rooms.map((room) => {
                 const full = room.playerCount >= room.maxPlayers;
                 const started = room.status !== 'waiting';
+                // 只有麻將房會有電腦代打；房間滿位但有電腦座位時，改成「申請加入」頂替電腦
+                const hasNpcSeat = room.gameType === 'taiwanMahjong' && room.npcCount > 0;
+                const canRequestJoin = hasNpcSeat && full;
+                const alreadyRequested = requestedRooms.has(room.id);
                 return (
                   <li key={room.id} className="room-row">
                     <div className="room-row__main">
@@ -355,21 +368,40 @@ export function Lobby() {
                     </div>
                     <div className="room-row__meta">
                       <span>{t('lobby.host', { name: room.hostNickname })}</span>
-                      <span>{t('lobby.playerCount', { n: room.playerCount, max: room.maxPlayers })}</span>
+                      <span>
+                        {hasNpcSeat
+                          ? t('lobby.playerNpcCount', {
+                              human: room.playerCount - room.npcCount,
+                              npc: room.npcCount,
+                              max: room.maxPlayers,
+                            })
+                          : t('lobby.playerCount', { n: room.playerCount, max: room.maxPlayers })}
+                      </span>
                       {room.spectatorCount > 0 && (
                         <span>{t('lobby.spectatorCount', { n: room.spectatorCount })}</span>
                       )}
                     </div>
                     <div className="room-row__actions">
-                      <button
-                        type="button"
-                        className="btn btn--primary"
-                        disabled={full || started}
-                        title={started ? t('lobby.started') : full ? t('lobby.full') : undefined}
-                        onClick={() => join(room.id, 'play')}
-                      >
-                        {t('lobby.join')}
-                      </button>
+                      {canRequestJoin ? (
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          disabled={alreadyRequested}
+                          onClick={() => requestJoin(room.id)}
+                        >
+                          {alreadyRequested ? t('lobby.requestJoinSent') : t('lobby.requestJoin')}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          disabled={full || started}
+                          title={started ? t('lobby.started') : full ? t('lobby.full') : undefined}
+                          onClick={() => join(room.id, 'play')}
+                        >
+                          {t('lobby.join')}
+                        </button>
+                      )}
                       <button type="button" className="btn" onClick={() => join(room.id, 'spectate')}>
                         {t('lobby.spectate')}
                       </button>

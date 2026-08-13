@@ -270,6 +270,24 @@ function formatLog(event: LogEvent): string {
       return `[TRAP] ${event.player} triggered a hidden trap and suffered ${event.damage} dmg`;
     case 'dndMessage':
       return event.message;
+    case 'mahjongStart':
+      return `new build started, ${event.players} members`;
+    case 'mahjongRound':
+      return `build #${event.round} started, lead ${event.banker}`;
+    case 'mahjongDiscard':
+      return `${event.player} released ${event.tile}`;
+    case 'mahjongMeld':
+      return `${event.player} merged (${event.kind}) ${event.tiles.join(' ')}`;
+    case 'mahjongWin':
+      return event.winType === 'selfDraw'
+        ? `${event.player} shipped solo, ${event.tai} pts`
+        : `${event.player} shipped, ${event.tai} pts${event.from ? ` (broke build: ${event.from})` : ''}`;
+    case 'mahjongDraw':
+      return 'no release — lead carries over';
+    case 'mahjongOver':
+      return `series finished: ${event.ranking.map((n, i) => `#${i + 1} ${n}`).join(', ')}`;
+    case 'timeoutMahjong':
+      return `${event.player} timed out — handled automatically`;
   }
 }
 
@@ -325,9 +343,12 @@ const TEXT: TextTable = {
   'lobby.empty': 'No active sessions.',
   'lobby.host': 'owner {name}',
   'lobby.playerCount': '{n}/{max} members',
+  'lobby.playerNpcCount': '{human} members + {npc} bots / {max}',
   'lobby.spectatorCount': '{n} watching',
   'lobby.started': 'Already running',
   'lobby.full': 'No free slots',
+  'lobby.requestJoin': 'Request seat',
+  'lobby.requestJoinSent': 'Request sent — waiting on the owner',
   'lobby.spectate': 'Watch',
   'lobby.status.waiting': 'idle',
   'lobby.status.playing': 'running',
@@ -570,6 +591,56 @@ const TEXT: TextTable = {
   'dndHint.yourTurn': 'Your turn to execute actions',
   'dndHint.spectating': 'Read-only mode',
   'dnd.logTitle': 'OUTPUT — dungeon',
+  'start.startTaiwanMahjong': 'Start build',
+  'mahjong.idleTitle': 'Waiting for the owner to start the build',
+  'mahjong.idleHint': 'Needs exactly 4 members, {n}/{max} now',
+  'mahjong.round': 'build #{n}',
+  'mahjong.banker': 'lead {name}',
+  'mahjong.wall': '{n} queued',
+  'mahjong.discard': 'Release',
+  'mahjong.hu': 'Ship',
+  'mahjong.gang': 'Merge x4',
+  'mahjong.peng': 'Merge x3',
+  'mahjong.chi': 'Merge run',
+  'mahjong.pass': 'Skip',
+  'mahjong.none': 'No action',
+  'mahjong.lastDiscard': '{name} released {tile}',
+  'mahjong.selfDrawTitle': 'Ready to ship — take an action?',
+  'mahjong.reactionTitle': '{name} released {tile}',
+  'mahjong.resultTitle': 'Build finished',
+  'mahjong.winSelfDraw': '{name} shipped solo, {n} points',
+  'mahjong.winDiscard': '{name} shipped, {n} points',
+  'mahjong.drawResult': 'No release — lead carries over',
+  'mahjong.nextRoundSoon': 'Next build waits for every approval — auto-merges after 3min regardless',
+  'mahjong.matchEndingSoon': 'Final build in this pipeline — results publish automatically when it finishes',
+  'mahjong.revealedHandsTitle': 'Diff — all working trees',
+  'mahjong.joinRequestText': '{name} wants to join this build, taking over a bot slot',
+  'mahjong.joinRequestAccept': 'Accept',
+  'mahjong.joinRequestReject': 'Decline',
+  'mahjong.winningHandLabel': 'Passing diff',
+  'mahjong.readyContinue': 'Approve next build',
+  'mahjong.readyWaiting': 'Waiting on other reviewers…',
+  'mahjong.readyCount': '{n} / 4 approved',
+  'mahjong.matchOverTitle': 'Series finished',
+  'mahjong.matchWinner': 'Winner: {name}',
+  'mahjong.matchCompleteRanking': '{n} builds complete — final leaderboard:',
+  'mahjong.playAgain': 'Build again',
+  'mahjong.waitHost': 'Waiting for the owner',
+  'mahjong.scoreLabel': '{n} pts',
+  'mahjong.myScoreLabel': 'My score: {n}',
+  'mahjong.flowerCount': '+{n} bonus',
+  'mahjong.handEmpty': 'Waiting for assignment',
+  'mahjong.dealerTag': 'LEAD',
+  'mahjong.addNpc': 'Fill with bots',
+  'mahjong.bankerDiceResult': '{name} owns the release branch!',
+  'mahjong.dealing': 'Provisioning…',
+  'mahjong.gameStartBanner': 'Build started!',
+  'mahjongHint.notPlaying': 'Press Ready, then the owner starts (exactly 4 members)',
+  'mahjongHint.waitOthers': 'Waiting for other members',
+  'mahjongHint.yourTurnDiscard': 'Your turn to release',
+  'mahjongHint.selfDraw': 'Ready to ship — choose an action',
+  'mahjongHint.reaction': 'You can merge or ship, or skip',
+  'mahjongHint.roundEnd': 'Build finished — next one starts automatically',
 };
 
 const ERRORS: Skin['errors'] = {
@@ -579,9 +650,13 @@ const ERRORS: Skin['errors'] = {
   IN_PROGRESS: 'Already running — you can watch',
   ROOM_FULL: 'No free slots — you can watch',
   NOT_HOST: 'Only the owner can start this',
+  NO_NPC_SEAT: 'No bot slot free to take over',
+  NO_REQUEST: 'No pending request to review',
+  JOIN_REJECTED: 'The owner declined your request',
   NOT_READY: 'Not enough members are ready',
   WRONG_GAME: 'Wrong pipeline for this action',
   BAD_ACTION: 'Unsupported action',
+  INVALID_ACTION: 'That option is not available',
   GAME_NOT_RUNNING: 'Nothing is running',
   SPECTATOR: 'Read-only members cannot commit',
   NOT_YOUR_TURN: 'Not your turn',
@@ -653,7 +728,7 @@ export const vscodeSkin: Skin = {
     ),
   text: TEXT,
   combo: COMBO,
-  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace', snake: 'watch', downstairs: 'descent.ts', minesweeper: 'debug', dnd: 'dungeon' },
+  gameType: { bigTwo: 'batch', holdem: 'stream', monopoly: 'workspace', snake: 'watch', downstairs: 'descent.ts', minesweeper: 'debug', dnd: 'dungeon', taiwanMahjong: 'build' },
   bigTwoPreset: { taiwan: 'strict', classic: 'default', custom: 'custom' },
   bigTwoRule: {
     cuts: 'override',
