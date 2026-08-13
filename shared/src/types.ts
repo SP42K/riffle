@@ -324,8 +324,8 @@ export interface SeatView {
   isHost: boolean;
   ready: boolean;
   connected: boolean;
-  /** 只有樓梯小勇者使用；其他玩法仍保留預設值但不呈現。 */
-  characterId: DownstairsCharacterId;
+  /** 樓梯小勇者與地下城共用；地下城多兩個職業，所以型別取較寬的那個。 */
+  characterId: DndClassId;
   /** 只有龍與地下城使用：當冒險者還是當魔王。 */
   dndRole: DndRole;
 }
@@ -493,7 +493,12 @@ export type LogEvent =
   | { t: 'timeoutDnd'; player: string }
   | { t: 'dndLevelUp'; level: number }
   | { t: 'dndTrap'; player: string; damage: number }
-  | { t: 'dndMessage'; message: string }
+  /**
+   * 自由文字的戰報。`kind: 'skill'` 代表這是職業技能或被動的敘述 ——
+   * 前端據此把它分到「技能與被動」那一欄；沒標的（生怪、死亡、換層、撿裝備…）
+   * 留在戰鬥紀錄裡。標在事件上而不是讓前端比對字串，是因為字串一改分類就會失準。
+   */
+  | { t: 'dndMessage'; message: string; kind?: 'skill' }
   // 台灣麻將。牌一律送 tile id，前端照牌面規則自己還原文字。
   | { t: 'mahjongStart'; players: number }
   | { t: 'mahjongRound'; round: number; banker: string }
@@ -531,6 +536,12 @@ export interface RoomView {
   dndDifficulty: DndDifficulty | null;
   /** 只有龍與地下城房有值:NPC 隊友由 AI 還是房主操作。 */
   dndNpcControl: DndNpcControl | null;
+  /**
+   * 空位要補什麼職業的 NPC 隊友，四個座位各一格。
+   * 一律是明確的職業，不會是「隨機」—— 隊伍組成是要能事先規劃的東西。
+   * 只有龍與地下城房有值。
+   */
+  dndNpcClasses: DndClassId[] | null;
   hostId: PlayerId;
   maxPlayers: number;
   status: RoomStatus;
@@ -596,13 +607,15 @@ export interface ClientToServerEvents {
   'room:leave': (p: Record<string, never>, ack: Ack<null>) => void;
   'room:chat': (p: { text: string }) => void;
   'room:ready': (p: { ready: boolean }) => void;
-  'room:character': (p: { characterId: DownstairsCharacterId }) => void;
+  'room:character': (p: { characterId: DndClassId }) => void;
   /** 龍與地下城：房主在開局前選難度。 */
   'room:dndDifficulty': (p: { difficulty: DndDifficulty }) => void;
   /** 龍與地下城：開局前選要當冒險者還是魔王。 */
   'room:dndRole': (p: { role: DndRole }) => void;
   /** 龍與地下城：房主在開局前決定 NPC 隊友要不要自己手動操作。 */
   'room:dndNpcControl': (p: { control: DndNpcControl }) => void;
+  /** 指定某個空位要補什麼職業的 NPC。 */
+  'room:dndNpcClass': (p: { seat: number; classId: DndClassId }) => void;
   'game:start': (p: Record<string, never>, ack: Ack<null>) => void;
   /** 大老二專用。 */
   'game:play': (p: { cardIds: string[] }, ack: Ack<null>) => void;
@@ -710,15 +723,67 @@ export const DND_NPC_CONTROL_LABEL: Record<DndNpcControl, string> = {
  * 所以 tier 只會是 normal / hard / hell。
  */
 export interface DndEquipment {
-  kind: DownstairsCharacterId;
+  kind: DndClassId;
   tier: Exclude<DndDifficulty, 'easy'>;
 }
 
-export const DND_EQUIPMENT_NAME: Record<DownstairsCharacterId, string> = {
+/**
+ * 地下城的職業。前四個跟樓梯小勇者共用（`DownstairsCharacterId`），
+ * 鬥士與弓手是地下城獨有的 —— 直接往那個聯集加會逼樓梯小勇者也生兩個角色，
+ * 所以在這裡另開一個更寬的型別，只有地下城吃它。
+ */
+export type DndClassId = DownstairsCharacterId | 'gladiator' | 'archer' | 'bard' | 'summoner';
+
+/** 空位的預設職業：經典四人隊，一個前排、一個機動、一個輸出、一個補。 */
+export const DEFAULT_DND_NPC_CLASSES: DndClassId[] = ['brave', 'bubble', 'tangerine', 'star'];
+
+export const DND_CLASSES: readonly DndClassId[] = [
+  'brave',
+  'bubble',
+  'tangerine',
+  'star',
+  'gladiator',
+  'archer',
+  'bard',
+  'summoner',
+];
+
+/**
+ * 各職業一回合能走幾格。前後端共用同一張表 —— 之前這個數字寫死在
+ * 伺服器與前端各兩處，改一個數字要動四個地方，遲早會漂移。
+ */
+export const DND_CLASS_MOVE: Record<DndClassId, number> = {
+  brave: 3,
+  bubble: 6,
+  tangerine: 2,
+  star: 2,
+  gladiator: 3,
+  archer: 3,
+  bard: 3,
+  summoner: 2,
+};
+
+/** 各職業的普通攻擊距離（曼哈頓）。同樣是前後端共用，別再寫死在分支裡。 */
+export const DND_CLASS_RANGE: Record<DndClassId, number> = {
+  brave: 1,
+  bubble: 1,
+  tangerine: 3,
+  star: 1,
+  gladiator: 1,
+  archer: 5,
+  bard: 2,
+  summoner: 2,
+};
+
+export const DND_EQUIPMENT_NAME: Record<DndClassId, string> = {
   brave: '反射盾',
   tangerine: '魔法珠',
   star: '法杖',
   bubble: '骰子匕首',
+  gladiator: '巨劍',
+  archer: '弓箭',
+  bard: '里拉琴',
+  summoner: '召喚書',
 };
 
 /**
@@ -736,7 +801,7 @@ export const DND_EQUIPMENT_SPEC: Record<
     /** 法師：火牆邊長與額外傷害 */
     fireWallSize: number;
     fireWallDamage: number;
-    /** 牧師：主治療量、「除目標外每人」的治療量，以及攻擊命中後回復自身的量 */
+    /** 牧師：主治療量、「除目標外每人」的治療量，以及【神聖判官】的汲取量 */
     healMain: number;
     healSplash: number;
     healSelfOnAttack: number;
@@ -745,12 +810,78 @@ export const DND_EQUIPMENT_SPEC: Record<
     /** 盜賊：【撒網】多綁幾輪、每輪多扣幾點 */
     netBonusTurns: number;
     netBonusDamage: number;
+    /** 戰士：【反射盾】額外的 AC 與 HP（跟共通加值疊加） */
+    shieldBonus: number;
+    /** 鬥士：【堅韌】HP 加幾成 */
+    toughness: number;
+    /** 鬥士：【巨劍】額外的 AC（固定值，不是比例） */
+    bladeAc: number;
+    /** 鬥士：休息時多回復幾點 HP */
+    restBonus: number;
+    /** 鬥士：【旋風】的傷害倍率（沒裝備時是基礎的 0.5） */
+    whirlwind: number;
+    /** 弓手：【連射】一次【狙擊】射幾箭 */
+    sniperShots: number;
+    /** 弓手：【殘影】受擊時生出分身的機率 */
+    decoyChance: number;
+    /** 弓手：【放血】每回合多扣幾點 */
+    bleedBonus: number;
+    /** 吟遊詩人：【里拉琴】常駐光環，全隊 AC／傷害／命中各 +N */
+    bardAura: number;
+    /** 吟遊詩人：三首歌的效果各再 +N */
+    songBonus: number;
+    /** 召喚術士：【召喚書】讓召喚上限 +N */
+    summonBonus: number;
   }
 > = {
-  normal: { stat: 2, reflect: 0.2, chainRange: 2, fireWallSize: 2, fireWallDamage: 1, healMain: 5, healSplash: 1, healSelfOnAttack: 2, diceRatio: 0.3, netBonusTurns: 1, netBonusDamage: 1 },
-  hard: { stat: 4, reflect: 0.4, chainRange: 3, fireWallSize: 3, fireWallDamage: 2, healMain: 6, healSplash: 2, healSelfOnAttack: 3, diceRatio: 0.6, netBonusTurns: 2, netBonusDamage: 2 },
-  hell: { stat: 6, reflect: 0.6, chainRange: 4, fireWallSize: 4, fireWallDamage: 3, healMain: 7, healSplash: 3, healSelfOnAttack: 4, diceRatio: 0.9, netBonusTurns: 3, netBonusDamage: 3 },
+  normal: { stat: 2, reflect: 0.2, chainRange: 2, fireWallSize: 2, fireWallDamage: 1, healMain: 5, healSplash: 2, healSelfOnAttack: 2, diceRatio: 0.3, netBonusTurns: 2, netBonusDamage: 1, shieldBonus: 2, toughness: 0.2, bladeAc: 1, restBonus: 1, whirlwind: 0.6, sniperShots: 2, decoyChance: 0.25, bleedBonus: 1, bardAura: 1, songBonus: 1, summonBonus: 1 },
+  hard: { stat: 4, reflect: 0.4, chainRange: 3, fireWallSize: 3, fireWallDamage: 2, healMain: 6, healSplash: 3, healSelfOnAttack: 3, diceRatio: 0.6, netBonusTurns: 4, netBonusDamage: 2, shieldBonus: 4, toughness: 0.4, bladeAc: 2, restBonus: 2, whirlwind: 0.7, sniperShots: 3, decoyChance: 1 / 3, bleedBonus: 2, bardAura: 2, songBonus: 2, summonBonus: 2 },
+  hell: { stat: 6, reflect: 0.6, chainRange: 4, fireWallSize: 4, fireWallDamage: 3, healMain: 7, healSplash: 4, healSelfOnAttack: 4, diceRatio: 0.9, netBonusTurns: 6, netBonusDamage: 3, shieldBonus: 6, toughness: 0.6, bladeAc: 4, restBonus: 3, whirlwind: 0.8, sniperShots: 4, decoyChance: 0.5, bleedBonus: 3, bardAura: 3, songBonus: 3, summonBonus: 3 },
 };
+
+/**
+ * 技能／被動發動時，在棋子頭上冒一個圖示。
+ * 這是一次性的：伺服器在每次行動開始時清空，所以畫面上看到的永遠是「剛剛發生的事」。
+ */
+export type DndFxKind =
+  | 'reflect'    // 戰士反射（鏡子）
+  | 'guard'      // 極限防禦
+  | 'stun'       // 暈眩
+  | 'knockback'  // 擊退／彈飛
+  | 'net'        // 撒網
+  | 'bind'       // 法師束縛
+  | 'acDown'     // 盜賊破甲（降 AC）
+  | 'weaken'     // 削弱
+  | 'judge'      // 神聖判官
+  | 'heal'       // 治療
+  | 'dice'       // 骰子匕首
+  | 'fire'       // 火牆
+  | 'chain'      // 鎖鏈
+  | 'banish'     // 放逐
+  | 'fear'       // 恐懼
+  | 'summon'     // 召喚
+  | 'swap'       // 錯位
+  | 'possess'    // 邪神奪舍
+  | 'stealth'    // 盜賊匿蹤
+  | 'corrupt'    // 聖物腐化
+  | 'altarBreak' // 祭壇碎裂
+  | 'empower'    // 打倒酋長的強化
+  | 'song'       // 吟遊詩人的歌
+  | 'charm'      // 洗腦
+  | 'wander'     // 魅惑：漫無目的地遊蕩
+  | 'transmute'  // 魂體轉化
+  | 'doom'       // 惡魔之卵
+  | 'execute'    // 鬥士致命斬殺
+  | 'whirlwind'  // 鬥士旋風
+  | 'bleed'      // 弓手放血
+  | 'pierce'     // 弓手穿刺
+  | 'snipe'      // 弓手狙擊
+  | 'decoy';     // 弓手殘影分身
+
+export interface DndFx {
+  pieceId: string;
+  kind: DndFxKind;
+}
 
 export const DND_BOSS_SEAT = 4;
 
@@ -772,13 +903,13 @@ export const DND_DIFFICULTY_MULTIPLIER: Record<DndDifficulty, number> = {
 
 export interface DndPiece {
   id: string;
-  type: 'player' | 'goblin' | 'staircase' | 'trap' | 'villager';
+  type: 'player' | 'goblin' | 'staircase' | 'trap' | 'villager' | 'altar' | 'decoy';
   playerId?: PlayerId;
   name: string;
   hp: number;
   maxHp: number;
   ac: number;
-  classId?: DownstairsCharacterId;
+  classId?: DndClassId;
   damagedByRogue?: boolean;
   /** 被戰士被動【暈眩】命中時，剩餘無法行動的回合數 */
   stunnedTurns?: number;
@@ -786,6 +917,29 @@ export interface DndPiece {
   trappedTurns?: number;
   /** 這張網每回合扣幾點 HP（跟著撒網的人的裝備走），沒填是 1 */
   netDamage?: number;
+  /** 中了弓手【放血】，剩餘幾回合每回合流血 */
+  bleedTurns?: number;
+  /** 這道傷口每回合流幾點（跟著射出這一箭的人的裝備走），沒填是 1 */
+  bleedDamage?: number;
+  /**
+   * 這隻怪站在冒險者這一邊（召喚術士召喚出來的、或被洗腦的）。
+   * 牠仍然是 type 'goblin'，但不算在「場上還有幾隻怪」裡，也不會被玩家攻擊。
+   */
+  ally?: boolean;
+  /** 中了召喚術士【惡魔之卵】，剩幾回合必死（頭目免疫） */
+  doomTurns?: number;
+  /** 中了召喚術士【魅惑】，剩幾回合只會漫無目的地遊蕩、不會攻擊 */
+  wanderTurns?: number;
+  /**
+   * 怪物的攻擊被動。用旗標而不是 id 判斷 —— B6 的異界大門會一直生出新的虛空酋長，
+   * id 每隻都不同，硬判 'boss-3' 的話新生的那些就沒有放逐／召喚／恐懼。
+   */
+  monsterPassive?: 'void' | 'hero' | 'troll';
+  /**
+   * 盜賊【匿蹤】：怪物找目標時會直接跳過這名角色。
+   * 攻擊（含撒網）會解除，休息一回合恢復。只有拿到【骰子匕首】的盜賊會有。
+   */
+  stealth?: boolean;
   /** 怪物一回合能走幾步，沒填是 2（哥布林盜賊是 5） */
   speed?: number;
   /** 怪物的攻擊距離（曼哈頓），沒填是 1（哥布林法師是 3） */
@@ -801,7 +955,7 @@ export interface DndPiece {
   /** 【削弱】：剩餘幾回合造成的傷害只有原本的 60% */
   atkDebuffTurns?: number;
   /** 邪神分身複製的職業 —— 分身會用這個職業的技能 */
-  copyClass?: DownstairsCharacterId;
+  copyClass?: DndClassId;
   /** 這隻怪目前免疫傷害（邪神有分身護體時） */
   invulnerable?: boolean;
 }
@@ -835,8 +989,29 @@ export interface DndSeatInfo {
   restrainedTurns?: number;
   /** 被邪神打暈，剩餘幾回合不能行動 */
   stunnedTurns?: number;
+  /** 這個座位的職業。終章畫面要靠它列出每個人的歸宿。 */
+  classId?: DndClassId;
   /** 護送關拿到的裝備；沒拿到就是 undefined */
   equipment?: DndEquipment;
+  /** 盜賊【匿蹤】是否生效中。換樓層時棋子會重生，所以真正的來源是這裡。 */
+  stealth?: boolean;
+  /** B6【聖物腐化】：剩餘幾回合裝備的特殊效果與命中加值失效（AC／HP 的加值保留） */
+  corruptedTurns?: number;
+  /** 打倒異界大門的虛空酋長累積下來的全數值加成 */
+  statBonus?: number;
+  /** 召喚術士這一層樓已經召喚過幾次（每層有次數上限，換層歸零） */
+  summonsUsed?: number;
+  /** 弓手【狙擊】的窗口：剩幾回合可以無視射程、並且一次射多箭 */
+  sniperTurns?: number;
+  /** 吟遊詩人【進擊之歌】：剩幾回合傷害提升，以及提升的比例 */
+  dmgBuffTurns?: number;
+  dmgBuffRatio?: number;
+  /** 吟遊詩人【大地之歌】：剩幾回合 AC 提升，以及提升的點數 */
+  acBuffTurns?: number;
+  acBuffAmount?: number;
+  /** 吟遊詩人【專注之歌】：剩幾回合命中提升，以及提升的點數 */
+  hitBuffTurns?: number;
+  hitBuffAmount?: number;
 }
 
 export interface DndGameView {
@@ -880,6 +1055,11 @@ export interface DndGameView {
   villagersLost: number;
   /** 這一局進行到第幾輪 */
   roundCount: number;
+  /** 剛剛這一次行動裡發動的技能／被動，前端在棋子頭上冒圖示。下一次行動就會被清掉。 */
+  fx: DndFx[];
+  /** B6 異界大門：祭壇總數與已破壞數。其他層都是 0。 */
+  altarsTotal: number;
+  altarsDestroyed: number;
 }
 
 export interface DndAction {
@@ -897,6 +1077,8 @@ export interface DndAction {
     | 'bossEnd';
   dir?: 'up' | 'down' | 'left' | 'right';
   targetId?: string;
+  /** 弓手【連射】的其餘目標；沒填的話多的箭全射 targetId 那一隻。 */
+  targetIds?: string[];
   r?: number;
   c?: number;
   move?: { r: number; c: number } | null;

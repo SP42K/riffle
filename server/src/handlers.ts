@@ -35,6 +35,7 @@ import {
   setDownstairsDirection,
   startDownstairs,
   DOWNSTAIRS_CHARACTERS,
+  DND_CLASSES,
   DOWNSTAIRS_TICK_MS,
   type MinesweeperAction,
   type DndAction,
@@ -121,6 +122,7 @@ import {
   swapSeats,
   normalizeDndDifficulty,
   normalizeDndNpcControl,
+  normalizeDndClass,
   npcControllerOf,
   normalizeMonopolyOptions,
   normalizeSnakeOptions,
@@ -390,6 +392,7 @@ export class GameServer {
     socket.on('room:dndDifficulty', (payload) => this.onDndDifficulty(socket, payload));
     socket.on('room:dndRole', (payload) => this.onDndRole(socket, payload));
     socket.on('room:dndNpcControl', (payload) => this.onDndNpcControl(socket, payload));
+    socket.on('room:dndNpcClass', (payload) => this.onDndNpcClass(socket, payload));
     socket.on('game:mahjong', (payload, ack) => this.onMahjong(socket, payload, ack));
     socket.on('room:addNpc', (_payload, ack) => this.onAddNpc(socket, ack));
     socket.on('room:requestJoin', (payload, ack) => this.onMahjongRequestJoin(socket, payload, ack));
@@ -792,7 +795,9 @@ export class GameServer {
     const room = this.rooms.get(session.roomId);
     const player = room?.players.get(session.playerId);
     if (!room || !player || (room.gameType !== 'downstairs' && room.gameType !== 'dnd') || statusOf(room) === 'playing') return;
-    const characterId = DOWNSTAIRS_CHARACTERS.find((id) => id === payload?.characterId);
+    // 地下城多兩個職業（鬥士／弓手），樓梯小勇者只認原本那四個
+    const allowed = room.gameType === 'dnd' ? DND_CLASSES : DOWNSTAIRS_CHARACTERS;
+    const characterId = allowed.find((id) => id === payload?.characterId);
     if (!characterId) return;
     player.characterId = characterId;
     this.broadcastRoom(room);
@@ -840,6 +845,28 @@ export class GameServer {
     if (room.hostId !== session.playerId || statusOf(room) === 'playing') return;
 
     room.dndNpcControl = normalizeDndNpcControl(payload?.control);
+    this.broadcastRoom(room);
+  }
+
+  /**
+   * 空位要補什麼職業的 NPC，也是房主的決定，只能在開局前改。
+   * 座位上有真人時這個設定不生效（他自己選的職業優先），但還是可以先設好等他離開。
+   */
+  private onDndNpcClass(socket: GameSocket, payload: { seat?: unknown; classId?: unknown }): void {
+    const session = this.sessions.get(socket.id);
+    if (!session?.roomId) return;
+    const room = this.rooms.get(session.roomId);
+    if (!room || room.gameType !== 'dnd') return;
+    if (room.hostId !== session.playerId || statusOf(room) === 'playing') return;
+
+    const seat = typeof payload?.seat === 'number' ? Math.floor(payload.seat) : -1;
+    if (seat < 0 || seat >= DND_BOSS_SEAT) return;
+
+    // 認不得的職業就當作沒按到，維持原本的選擇 —— 沒有「隨機」這個選項
+    const classId = normalizeDndClass(payload?.classId);
+    if (!classId) return;
+
+    room.dndNpcClasses[seat] = classId;
     this.broadcastRoom(room);
   }
 
@@ -934,7 +961,12 @@ export class GameServer {
         const state = startDownstairs(
           players.map((player) => player.playerId),
           Date.now(),
-          Object.fromEntries(players.map((player) => [player.playerId, player.characterId])),
+          // 玩家可能在地下城房選過鬥士／弓手，那兩個 id 樓梯小勇者沒有對應的技能表，
+          // 直接餵進去 DOWNSTAIRS_SKILLS 會查到 undefined —— 這裡先擋掉
+          Object.fromEntries(players.map((player) => [
+            player.playerId,
+            DOWNSTAIRS_CHARACTERS.find((id) => id === player.characterId) ?? 'brave',
+          ])),
           'pve',
         );
         room.game = { type: 'downstairs', state };
@@ -968,6 +1000,8 @@ export class GameServer {
           room.dndDifficulty,
           bossSeatOf(room),
           npcControllerOf(room),
+          Math.random,
+          room.dndNpcClasses,
         );
         room.game = { type: 'dnd', state };
         pushLog(room, { t: 'dndStart', players: seatedPlayers(room).length });
@@ -1399,6 +1433,10 @@ export class GameServer {
       kind: rawAction.kind as any,
       dir: rawAction.dir,
       targetId: rawAction.targetId,
+      // 弓手【連射】的其餘目標：只收字串陣列，長度交給引擎依裝備截斷
+      targetIds: Array.isArray(rawAction.targetIds)
+        ? rawAction.targetIds.filter((id): id is string => typeof id === 'string').slice(0, 8)
+        : undefined,
       r: rawAction.r,
       c: rawAction.c,
       move: rawAction.move,     // 支援組合動作的移動座標

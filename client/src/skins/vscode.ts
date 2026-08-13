@@ -718,6 +718,7 @@ const ERRORS: Skin['errors'] = {
   MONSTER_ALREADY_ACTED: 'That worker already ran this pass',
   MONSTER_ALREADY_MOVED: 'That worker already relocated this pass — it can only run a task',
   MONSTER_RESTRAINED: 'That worker is pinned to its slot for a few passes — it can still run tasks',
+  MONSTER_CHARMED: 'That worker is detached for a few passes — it will not take your commands',
   PLAYER_RESTRAINED: 'Your process is pinned to its slot for a few passes — you can still run tasks',
   TARGET_INVULNERABLE: 'That target is shielded by its replicas — clear them first',
 };

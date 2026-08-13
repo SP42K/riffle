@@ -47,10 +47,12 @@ import {
   type SystemNotice,
   type DownstairsGameView,
   type DownstairsState,
-  type DownstairsCharacterId,
+  type DndClassId,
   DND_BOSS_SEAT,
   DND_DIFFICULTIES,
   DND_NPC_CONTROLS,
+  DND_CLASSES,
+  DEFAULT_DND_NPC_CLASSES,
   type DndDifficulty,
   type DndNpcControl,
   type DndRole,
@@ -73,7 +75,7 @@ import {
 import type { SnakeEvent, SnakeState } from './snakeEngine.js';
 import { assertNeverGame, type TurnBased } from './turnBased.js';
 import { type MinesweeperState, countAdjacentMines } from './minesweeperEngine.js';
-import { type DndState } from './dndEngine.js';
+import { altarsTotalOf, type DndState } from './dndEngine.js';
 
 export interface Member {
   playerId: PlayerId;
@@ -82,7 +84,7 @@ export interface Member {
   connected: boolean;
   /** 斷線寬限計時器，重新連上時要清掉。 */
   graceTimer: NodeJS.Timeout | null;
-  characterId: DownstairsCharacterId;
+  characterId: DndClassId;
   /** 只有龍與地下城使用：當冒險者還是當操控怪物的魔王。 */
   dndRole: DndRole;
   /**
@@ -124,6 +126,8 @@ export interface Room {
   dndDifficulty: DndDifficulty;
   /** 龍與地下城：NPC 隊友由 AI 自動行動，還是交給房主手動操作。 */
   dndNpcControl: DndNpcControl;
+  /** 空位要補什麼職業的 NPC 隊友，四個座位各一格。 */
+  dndNpcClasses: DndClassId[];
   hostId: PlayerId;
   maxPlayers: number;
   seats: Seats;
@@ -262,6 +266,11 @@ export function normalizeSnakeOptions(value: unknown): SnakeOptions {
 }
 
 /** 只收認得的 NPC 操作方式，其他一律吃 AI 自動。 */
+/** 只收認得的職業，認不得就回 null 讓呼叫端忽略這次設定。 */
+export function normalizeDndClass(value: unknown): DndClassId | null {
+  return DND_CLASSES.find((id) => id === value) ?? null;
+}
+
 export function normalizeDndNpcControl(value: unknown): DndNpcControl {
   return DND_NPC_CONTROLS.find((control) => control === value) ?? 'auto';
 }
@@ -300,6 +309,7 @@ export function createRoom(input: CreateRoomInput): Room {
     snakeOptions,
     dndDifficulty: 'normal',
     dndNpcControl: 'auto',
+    dndNpcClasses: [...DEFAULT_DND_NPC_CLASSES],
     hostId: host.playerId,
     maxPlayers,
     seats: Array.from({ length: maxPlayers }, () => null),
@@ -339,6 +349,11 @@ export function freeSeatOf(room: Room): number {
   if (taken >= budget) return -1;
 
   for (let i = 0; i < DND_BOSS_SEAT; i++) if (!room.seats[i]) return i;
+
+  // 四個冒險者位滿了，但房間還容得下人 —— 剩下的那一個位置只可能是魔王。
+  // 不這樣接的話，第 5 個人會被推去觀戰，而認領魔王又要求「已經入座」，
+  // 於是五人房永遠湊不出魔王。
+  if (room.maxPlayers > DND_BOSS_SEAT && !room.seats[DND_BOSS_SEAT]) return DND_BOSS_SEAT;
   return -1;
 }
 
@@ -347,7 +362,9 @@ export function seatPlayer(room: Room, member: Member): number | null {
   const seat = freeSeatOf(room);
   if (seat === -1) return null;
   room.seats[seat] = member.playerId;
-  room.players.set(member.playerId, { ...member, ready: false });
+  // 坐上魔王位就是魔王 —— 一間房只有 4 個冒險者位，第 5 個人只能當魔王
+  const dndRole: DndRole = room.gameType === 'dnd' && seat === DND_BOSS_SEAT ? 'boss' : member.dndRole;
+  room.players.set(member.playerId, { ...member, dndRole, ready: false });
   // 第一次入座才發籌碼；回鍋的人接回原本的堆疊
   if (room.gameType === 'holdem' && !room.chips.has(member.playerId)) {
     room.chips.set(member.playerId, HOLDEM_START_CHIPS);
@@ -1080,6 +1097,9 @@ function buildDndGameView(room: Room, game: DndState): DndGameView {
     villagersRescued: game.villagersRescued,
     villagersLost: game.villagersLost,
     roundCount: game.roundCount,
+    fx: game.fx,
+    altarsTotal: altarsTotalOf(game),
+    altarsDestroyed: game.altarsDestroyed,
     npcControllerId: game.npcController,
     phase: game.phase,
     actedMonsterIds: [...game.monsterActed],
@@ -1176,6 +1196,7 @@ export function buildRoomView(room: Room, viewerId: PlayerId): RoomView | null {
     snakeOptions: room.gameType === 'snake' ? room.snakeOptions : null,
     dndDifficulty: room.gameType === 'dnd' ? room.dndDifficulty : null,
     dndNpcControl: room.gameType === 'dnd' ? room.dndNpcControl : null,
+    dndNpcClasses: room.gameType === 'dnd' ? room.dndNpcClasses : null,
     hostId: room.hostId,
     maxPlayers: room.maxPlayers,
     status: statusOf(room),
