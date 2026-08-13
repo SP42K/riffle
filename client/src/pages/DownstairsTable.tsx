@@ -115,7 +115,7 @@ function CharacterLobby({ room }: { room: RoomView }) {
         <em>{mine === id ? '已選擇' : '選擇'}</em>
       </button>)}
     </div>
-    <div className="downstairs__party"><h3>探險隊伍</h3>{room.seats.map((seat) => <div key={seat.playerId}><span className="downstairs__party-avatar" data-character={seat.characterId}>•ᴗ•</span><strong>{seat.nickname}{seat.playerId === room.me.playerId ? '（你）' : ''}</strong><span>{CHARACTER[seat.characterId].name}</span><span className={seat.ready || seat.isHost ? 'tag tag--ready' : 'tag'}>{seat.ready || seat.isHost ? '已準備' : '等待中'}</span></div>)}</div>
+    <div className="downstairs__party"><h3>探險隊伍</h3>{room.seats.map((seat) => <div key={seat.playerId}><span className="downstairs__party-avatar" data-character={seat.characterId}>•ᴗ•</span><strong>{seat.nickname}{seat.playerId === room.me.playerId ? '（你）' : ''}</strong><span>{(CHARACTER[seat.characterId as keyof typeof CHARACTER] ?? CHARACTER.brave).name}</span><span className={seat.ready || seat.isHost ? 'tag tag--ready' : 'tag'}>{seat.ready || seat.isHost ? '已準備' : '等待中'}</span></div>)}</div>
     <div className="downstairs__legend"><span>▬ 安全</span><span>↟ 彈跳</span><span>▼ 踩擊</span><span>◆ Boss 機關</span></div>
   </div>;
 }

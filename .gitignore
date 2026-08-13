@@ -11,3 +11,5 @@ server.stderr.log
 .runtime/
 # codebase-memory-mcp 的索引產物
 .codebase-memory/
+# 劇情插圖的原始大圖（2624px、每張 7MB）。實際用的是 public/story 底下壓好的 jpg
+client/story-src/

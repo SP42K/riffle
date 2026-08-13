@@ -586,6 +586,7 @@ const ERRORS: Skin['errors'] = {
   MONSTER_ALREADY_ACTED: 'process already ran this pass',
   MONSTER_ALREADY_MOVED: 'process already moved this pass — exec only',
   MONSTER_RESTRAINED: 'process pinned to its slot for a few passes — exec only',
+  MONSTER_CHARMED: 'process detached for a few passes — ignores your signals',
   PLAYER_RESTRAINED: 'you are pinned to your slot for a few passes — exec only',
   TARGET_INVULNERABLE: 'target shielded by replicas — kill the replicas first',
 };

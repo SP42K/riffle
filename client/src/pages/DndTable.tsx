@@ -1,8 +1,12 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import {
+  DND_CLASS_MOVE,
+  DND_CLASS_RANGE,
   DND_DIFFICULTIES,
   DND_EQUIPMENT_SPEC,
   DND_EQUIPMENT_NAME,
+  DND_CLASSES,
+  DEFAULT_DND_NPC_CLASSES,
   DND_NPC_CONTROLS,
   DND_NPC_CONTROL_LABEL,
   DND_DIFFICULTY_LABEL,
@@ -10,8 +14,35 @@ import {
   type RoomView,
   type DndAction,
   type DndCellView,
-  type DownstairsCharacterId,
+  type DndClassId,
+  type DndFxKind,
 } from 'shared';
+
+/** 技能發動時冒出來的圖示。用一眼能聯想到技能的符號 —— 反射就是鏡子。 */
+const DND_FX_ICON: Record<DndFxKind, string> = {
+  reflect: '🪞', guard: '🛡️', stun: '💫', knockback: '💨',
+  net: '🕸️', bind: '🪢', acDown: '🗡️', weaken: '🩸',
+  judge: '⚖️', heal: '✨', dice: '🎲', fire: '🔥',
+  chain: '⛓️', banish: '🌌', fear: '😱', summon: '🧿',
+  swap: '🌀', possess: '👁️', stealth: '🌫️',
+  corrupt: '🕳️', altarBreak: '💥', empower: '⬆️',
+  execute: '🩸', whirlwind: '🌀', bleed: '💧', pierce: '➶', snipe: '🎯', decoy: '👥',
+  song: '🎵', charm: '💞', wander: '😵', transmute: '🔺', doom: '🥚',
+};
+
+const DND_FX_LABEL: Record<DndFxKind, string> = {
+  reflect: '反射', guard: '極限防禦', stun: '暈眩', knockback: '擊退',
+  net: '撒網', bind: '束縛', acDown: '破甲', weaken: '削弱',
+  judge: '神聖判官', heal: '治療', dice: '骰子匕首', fire: '火牆',
+  chain: '鎖鏈', banish: '放逐', fear: '恐懼', summon: '召喚',
+  swap: '錯位', possess: '奪舍', stealth: '匿蹤',
+  corrupt: '聖物腐化', altarBreak: '祭壇碎裂', empower: '強化',
+  execute: '致命斬殺', whirlwind: '旋風', bleed: '放血', pierce: '穿刺', snipe: '狙擊', decoy: '殘影',
+  song: '吟唱', charm: '洗腦', wander: '魅惑', transmute: '魂體轉化', doom: '惡魔之卵',
+};
+import { PixelSprite, spriteFor, LEVEL_DECOR, type SpriteKey } from './dndSprites';
+import { DndGuide, DND_CLASS_LINE } from './DndGuide';
+import { DndStoryOverlay, DndEndingOverlay } from './dndStory';
 import { StartControls } from '../components/StartControls';
 import { TurnBanner } from '../components/TurnBanner';
 import { useCountdown } from '../hooks/useCountdown';
@@ -19,11 +50,15 @@ import { emitWithAck, socket } from '../net/socket';
 import { useGame } from '../state/GameProvider';
 import { useSkin } from '../state/skinContext';
 
-const DND_CLASSES: Array<{ id: DownstairsCharacterId; name: string; hp: number; ac: number; desc: string }> = [
-  { id: 'brave', name: '戰士 (Warrior) 🛡️', hp: 24, ac: 14, desc: '前線坦攻。【鎖鏈】：將3格內的怪物拉到身旁（拿到【反射盾】後改成把 2/3/4 格內的怪物全部拖過來）。【反射】：受擊時把 1/3 的傷害彈回攻擊者（常駐）。【武勇】：命中時各1/3機率暈眩／擊退目標，或發動極限防禦（下一輪單次傷害上限2）。 (移動2格)' },
-  { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12, desc: '突襲刺客，極高機動。【撒網】：把 5 格內的一隻怪物釘在原地 3 回合，期間牠無法移動、每回合扣 1 HP，但仍能攻擊打得到的目標；虛空酋長靠瞬間移動，只會被扣血、位置綁不住。【弱點打擊】：命中時各1/2機率把目標的 AC 或傷害降到六成（2回合）。拿到【骰子匕首】後，撒網會多綁 1/2/3 輪、每輪多扣 1/2/3 點。 (移動5格)' },
-  { id: 'tangerine', name: '法師 (Mage) 🧙', hp: 16, ac: 10, desc: '遠程爆發。【火牆】：對3格內的地面拉出一道3格火牆，站在裡面的怪物每回合燒3點HP，持續2回合。 (移動1格)' },
-  { id: 'star', name: '牧師 (Cleric) ⛪', hp: 20, ac: 12, desc: '神聖判官，攻擊時治癒隊友。【神聖治癒】：補3格內隊友4點HP；由NPC操作時會優先搶救血量低於70%的隊友。 (移動1格)' },
+const DND_CLASSES_INFO: Array<{ id: DndClassId; name: string; hp: number; ac: number }> = [
+  { id: 'brave', name: '騎士 (Knight) 🛡️', hp: 24, ac: 14 },
+  { id: 'gladiator', name: '鬥士 (Gladiator) 🐗', hp: 30, ac: 12 },
+  { id: 'bubble', name: '盜賊 (Rogue) 🗡️', hp: 18, ac: 12 },
+  { id: 'archer', name: '弓手 (Archer) 🏹', hp: 18, ac: 12 },
+  { id: 'tangerine', name: '法師 (Mage) 🧙', hp: 16, ac: 10 },
+  { id: 'star', name: '牧師 (Cleric) ⛪', hp: 20, ac: 12 },
+  { id: 'bard', name: '吟遊詩人 (Bard) 🎵', hp: 18, ac: 12 },
+  { id: 'summoner', name: '召喚術士 (Summoner) 🌑', hp: 20, ac: 12 },
 ];
 
 export function DndRoom({ room }: { room: RoomView }) {
@@ -35,12 +70,38 @@ export function DndRoom({ room }: { room: RoomView }) {
   const playing = room.status === 'playing';
   // 輪到我：自己的座位，或是這個 NPC 座位由我代打
   const iControlNpcs = !!game && game.npcControllerId === me.playerId;
+  // 沒有 turnPlayerId 還有另一種情況：有人中離、座位被清空但那個座位不是 NPC。
+  // 少了 isNpc 這個條件，代打者會看到「輪到你」但伺服器每個動作都退 NOT_YOUR_TURN。
   const npcSeatIsMine =
-    !!game && !game.turnPlayerId && iControlNpcs && game.phase === 'party' && !game.over;
+    !!game &&
+    !game.turnPlayerId &&
+    iControlNpcs &&
+    game.seats[game.turnSeat]?.isNpc === true &&
+    game.phase === 'party' &&
+    !game.over;
   const isMyTurn = playing && (game?.turnPlayerId === me.playerId || npcSeatIsMine);
   const isHost = room.hostId === me.playerId;
 
   const remainingMs = useCountdown(playing ? (game?.turnDeadline ?? 0) : 0);
+
+  // 層間分鏡與終章：純前端，每個人各自看自己的。
+  // 同一層只跳一次，所以記住上一次跳過的樓層；換局（回到大廳）時歸零。
+  const [storyLevel, setStoryLevel] = useState<number | null>(null);
+  const [endingShown, setEndingShown] = useState(false);
+  const lastStoryLevel = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!playing || !game) {
+      lastStoryLevel.current = null;
+      setStoryLevel(null);
+      setEndingShown(false);
+      return;
+    }
+    if (game.over) return;
+    if (lastStoryLevel.current === game.level) return;
+    lastStoryLevel.current = game.level;
+    setStoryLevel(game.level);
+  }, [playing, game?.level, game?.over]);
 
   const [turnPhase, setTurnPhase] = useState<'idle' | 'targeting_move' | 'moved' | 'targeting_attack' | 'targeting_skill'>('idle');
   const [pendingMove, setPendingMove] = useState<{ r: number; c: number } | null>(null);
@@ -135,12 +196,24 @@ export function DndRoom({ room }: { room: RoomView }) {
     return { r: myPosition.r * 2 - r, c: myPosition.c * 2 - c };
   };
 
+  /**
+   * 這個職業的技能要不要選目標。
+   * 吟遊詩人的【進擊之歌】、召喚術士的【魔物召喚】、弓手的【狙擊】都是對自己／對全隊發動 ——
+   * 送進瞄準模式的話畫面只會把怪物點亮，看起來像「非得點一隻怪不可」。
+   */
+  const skillNeedsTarget = (classId: string) =>
+    classId !== 'bard' && classId !== 'summoner' && classId !== 'archer';
+
   const getSkillName = (classId: string) => {
     switch (classId) {
       case 'brave': return '⛓️ 鎖鏈';
       case 'bubble': return '🕸️ 撒網';
       case 'tangerine': return '🔥 火牆';
       case 'star': return '✨ 神聖治癒';
+      case 'gladiator': return '🐗 野蠻衝撞';
+      case 'archer': return '🎯 狙擊';
+      case 'bard': return '🎺 進擊之歌';
+      case 'summoner': return '🌑 魔物召喚';
       default: return '✨ 技能';
     }
   };
@@ -191,7 +264,7 @@ export function DndRoom({ room }: { room: RoomView }) {
     const classId = myPosition.piece.classId || 'brave';
 
     if (turnPhase === 'targeting_move') {
-      const moveRange = classId === 'bubble' ? 5 : (classId === 'brave' ? 2 : 1);
+      const moveRange = DND_CLASS_MOVE[classId as DndClassId] ?? 1;
 
       if (r === myPosition.r && c === myPosition.c) {
         setPendingMove({ r, c });
@@ -208,8 +281,12 @@ export function DndRoom({ room }: { room: RoomView }) {
         setTurnPhase('moved');
       }
     } else if (turnPhase === 'targeting_attack') {
-      const attackRange = classId === 'tangerine' ? 3 : 1;
-      if (cell.piece && cell.piece.type === 'goblin' && dist <= attackRange) {
+      const attackRange = DND_CLASS_RANGE[classId as DndClassId] ?? 1;
+      const hittable = (cell.piece?.type === 'goblin' && !cell.piece.ally) || cell.piece?.type === 'altar';
+      // 【狙擊】開著的時候不看距離
+      const sniperOpen = classId === 'archer'
+        && (mySeat >= 0 ? (game.seats[mySeat]?.sniperTurns ?? 0) : 0) > 0;
+      if (cell.piece && hittable && (dist <= attackRange || sniperOpen)) {
         executeTurn({ kind: 'attack', targetId: cell.piece.id });
       }
     } else if (turnPhase === 'targeting_skill') {
@@ -226,11 +303,27 @@ export function DndRoom({ room }: { room: RoomView }) {
         if (dist <= 3) {
           executeTurn({ kind: 'skill', r, c });
         }
+      } else if (classId === 'bard' || classId === 'summoner') {
+        // 對全隊／對自己施放，不需要選目標
+        executeTurn({ kind: 'skill' });
+      } else if (classId === 'gladiator') {
+        if (cell.piece?.type === 'goblin' && dist <= 5) {
+          executeTurn({ kind: 'skill', targetId: cell.piece.id });
+        }
+      } else if (classId === 'archer') {
+        // 【狙擊】不限距離；有【弓箭】時多的箭會自動補在同一隻怪身上
+        if (cell.piece?.type === 'goblin') {
+          executeTurn({ kind: 'skill', targetId: cell.piece.id });
+        }
       } else if (classId === 'brave') {
         const equip = mySeat >= 0 ? game.seats[mySeat]?.equipment : undefined;
         const reach = equip ? DND_EQUIPMENT_SPEC[equip.tier].chainRange : 3;
-        if (cell.piece && cell.piece.type === 'goblin' && dist <= reach) {
-          executeTurn({ kind: 'skill', targetId: cell.piece.id });
+        // 怪物或隊友都能當鎖鏈目標；點自己沒有意義所以擋掉
+        const pullable = cell.piece
+          && (cell.piece.type === 'goblin'
+            || (cell.piece.type === 'player' && cell.piece.id !== myPosition.piece.id));
+        if (pullable && dist <= reach) {
+          executeTurn({ kind: 'skill', targetId: cell.piece!.id });
         }
       } else {
         executeTurn({ kind: 'skill' });
@@ -249,7 +342,7 @@ export function DndRoom({ room }: { room: RoomView }) {
     if (dir === 'right') nc++;
     
     const classId = myPosition.piece.classId || 'brave';
-    const moveRange = classId === 'bubble' ? 5 : (classId === 'brave' ? 2 : 1);
+    const moveRange = DND_CLASS_MOVE[classId as DndClassId] ?? 1;
     const dist = Math.abs(nr - myPosition.r) + Math.abs(nc - myPosition.c);
 
     const landing = fearAdjust(nr, nc);
@@ -286,11 +379,57 @@ export function DndRoom({ room }: { room: RoomView }) {
     setChatInput('');
   };
 
+  /**
+   * 戰報拆成兩欄：右邊是戰鬥的來龍去脈，左邊只放職業技能與被動。
+   *
+   * 分法看的是事件上的 `kind: 'skill'` 標記，不是字串比對 ——
+   * 「隨從動了起來」「又一隻盜賊追了上來」這種生怪與流程訊息雖然也是 dndMessage，
+   * 但它們不是技能，混進來會把真正想看的東西沖掉。
+   */
+  const skillLog = useMemo(
+    () => room.log.filter((item) => item.t === 'dndMessage' && item.kind === 'skill'),
+    [room.log],
+  );
+  const damageLog = useMemo(
+    () => room.log.filter((item) => item.t !== 'dndMessage' || item.kind !== 'skill'),
+    [room.log],
+  );
+
+  // 剛剛那一次行動發動了哪些技能 —— 在對應的棋子頭上冒圖示
+  const fxAt = useMemo(() => {
+    const map = new Map<string, DndFxKind[]>();
+    for (const item of game?.fx ?? []) {
+      const list = map.get(item.pieceId) ?? [];
+      list.push(item.kind);
+      map.set(item.pieceId, list);
+    }
+    return map;
+  }, [game?.fx]);
+
+  const renderFx = (pieceId: string) => {
+    const kinds = fxAt.get(pieceId);
+    if (!kinds || kinds.length === 0) return null;
+    return (
+      <span className="dnd-fx" title={kinds.map((k) => DND_FX_LABEL[k]).join('、')}>
+        {kinds.map((kind) => (
+          <span key={kind} className="dnd-fx__icon">{DND_FX_ICON[kind]}</span>
+        ))}
+      </span>
+    );
+  };
+
+  // 這一層的固定佈景：只畫在空格上，純視覺
+  const decorAt = useMemo(() => {
+    const map = new Map<string, SpriteKey>();
+    for (const item of LEVEL_DECOR[game?.level ?? 1] ?? []) map.set(`${item.r}-${item.c}`, item.name);
+    return map;
+  }, [game?.level]);
+
   const getCellDisplay = (cell: DndCellView, r: number, c: number) => {
     const fireWall = game?.fireWalls?.find((w) => w.r === r && w.c === c);
     if (fireWall && !cell.piece) {
       return (
-        <div className="dnd-token" style={{ opacity: 0.9 }}>
+        <div className="dnd-token fire-token" style={{ opacity: 0.9 }}>
           <span className="token-icon" style={{ fontSize: '1.2rem' }}>🔥</span>
           <span className="token-label" style={{ color: fireWall.hostile ? 'var(--red)' : '#e67e22', fontSize: '0.65rem' }}>
             {fireWall.hostile ? '邪火' : '火牆'} {fireWall.turns}
@@ -308,6 +447,14 @@ export function DndRoom({ room }: { room: RoomView }) {
           </div>
         );
       }
+      const decor = decorAt.get(`${r}-${c}`);
+      if (decor) {
+        return (
+          <div className="dnd-token decor-token">
+            <PixelSprite name={decor} className="token-icon" />
+          </div>
+        );
+      }
       return '';
     }
     const piece = cell.piece;
@@ -315,57 +462,69 @@ export function DndRoom({ room }: { room: RoomView }) {
     if (piece.type === 'player') {
       const seatIndex = room.seats.findIndex((s) => s?.playerId === piece.playerId);
       const label = `P${seatIndex + 1}`;
-      let icon = '👤';
-      if (piece.classId === 'brave') icon = '🛡️';
-      else if (piece.classId === 'bubble') icon = '🗡️';
-      else if (piece.classId === 'tangerine') icon = '🧙';
-      else if (piece.classId === 'star') icon = '⛪';
       
       // 殘影要畫在「現在操作的角色」身上，代打 NPC 時就是那個 NPC
       const isMe = myPosition ? piece.id === myPosition.piece.id : piece.playerId === me.playerId;
       const isOriginalGhost = isMe && pendingMove && (pendingMove.r !== myPosition?.r || pendingMove.c !== myPosition?.c);
 
       return (
-        <div className="dnd-token player-token" data-seat={seatIndex} style={{ opacity: isOriginalGhost ? 0.3 : 1 }}>
-          <span className="token-icon">{icon}</span>
-          <span className="token-label">{label}</span>
+        <div
+          className={`dnd-token player-token${isMe ? ' player-token--active' : ''}${piece.stealth ? ' player-token--hidden' : ''}`}
+          data-seat={seatIndex}
+          title={`${piece.name} HP ${piece.hp}/${piece.maxHp}`}
+          style={{ opacity: isOriginalGhost ? 0.3 : 1 }}
+        >
+          <PixelSprite name={spriteFor(piece)} className="token-icon" />
+          <span className="token-label">{piece.stealth ? `${label} 🌫️` : label}</span>
+          {renderFx(piece.id)}
         </div>
       );
     } else if (piece.type === 'villager') {
       return (
-        <div className="dnd-token" title={`${piece.name} HP ${piece.hp}/${piece.maxHp}`}>
-          <span className="token-icon">🧑‍🌾</span>
+        <div className="dnd-token villager-token" title={`${piece.name} HP ${piece.hp}/${piece.maxHp}`}>
+          <PixelSprite name={spriteFor(piece)} className="token-icon" />
           <span className="token-label" style={{ color: '#2ecc71', fontSize: '0.65rem' }}>村民</span>
+        </div>
+      );
+    } else if (piece.type === 'decoy') {
+      return (
+        <div className="dnd-token decoy-token" title={`${piece.name} HP ${piece.hp}/${piece.maxHp}`}>
+          <PixelSprite name={spriteFor(piece)} className="token-icon" />
+          <span className="token-label" style={{ color: '#9fd8ff', fontSize: '0.62rem' }}>殘影</span>
+          {renderFx(piece.id)}
+        </div>
+      );
+    } else if (piece.type === 'altar') {
+      return (
+        <div className="dnd-token altar-token" title={`${piece.name} HP ${piece.hp}/${piece.maxHp}`}>
+          <PixelSprite name="gateAltar" className="token-icon" />
+          <span className="token-label" style={{ color: '#b78bff', fontSize: '0.62rem' }}>祭壇</span>
+          {renderFx(piece.id)}
         </div>
       );
     } else if (piece.type === 'staircase') {
       return (
         <div className="dnd-token staircase-token" style={{ animation: 'pulse 1.5s infinite' }}>
-          <span className="token-icon" style={{ fontSize: '1.2rem' }}>🪜</span>
+          <PixelSprite name="staircase" className="token-icon" />
           <span className="token-label" style={{ color: 'var(--gold)', fontSize: '0.75rem' }}>下樓梯</span>
         </div>
       );
     } else {
-      let icon = '👹';
-      if (piece.name.includes('薩滿') || piece.name.includes('Shaman')) icon = '🔮';
-      else if (piece.name.includes('酋長') || piece.name.includes('Chief')) icon = '👑';
-      else if (piece.name.includes('盜賊') || piece.name.includes('Rogue')) icon = '🥷';
-      else if (piece.name.includes('法師') || piece.name.includes('Mage')) icon = '🧿';
-      if (piece.id === 'boss-5') icon = '🕯️';
-      else if (piece.copyClass) icon = '🪞';
       const acted = !!game?.actedMonsterIds.includes(piece.id);
       const picked = selectedMonsterId === piece.id;
       return (
         <div
-          className="dnd-token goblin-token"
+          className={`dnd-token goblin-token${piece.ally ? ' ally-token' : ''}${piece.id.startsWith('boss-') ? ' boss-token' : ''}${piece.copyClass ? ' copy-token' : ''}${piece.invulnerable ? ' invulnerable-token' : ''}`}
+          title={`${piece.name} HP ${piece.hp}/${piece.maxHp}`}
           style={{
             opacity: bossPhase && acted ? 0.35 : 1,
             outline: picked ? '2px solid var(--gold)' : undefined,
             borderRadius: picked ? '4px' : undefined,
           }}
         >
-          <span className="token-icon">{icon}</span>
-          <span className="token-label">{piece.name.split(' ')[0]}</span>
+          <PixelSprite name={spriteFor(piece)} className="token-icon" />
+          <span className="token-label">{piece.ally ? `🤝${piece.name.split(' ')[0]}` : piece.name.split(' ')[0]}</span>
+          {renderFx(piece.id)}
           {(piece.invulnerable || piece.stunnedTurns || piece.trappedTurns || piece.acDebuffTurns || piece.atkDebuffTurns) ? (
             <span className="token-label" style={{ color: 'var(--gold)', fontSize: '0.6rem' }}>
               {piece.invulnerable ? '🛡️無敵'
@@ -503,7 +662,15 @@ export function DndRoom({ room }: { room: RoomView }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_move')}>👣 移動</button>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_attack')}>⚔️ 攻擊</button>
-            <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_skill')}>{getSkillName(classId)}</button>
+            <button
+              className="btn btn--primary"
+              style={{ display: 'flex', justifyContent: 'center' }}
+              onClick={() => (skillNeedsTarget(classId)
+                ? setTurnPhase('targeting_skill')
+                : executeTurn({ kind: 'skill' }))}
+            >
+              {getSkillName(classId)}
+            </button>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => executeTurn({ kind: 'rest' })}>🏕️ 休息</button>
           </div>
         </div>
@@ -516,7 +683,15 @@ export function DndRoom({ room }: { room: RoomView }) {
           <h4 style={{ color: 'var(--gold)', textAlign: 'center', margin: '0 0 0.3rem 0', fontSize: '0.85rem' }}>已移動，選擇終結動作</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_attack')}>⚔️ 攻擊</button>
-            <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => setTurnPhase('targeting_skill')}>{getSkillName(classId)}</button>
+            <button
+              className="btn btn--primary"
+              style={{ display: 'flex', justifyContent: 'center' }}
+              onClick={() => (skillNeedsTarget(classId)
+                ? setTurnPhase('targeting_skill')
+                : executeTurn({ kind: 'skill' }))}
+            >
+              {getSkillName(classId)}
+            </button>
             <button className="btn btn--primary" style={{ display: 'flex', justifyContent: 'center' }} onClick={() => executeTurn({ kind: 'rest' })}>🏕️ 休息</button>
           </div>
           <div style={{ borderTop: '1px solid var(--line)', margin: '0.1rem 0' }} />
@@ -530,7 +705,25 @@ export function DndRoom({ room }: { room: RoomView }) {
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto', color: 'var(--text)', boxSizing: 'border-box' }}>
-      
+
+      {/* 層間分鏡：進新樓層時蓋上來。輪到自己而且倒數快沒了就自動關，不能讓人因為讀劇情被判超時 */}
+      {storyLevel !== null && playing && !game?.over && (
+        <DndStoryOverlay
+          level={storyLevel}
+          urgent={isMyTurn && remainingMs > 0 && remainingMs < 15_000}
+          onClose={() => setStoryLevel(null)}
+        />
+      )}
+
+      {/* 終章：整局結束時蓋一次，關掉之後留在結算畫面 */}
+      {playing && game?.over && !endingShown && (
+        <DndEndingOverlay
+          won={game.won === true}
+          seats={game.seats}
+          onClose={() => setEndingShown(true)}
+        />
+      )}
+
       {/* 頂部房號與離開按鈕列 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', background: 'rgba(0,0,0,0.2)', padding: '0.8rem 1.2rem', borderRadius: '8px', border: '1px solid var(--line)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -549,7 +742,12 @@ export function DndRoom({ room }: { room: RoomView }) {
           {playing && game && (
             <div style={{ width: '100%', maxWidth: '900px' }}>
               <h3 style={{ textAlign: 'center', margin: '0 0 1rem 0', color: 'var(--gold)', letterSpacing: '2px' }}>
-                🏰 地下城第 {game.level} 層 / 共 5 層
+                🏰 地下城第 {game.level} 層 / 共 6 層
+                {game.altarsTotal > 0 && (
+                  <span style={{ marginLeft: '0.8rem', color: 'var(--gold)' }}>
+                    🕯️ 祭壇 {game.altarsDestroyed}/{game.altarsTotal}
+                  </span>
+                )}
                 <span style={{ marginLeft: '0.8rem', fontSize: '0.8rem', color: 'var(--muted)', letterSpacing: 'normal' }}>
                   {DND_DIFFICULTY_LABEL[game.difficulty]}模式 · 怪物強度 {Math.round(DND_DIFFICULTY_MULTIPLIER[game.difficulty] * 100)}%
                   {game.bossPlayerId && (
@@ -576,7 +774,8 @@ export function DndRoom({ room }: { room: RoomView }) {
                 {game.level === 1 && "📖 【B1 貪婪地窖】: 你們跟隨微光聖物的指引來到失落的法師塔。底層已被哥布林佔據，請清除牠們並找尋通往深處的樓梯。"}
                 {game.level === 2 && "📖 【B2 薩滿祭壇】: 這裡瀰漫著詭異的魔法氣息。哥布林薩滿正在進行儀式試圖召喚虛空魔物 —— 而且有 3 隻哥布林盜賊在暗處游走，牠們一次能衝刺 5 格。阻止他們！"}
                 {game.level === 3 && "📖 【B3 逃亡通道】: 哥布林把整村的人抓來當祭品。10 位村民正拼命往上方的出口跑，第二輪就會有伏兵殺出、之後每 3 輪還有追兵從後方追上來。擋住他們，至少讓 5 位村民活著離開！"}
-                {game.level === 5 && "📖 【B5 邪神祭壇】: 守著祭壇的是一整批邪神信徒。清掉四分之三之後，哥布林邪神才會睜眼 —— 它照著你們的模樣捏出分身，分身會用你們自己的招式。有分身護體時本體刀槍不入，打碎所有分身才有 2 回合的空窗可以真的傷到它。當它掉到半血，護體會消失、改成在分身之間流竄奪舍：看血量，找出哪一個才是本體。"}
+                {game.level === 5 && "📖 【B5 邪神祭壇】: 空氣裡有一股燒過的味道。祭壇周圍跪滿了邪神的信徒，牠們沒有回頭 —— 因為牠們等的東西已經開始睜眼。哥布林一族向虛空祈求了太久，久到虛空真的回頭看了牠們一眼。"}
+                {game.level === 6 && "📖 【B6 異世界大門】: 邪神在斷氣前把自己獻祭了。石地板上撐開了一道不屬於這個世界的裂縫，門後的東西正一批一批走進來 —— 而且沒有要停的意思。這裡沒有樓梯了，只有你們和那道門。"}
                 {game.level === 4 && "📖 【B4 酋長王座】: 抵達高塔基石。除了精銳哥布林與盜賊，還有 3 名哥布林法師能隔 3 格轟擊你們。被虛空力量腐化的哥布林酋長就在前方 —— 牠的攻擊會放逐、召喚或降下恐懼，重傷時更會把上兩層的 Boss 一起召回！"}
               </div>
             </div>
@@ -619,14 +818,30 @@ export function DndRoom({ room }: { room: RoomView }) {
                           <span className="party-member-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             P{seatIndex + 1}. {displayName}
                             {seatInfo.equipment && (
-                              <span title={`${DND_EQUIPMENT_NAME[seatInfo.equipment.kind]}（${seatInfo.equipment.tier}）`} style={{ color: 'var(--gold)', marginLeft: '4px' }}>
-                                ⚔️{DND_EQUIPMENT_NAME[seatInfo.equipment.kind]}
+                              <span
+                                title={seatInfo.corruptedTurns
+                                  ? `${DND_EQUIPMENT_NAME[seatInfo.equipment.kind]} 已被腐化，剩 ${seatInfo.corruptedTurns} 回合`
+                                  : `${DND_EQUIPMENT_NAME[seatInfo.equipment.kind]}（${seatInfo.equipment.tier}）`}
+                                style={seatInfo.corruptedTurns
+                                  ? { color: 'var(--muted)', marginLeft: '4px', textDecoration: 'line-through' }
+                                  : { color: 'var(--gold)', marginLeft: '4px' }}
+                              >
+                                {seatInfo.corruptedTurns ? '🕳️' : '⚔️'}{DND_EQUIPMENT_NAME[seatInfo.equipment.kind]}
                               </span>
                             )}
+                            {seatInfo.statBonus ? (
+                              <span title="打倒虛空酋長累積的強化" style={{ color: '#7ee08a', marginLeft: '4px' }}>
+                                ⬆️+{seatInfo.statBonus}
+                              </span>
+                            ) : null}
                           </span>
                           <span className={`party-member-status ${!alive ? 'dead' : seatInfo.banishedTurns ? 'banished' : 'alive'}`} style={seatInfo.banishedTurns ? { color: 'var(--gold)' } : {}}>
+                            {/* 負面狀態排在增益前面：這一格的底色是照 banished 上的，
+                                【狙擊】排最前面的話，被放逐的人會顯示成金色的「狙擊中」。 */}
                             {!alive
                               ? t('dnd.dead')
+                              : seatInfo.corruptedTurns
+                              ? `🕳️ 聖物腐化 (${seatInfo.corruptedTurns})`
                               : seatInfo.banishedTurns
                                 ? `放逐 (${seatInfo.banishedTurns})`
                                 : seatInfo.stunnedTurns
@@ -635,6 +850,8 @@ export function DndRoom({ room }: { room: RoomView }) {
                                     ? `🕸️ 被纏住 (${seatInfo.restrainedTurns})`
                                 : seatInfo.fearTurns
                                   ? `😱 恐懼 (${seatInfo.fearTurns})`
+                                  : seatInfo.sniperTurns
+                                    ? `🎯 狙擊 (${seatInfo.sniperTurns})`
                                   : seatInfo.damageCapTurns
                                     ? '🛡️ 極限防禦'
                                     : t('dnd.alive')}
@@ -650,6 +867,25 @@ export function DndRoom({ room }: { room: RoomView }) {
                     );
                   })}
                 </div>
+
+                {playing && skillLog.length > 0 && (
+                  <div className="dnd-latest-log dnd-skill-log">
+                    <div className="dnd-latest-log__title">✨ 技能與被動</div>
+                    <div className="dnd-latest-log__scroll">
+                      {skillLog.map((_, idx) => {
+                        const logIdx = skillLog.length - 1 - idx;
+                        return (
+                          <div
+                            key={logIdx}
+                            className={`dnd-latest-log__line${idx === 0 ? ' dnd-latest-log__line--newest' : ''}`}
+                          >
+                            {skin.formatLog(skillLog[logIdx]!)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {lastAttackEvent && (
                   <div className="dnd-dice-sidebar-card" style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '1rem', borderRadius: 'var(--radius)', border: '1px solid var(--line)', textAlign: 'center' }}>
@@ -698,14 +934,14 @@ export function DndRoom({ room }: { room: RoomView }) {
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: '2 1 400px', minWidth: 0 }}>
               {playing && game ? (
                 <div className="dnd-board-container" style={{ width: '100%', maxWidth: '100%', overflowX: 'auto', margin: '0' }}>
-                  <div className="dnd-board" style={{ margin: '0 auto' }}>
+                  <div className="dnd-board" data-level={game.level} style={{ margin: '0 auto' }}>
                     {game.board.map((row, r) =>
                       row.map((cell, c) => {
                         const currentR = pendingMove ? pendingMove.r : (myPosition?.r ?? 999);
                         const currentC = pendingMove ? pendingMove.c : (myPosition?.c ?? 999);
                         const classId = myPosition?.piece?.classId || 'brave';
-                        const attackRange = classId === 'tangerine' ? 3 : 1;
-                        const moveRange = classId === 'bubble' ? 5 : (classId === 'brave' ? 2 : 1);
+                        const attackRange = DND_CLASS_RANGE[classId as DndClassId] ?? 1;
+                        const moveRange = DND_CLASS_MOVE[classId as DndClassId] ?? 1;
                         
                         const dist = myPosition ? Math.abs(r - currentR) + Math.abs(c - currentC) : 999;
                         const distFromOriginal = myPosition ? Math.abs(r - myPosition.r) + Math.abs(c - myPosition.c) : 999;
@@ -715,16 +951,29 @@ export function DndRoom({ room }: { room: RoomView }) {
                         const landingCell = game.board[landing.r]?.[landing.c];
                         const isMoveable = distFromOriginal > 0 && distFromOriginal <= moveRange
                           && !!landingCell && (!landingCell.piece || landingCell.piece.type === 'staircase');
-                        const isAttackable = myPosition && dist <= attackRange && cell.piece?.type === 'goblin';
+                        // B6 的祭壇也是打擊目標；弓手開著【狙擊】時整張地圖都在射程內
+                        const sniperOpen = classId === 'archer'
+                          && (mySeat >= 0 ? (game.seats[mySeat]?.sniperTurns ?? 0) : 0) > 0;
+                        const isAttackable = myPosition && (dist <= attackRange || sniperOpen)
+                          && ((cell.piece?.type === 'goblin' && !cell.piece.ally) || cell.piece?.type === 'altar');
                         const myEquip = mySeat >= 0 ? game.seats[mySeat]?.equipment : undefined;
                         const chainRange = myEquip && classId === 'brave'
                           ? DND_EQUIPMENT_SPEC[myEquip.tier].chainRange
                           : 3;
-                        const skillRange = classId === 'bubble' ? 5 : classId === 'brave' ? chainRange : 3;
+                        const skillRange = classId === 'bubble' ? 5
+                          : classId === 'brave' ? chainRange
+                          : classId === 'gladiator' ? 5
+                          : classId === 'archer' ? 999 // 狙擊不限距離
+                          : 3;
                         const isSkillable = myPosition && dist <= skillRange && (
                           classId === 'star' ? cell.piece?.type === 'player'
                           : classId === 'tangerine' ? true // 火牆是對地技，任何格子都能點
-                          : cell.piece?.type === 'goblin' // 戰士【鎖鏈】與盜賊【撒網】都是指定怪物
+                          // 騎士【鎖鏈】怪物或隊友都能拉（隊友一次只能拉一個），盜賊【撒網】只對怪物
+                          : classId === 'brave'
+                            ? (cell.piece?.type === 'goblin'
+                              || (cell.piece?.type === 'player' && cell.piece.id !== myPosition?.piece?.id))
+                            // 鬥士【野蠻衝撞】與弓手【狙擊】都是指定怪物
+                            : cell.piece?.type === 'goblin'
                         );
 
                         let borderClass = '';
@@ -762,6 +1011,10 @@ export function DndRoom({ room }: { room: RoomView }) {
                             key={`${r}-${c}`}
                             type="button"
                             className={`dnd-cell ${borderClass}`}
+                            data-shade={(r + c) % 2 === 0 ? 'light' : 'dark'}
+                            data-fire={game.fireWalls?.some((w) => w.r === r && w.c === c)
+                              ? (game.fireWalls.find((w) => w.r === r && w.c === c)?.hostile ? 'hostile' : 'ally')
+                              : undefined}
                             onClick={() => handleCellClick(r, c)}
                             disabled={!isMyTurn}
                             style={{
@@ -778,7 +1031,10 @@ export function DndRoom({ room }: { room: RoomView }) {
                             
                             {isPendingHere && turnPhase !== 'idle' && !cell.piece && (
                               <div className="dnd-token player-token" style={{ opacity: 0.6, position: 'absolute' }}>
-                                <span className="token-icon">👤</span>
+                                <PixelSprite
+                                  name={myPosition ? spriteFor(myPosition.piece) : 'brave'}
+                                  className="token-icon"
+                                />
                               </div>
                             )}
 
@@ -840,6 +1096,34 @@ export function DndRoom({ room }: { room: RoomView }) {
             </div>
           )}
 
+          {/* 3. 行動面板下方的即時戰報：最新的一直在最上面，舊的往下堆，整塊自己捲 */}
+          {playing && game && damageLog.length > 0 && (
+            <div className="dnd-latest-log">
+              <div className="dnd-latest-log__title">⚔️ 戰鬥紀錄</div>
+              <div className="dnd-latest-log__scroll">
+                {/*
+                  戰報一律交給外觀的 formatLog。自己寫一份 if-chain 的話，沒列到的事件
+                  （dndStart／dndMonsterTurn／dndOver／timeoutDnd…）會直接吐 JSON 到畫面上，
+                  而且句子寫死中文，三個外觀全部失效。
+
+                  倒著跑而不是先 reverse() —— room.log 是共用的快照陣列，
+                  reverse() 會就地改動它，聊天室那邊的順序會跟著壞掉。
+                */}
+                {damageLog.map((_, idx) => {
+                  const logIdx = damageLog.length - 1 - idx;
+                  return (
+                    <div
+                      key={logIdx}
+                      className={`dnd-latest-log__line${idx === 0 ? ' dnd-latest-log__line--newest' : ''}`}
+                    >
+                      {skin.formatLog(damageLog[logIdx]!)}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {game?.over && (
             <div className="game-over-panel" style={{ textAlign: 'center', background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '8px' }}>
               <h2 className="game-over-title" style={{ color: 'var(--gold)', fontSize: '1.2rem', marginBottom: '0.5rem' }}>🎉 冒險結束</h2>
@@ -866,41 +1150,12 @@ export function DndRoom({ room }: { room: RoomView }) {
 
       </div>
 
-      {/* === 🎯 最下方的系統欄 / 即時戰報紀錄區塊 === */}
-      {playing && game && (
-        <div style={{
-          marginTop: '2rem',
-          background: 'rgba(0, 0, 0, 0.4)',
-          padding: '1rem 1.2rem',
-          borderRadius: '8px',
-          border: '1px solid var(--line)',
-          width: '100%',
-          maxHeight: '140px',
-          overflowY: 'auto',
-          fontSize: '0.85rem',
-          color: 'var(--muted)',
-          lineHeight: '1.5',
-          boxSizing: 'border-box'
-        }}>
-          <div style={{ color: 'var(--gold)', fontWeight: 'bold', marginBottom: '4px', fontSize: '0.9rem' }}>{t('dnd.logTitle')}</div>
-          {/*
-            戰報一律交給外觀的 formatLog。自己寫一份 if-chain 的話，沒列到的事件
-            （dndStart／dndMonsterTurn／dndOver／timeoutDnd…）會直接吐 JSON 到畫面上，
-            而且句子寫死中文，三個外觀全部失效。
-          */}
-          {room.log.map((logItem, idx) => (
-            <div key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '2px' }}>
-              {skin.formatLog(logItem)}
-            </div>
-          ))}
-        </div>
-      )}
-
     </div>
   );
 }
 
 function DndCharacterLobby({ room }: { room: RoomView }) {
+  const [showGuide, setShowGuide] = useState(false);
   const mySeat = room.seats.find((seat) => seat.playerId === room.me.playerId);
   const mine = mySeat?.characterId ?? 'brave';
   const myRole = mySeat?.dndRole ?? 'hero';
@@ -912,11 +1167,21 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
   const humanAdventurers = room.seats.filter((seat) => seat.dndRole !== 'boss').length;
   const heroCount = humanAdventurers;
 
+  if (showGuide) return <DndGuide onClose={() => setShowGuide(false)} />;
+
   return (
     <div className="dnd-lobby-container" style={{ width: '100%', maxWidth: '640px', margin: '0 auto', padding: '1rem' }}>
       <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
         <h2 style={{ color: 'var(--gold)', marginBottom: '0.5rem' }}>⚔️ 選擇你的冒險職業 ⚔️</h2>
-        <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>地下城難度已大幅提升！請與隊友協商挑選互補的職業以利破關。</p>
+        <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>八個職業，一次只能帶四個下去。技能與裝備的細節都在遊戲說明裡。</p>
+        <button
+          type="button"
+          className="btn"
+          style={{ marginTop: '0.8rem' }}
+          onClick={() => setShowGuide(true)}
+        >
+          📖 遊戲說明
+        </button>
       </div>
 
       <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>
@@ -1002,6 +1267,48 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
       </div>
 
       <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>
+        <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.3rem 0', color: 'var(--text)' }}>🎭 NPC 隊友的職業</h3>
+        <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 0.8rem 0' }}>
+          沒人坐的位置補上的 NPC 要用哪個職業。位置上有真人時以他自己選的為準，
+          這裡的設定會等他離開才生效。
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {[0, 1, 2, 3].map((seat) => {
+            const taken = room.seats.find((s) => s.seat === seat && s.dndRole !== 'boss');
+            const picked = room.dndNpcClasses?.[seat] ?? DEFAULT_DND_NPC_CLASSES[seat]!;
+            return (
+              <div key={seat} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--muted)', width: '4.5rem', flexShrink: 0 }}>
+                  P{seat + 1}
+                </span>
+                {taken ? (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text)' }}>
+                    {taken.nickname}（真人）
+                  </span>
+                ) : (
+                  <select
+                    className="dnd-select"
+                    value={picked}
+                    disabled={!isHost}
+                    onChange={(e) => socket.emit('room:dndNpcClass', {
+                      seat,
+                      classId: e.target.value as DndClassId,
+                    })}
+                  >
+                    {DND_CLASSES.map((cls) => (
+                      <option key={cls} value={cls}>
+                        {DND_CLASSES_INFO.find((c) => c.id === cls)?.name ?? cls}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--line)', marginBottom: '1.5rem' }}>
         <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.3rem 0', color: 'var(--text)' }}>⚔️ 地城難度</h3>
         <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 0.8rem 0' }}>
           {isHost ? '由房主決定，開打之後整局固定。倍率同時吃在怪物的 HP、傷害與防禦上。' : '由房主決定。倍率同時吃在怪物的 HP、傷害與防禦上。'}
@@ -1036,7 +1343,7 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginBottom: '2rem', opacity: myRole === 'boss' ? 0.35 : 1, pointerEvents: myRole === 'boss' ? 'none' : 'auto' }}>
-        {DND_CLASSES.map((cls) => {
+        {DND_CLASSES_INFO.map((cls) => {
           const isSelected = mine === cls.id;
           return (
             <button
@@ -1054,7 +1361,9 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
                 boxShadow: isSelected ? '0 0 15px rgba(227, 179, 65, 0.2)' : 'none',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', gap: '0.6rem' }}>
+                {/* 選職業時就看得到棋盤上會是什麼樣子 */}
+                <PixelSprite name={cls.id} className="class-portrait" />
                 <strong style={{ color: isSelected ? 'var(--gold)' : 'var(--text)', fontSize: '1.1rem' }}>
                   {cls.name}
                 </strong>
@@ -1063,8 +1372,8 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
               <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
                 HP: {cls.hp} | AC: {cls.ac}
               </div>
-              <p style={{ fontSize: '0.8rem', margin: 0, color: 'var(--muted)', lineHeight: '1.4' }}>
-                {cls.desc}
+              <p style={{ fontSize: '0.95rem', margin: 0, color: '#cfd8e3', fontStyle: 'italic', lineHeight: '1.5' }}>
+                {DND_CLASS_LINE[cls.id]}
               </p>
             </button>
           );
@@ -1076,7 +1385,7 @@ function DndCharacterLobby({ room }: { room: RoomView }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
           {room.seats.map((seat) => {
             if (!seat) return null;
-            const classInfo = DND_CLASSES.find((c) => c.id === seat.characterId) || DND_CLASSES[0]!;
+            const classInfo = DND_CLASSES_INFO.find((c) => c.id === seat.characterId) || DND_CLASSES_INFO[0]!;
             const isBoss = seat.dndRole === 'boss';
             return (
               <div key={seat.playerId} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: isBoss ? 'rgba(231, 76, 60, 0.12)' : 'rgba(255,255,255,0.03)', padding: '6px 12px', borderRadius: '20px', border: isBoss ? '1px solid var(--red)' : '1px solid var(--line)' }}>
