@@ -1580,6 +1580,22 @@ describe('D&D Game Engine', () => {
     expect(findPiece(state, (p) => p.id === 'm-boss-test').c).toBe(at.c);
   });
 
+  it('should let the boss attack villagers, not only the party', () => {
+    const { seats, state } = bossTable();
+    state.board[8][11].piece = {
+      id: 'v-boss-test', type: 'villager', name: '村民 誘餌', hp: 20, maxHp: 20, ac: 5,
+    };
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5); // 把回合交給魔王
+
+    // 只認 player 的話，護送關碰上魔王模式就是白送 —— 怪物全歸魔王指揮，
+    // AI 的村民索敵不會跑，而他一個村民都打不到。
+    const hit = applyDndAction(seats, state, 'boss', {
+      kind: 'bossAttack', monsterId: 'm-boss-test', targetId: 'v-boss-test',
+    }, () => 0.9);
+    expect(hit.ok).toBe(true);
+    expect(findPiece(state, (p) => p.id === 'v-boss-test').piece.hp).toBeLessThan(20);
+  });
+
   it('should not let the boss move a monster after it has attacked', () => {
     const { seats, state } = bossTable();
     const pawn = findPiece(state, (p) => p.id === 'm-boss-test');
@@ -2593,6 +2609,9 @@ describe('D&D Game Engine', () => {
     state.seats[0].hp = 999;
     me.piece.hp = 999;
     me.piece.maxHp = 999;
+    // 王貼著人打，被動又只有三選一 —— AC 拉高讓牠平常打不中，這些案例才只驗
+    // 分身機制本身。要驗被動的案例自己把 attackBonus 調到 40 去強制命中。
+    me.piece.ac = 40;
 
     state.board[8][7].piece = {
       id: 'boss-5', type: 'goblin', name: 'Goblin Evil God (哥布林邪神)',
@@ -2757,12 +2776,39 @@ describe('D&D Game Engine', () => {
     applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
     expect(state.seats[0].restrainedTurns).toBeGreaterThan(0);
 
-    // 被纏住就不能移動
-    const move = applyDndAction(seats, state, 'p1', {
+    // 被纏住就不能移動 —— 組合技與單獨的移動是兩條入口，兩條都要擋
+    const combo = applyDndAction(seats, state, 'p1', {
       kind: 'turnCombo', move: { r: 7, c: 6 }, action: { kind: 'rest' },
     }, () => 0.5);
-    expect(move.ok).toBe(false);
-    expect(move.error).toBe('MONSTER_RESTRAINED');
+    expect(combo.ok).toBe(false);
+    expect(combo.error).toBe('PLAYER_RESTRAINED');
+
+    const plain = applyDndAction(seats, state, 'p1', { kind: 'moveTo', r: 7, c: 6 }, () => 0.5);
+    expect(plain.ok).toBe(false);
+    expect(plain.error).toBe('PLAYER_RESTRAINED');
+  });
+
+  it('should keep the stun alive long enough to cost the hero a turn', () => {
+    const { seats, state } = evilGodTable();
+    const boss = findPiece(state, (p) => p.id === 'boss-5');
+    boss.piece.attackBonus = 40; // 必中
+    // rng 0.4 → 被動骰 floor(0.4*3)=1 → 震懾
+    applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.4);
+
+    // 倒數放在 endRound 的話這裡已經被扣回 0，暈眩等於完全沒發生
+    expect(state.seats[0].stunnedTurns).toBe(1);
+  });
+
+  it('should clear the hostile flag when the party mage recasts over an evil wall', () => {
+    const { seats, state } = evilGodTable();
+    const me = findPiece(state, (p) => p.playerId === 'p1');
+    me.piece.classId = 'tangerine';
+    state.fireWalls = [{ r: 6, c: 6, turns: 2, dmg: 3, hostile: true }];
+
+    const cast = applyDndAction(seats, state, 'p1', { kind: 'skill', r: 6, c: 6 }, () => 0.5);
+    expect(cast.ok).toBe(true);
+    // 沒有重設 hostile 的話，法師自己放的牆會反過來燒隊伍
+    expect(state.fireWalls.find((w) => w.r === 6 && w.c === 6)?.hostile).toBe(false);
   });
 
   it('should bounce damage back from a copied warrior', () => {
@@ -2939,6 +2985,34 @@ describe('D&D Game Engine', () => {
 
     const byHero = applyDndAction(seats, state, 'hero', { kind: 'rest' }, () => 0.5);
     expect(byHero.ok).toBe(true);
+  });
+
+  it('should charge the skill cooldown to the seat that acted, not to the controller', () => {
+    const seats: Seats = ['p1', null, null, null];
+    const state = dealDnd(seats, { p1: 'brave' }, 'normal', null, 'p1');
+    state.traps = [];
+    state.turnSeat = 1; // NPC 座位，由 p1 代打
+    state.seats[0].skillCooldown = 1; // p1 自己剛用過技能
+
+    const acted = applyDndAction(seats, state, 'p1', { kind: 'rest' }, () => 0.5);
+    expect(acted.ok).toBe(true);
+    // 代打 NPC 的行動不能去動操作者自己的冷卻
+    expect(state.seats[0].skillCooldown).toBe(1);
+  });
+
+  it('should keep advancing an NPC seat after the controller has left', () => {
+    const seats: Seats = ['p1', 'p2', null, null];
+    const state = dealDnd(seats, { p1: 'brave', p2: 'star' }, 'normal', null, 'p1');
+    state.traps = [];
+    state.turnSeat = 3; // 回合正好停在 NPC 座位上
+
+    removePlayerFromDnd(seats, state, 'p1');
+    expect(state.npcController).toBeNull();
+
+    // 代打者走了，這個座位不能再等人輸入 —— autoActDnd 回 null 的話房間會每 45 秒空轉一次
+    const acted = autoActDnd(seats, state, () => 0.5);
+    expect(acted).not.toBeNull();
+    expect(state.over || state.turnSeat === 1).toBe(true);
   });
 
   it('should support a solo boss run where the whole party is NPC', () => {
